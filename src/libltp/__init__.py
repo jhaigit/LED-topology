@@ -90,6 +90,7 @@ from libltp.types import (
     SourceType,
     StreamAction,
     StreamConfig,
+    Topology,
     TopologyType,
     Transform,
 )
@@ -123,6 +124,7 @@ __all__ = [
     "SourceType",
     "StreamAction",
     "StreamConfig",
+    "Topology",
     "TopologyType",
     "Transform",
     # Controls

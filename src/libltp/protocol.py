@@ -215,7 +215,7 @@ def error_message(seq: int | None, code: ErrorCode, message: str) -> Message:
 class DataPacket:
     """Binary data packet for UDP streaming."""
 
-    HEADER_FORMAT = ">HBBHI"  # magic(2), ver+flags(1), reserved(1), reserved(2), seq(4)
+    HEADER_FORMAT = ">HBBI"  # magic(2), ver+flags(1), reserved(1), seq(4)
     HEADER_SIZE = 8
     FRAME_HEADER_FORMAT = ">BBH"  # color_fmt(1), encoding(1), pixel_count(2)
     FRAME_HEADER_SIZE = 4
@@ -249,7 +249,6 @@ class DataPacket:
             self.HEADER_FORMAT,
             PACKET_MAGIC,
             ver_flags,
-            0,  # reserved
             0,  # reserved
             self.sequence & 0xFFFFFFFF,
         )
@@ -308,7 +307,7 @@ class DataPacket:
             raise ProtocolError(ErrorCode.INVALID_FORMAT, "Packet too small")
 
         # Parse packet header
-        magic, ver_flags, _, _, sequence = struct.unpack(
+        magic, ver_flags, _, sequence = struct.unpack(
             cls.HEADER_FORMAT, data[: cls.HEADER_SIZE]
         )
 
