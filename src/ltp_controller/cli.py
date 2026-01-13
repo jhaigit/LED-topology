@@ -198,7 +198,7 @@ def main() -> int:
         display_name=display_name,
         description=description,
         device_id=device_id,
-        device_timeout=config.get("discovery", {}).get("timeout", 30.0),
+        health_check_interval=config.get("discovery", {}).get("health_check_interval", 10.0),
     )
 
     # Create routing engine

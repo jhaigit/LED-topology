@@ -94,21 +94,21 @@ class Controller:
         description: str = "Central routing controller",
         device_id: UUID | None = None,
         control_port: int = 0,
-        device_timeout: float = 30.0,
+        health_check_interval: float = 10.0,
     ):
         self.name = name
         self.display_name = display_name
         self.description = description
         self.device_id = device_id or uuid4()
         self.control_port = control_port
-        self.device_timeout = device_timeout
+        self.health_check_interval = health_check_interval
 
         self._browser: ServiceBrowser | None = None
         self._advertiser: ControllerAdvertiser | None = None
         self._sources: dict[str, DeviceState] = {}
         self._sinks: dict[str, DeviceState] = {}
         self._running = False
-        self._timeout_task: asyncio.Task | None = None
+        self._health_check_task: asyncio.Task | None = None
 
         self._on_source_change: DeviceCallback | None = None
         self._on_sink_change: DeviceCallback | None = None
@@ -237,22 +237,49 @@ class Controller:
         except Exception as e:
             logger.warning(f"Failed to fetch info from {state.name}: {e}")
 
-    async def _check_timeouts(self) -> None:
-        """Periodically check for device timeouts."""
+    async def _health_check_loop(self) -> None:
+        """Periodically check device health by pinging via control channel."""
         while self._running:
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(self.health_check_interval)
 
-            now = datetime.now()
-            for state in list(self._sources.values()) + list(self._sinks.values()):
-                if state.online:
-                    elapsed = (now - state.last_seen).total_seconds()
-                    if elapsed > self.device_timeout:
-                        state.online = False
-                        logger.info(f"Device timed out: {state.name}")
-                        if state.device.is_source and self._on_source_change:
-                            self._on_source_change(state, False)
-                        elif state.device.is_sink and self._on_sink_change:
-                            self._on_sink_change(state, False)
+            all_devices = list(self._sources.values()) + list(self._sinks.values())
+            for state in all_devices:
+                await self._ping_device(state)
+
+    async def _ping_device(self, state: DeviceState) -> None:
+        """Ping a device to check if it's still online."""
+        try:
+            client = ControlClient(state.host, state.port)
+            await asyncio.wait_for(client.connect(), timeout=3.0)
+
+            try:
+                # Send capability request as a ping
+                cap_req = capability_request(0)
+                await client.request(cap_req, timeout=3.0)
+
+                # Device responded - mark as online
+                if not state.online:
+                    state.online = True
+                    logger.info(f"Device came online: {state.name}")
+                    if state.device.is_source and self._on_source_change:
+                        self._on_source_change(state, True)
+                    elif state.device.is_sink and self._on_sink_change:
+                        self._on_sink_change(state, True)
+
+                state.last_seen = datetime.now()
+
+            finally:
+                await client.close()
+
+        except Exception:
+            # Device didn't respond - mark as offline
+            if state.online:
+                state.online = False
+                logger.info(f"Device went offline: {state.name}")
+                if state.device.is_source and self._on_source_change:
+                    self._on_source_change(state, False)
+                elif state.device.is_sink and self._on_sink_change:
+                    self._on_sink_change(state, False)
 
     async def start(self) -> None:
         """Start the controller."""
@@ -278,8 +305,8 @@ class Controller:
         )
         await self._advertiser.start()
 
-        # Start timeout checker
-        self._timeout_task = asyncio.create_task(self._check_timeouts())
+        # Start health check loop
+        self._health_check_task = asyncio.create_task(self._health_check_loop())
 
         logger.info(f"Controller started: {self.display_name}")
 
@@ -290,13 +317,13 @@ class Controller:
 
         self._running = False
 
-        if self._timeout_task:
-            self._timeout_task.cancel()
+        if self._health_check_task:
+            self._health_check_task.cancel()
             try:
-                await self._timeout_task
+                await self._health_check_task
             except asyncio.CancelledError:
                 pass
-            self._timeout_task = None
+            self._health_check_task = None
 
         if self._advertiser:
             await self._advertiser.stop()
