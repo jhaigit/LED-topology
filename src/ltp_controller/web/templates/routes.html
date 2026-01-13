@@ -26,15 +26,30 @@
     </thead>
     <tbody>
         {% for route in routes %}
-        <tr>
+        <tr data-route-id="{{ route.id }}">
             <td>{{ route.name }}</td>
-            <td>{{ route.source_id }}</td>
-            <td>{{ route.sink_id }}</td>
+            <td class="source-name" data-source-id="{{ route.source_id }}">
+                {% for source in sources if source.id == route.source_id %}
+                    {{ source.name }}
+                {% else %}
+                    {{ route.source_id[:8] }}...
+                {% endfor %}
+            </td>
+            <td class="sink-name" data-sink-id="{{ route.sink_id }}">
+                {% for sink in sinks if sink.id == route.sink_id %}
+                    {{ sink.name }}
+                {% else %}
+                    {{ route.sink_id[:8] }}...
+                {% endfor %}
+            </td>
             <td>{{ route.mode.value }}</td>
             <td>
-                <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
+                <span class="status-badge {{ route.status.value }}" id="status-{{ route.id }}">{{ route.status.value }}</span>
+                <small class="error-msg" id="error-{{ route.id }}" style="display: {% if route.error_message %}block{% else %}none{% endif %}; color: var(--danger);">
+                    {{ route.error_message or '' }}
+                </small>
             </td>
-            <td>{{ route._frames_routed }}</td>
+            <td id="frames-{{ route.id }}">{{ route._frames_routed }}</td>
             <td class="actions">
                 {% if route.enabled %}
                 <button class="btn btn-sm btn-warning" onclick="disableRoute('{{ route.id }}')">Disable</button>
@@ -167,5 +182,42 @@ function deleteRoute(id) {
             .then(() => location.reload());
     }
 }
+
+// Auto-refresh route status every second
+function updateRouteStatus() {
+    fetch('/api/routes')
+        .then(r => r.json())
+        .then(routes => {
+            routes.forEach(route => {
+                // Update status badge
+                const statusEl = document.getElementById('status-' + route.id);
+                if (statusEl) {
+                    statusEl.textContent = route.status;
+                    statusEl.className = 'status-badge ' + route.status;
+                }
+
+                // Update error message
+                const errorEl = document.getElementById('error-' + route.id);
+                if (errorEl) {
+                    if (route.error_message) {
+                        errorEl.textContent = route.error_message;
+                        errorEl.style.display = 'block';
+                    } else {
+                        errorEl.style.display = 'none';
+                    }
+                }
+
+                // Update frame count
+                const framesEl = document.getElementById('frames-' + route.id);
+                if (framesEl) {
+                    framesEl.textContent = route.frames_routed;
+                }
+            });
+        })
+        .catch(err => console.error('Failed to update routes:', err));
+}
+
+// Update every second
+setInterval(updateRouteStatus, 1000);
 </script>
 {% endblock %}

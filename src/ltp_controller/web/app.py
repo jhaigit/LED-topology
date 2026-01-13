@@ -172,11 +172,19 @@ def create_app(controller: Controller, router: RoutingEngine) -> Flask:
 
     # ==================== API: Routes ====================
 
+    def _enrich_route(route_dict: dict) -> dict:
+        """Add source and sink names to route data."""
+        source = controller.get_source(route_dict["source_id"])
+        sink = controller.get_sink(route_dict["sink_id"])
+        route_dict["source_name"] = source.name if source else "Unknown"
+        route_dict["sink_name"] = sink.name if sink else "Unknown"
+        return route_dict
+
     @app.route("/api/routes", methods=["GET", "POST"])
     def api_routes() -> Any:
         """List or create routes."""
         if request.method == "GET":
-            return jsonify([r.to_dict() for r in router.routes])
+            return jsonify([_enrich_route(r.to_dict()) for r in router.routes])
 
         # POST - create new route
         data = request.get_json()
@@ -214,7 +222,7 @@ def create_app(controller: Controller, router: RoutingEngine) -> Flask:
             return jsonify({"error": "Route not found"}), 404
 
         if request.method == "GET":
-            return jsonify(route.to_dict())
+            return jsonify(_enrich_route(route.to_dict()))
 
         if request.method == "DELETE":
             run_async(router.delete_route(route_id))
