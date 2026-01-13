@@ -2,13 +2,7 @@
 
 import sys
 
-
-def main() -> int:
-    """Main entry point."""
-    print("LTP Controller is not yet implemented.")
-    print("Use ltp-source and ltp-sink for direct connections.")
-    return 1
-
+from ltp_controller.cli import main
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -1,0 +1,40 @@
+# LTP Controller Configuration Example
+
+device:
+  id: "auto"  # "auto" generates UUID, or specify explicit UUID
+  name: "ltp-controller"
+  display_name: "LTP Controller"
+  description: "Central routing controller"
+
+web:
+  enabled: true
+  port: 8080
+  host: "0.0.0.0"
+
+discovery:
+  browse_interval: 5.0    # Seconds between mDNS browse refreshes
+  timeout: 30.0           # Device timeout (mark offline after this many seconds)
+
+# Pre-configured routes (optional)
+# These routes will be created on startup
+routes:
+  # Example route configuration:
+  # - name: "Kitchen Animation"
+  #   source: "rainbow-generator"      # Source name or ID
+  #   sink: "kitchen-strip"            # Sink name or ID
+  #   enabled: true
+  #   mode: "proxy"                    # proxy or direct
+  #   transform:
+  #     scale_mode: "fit"              # fit, fill, stretch, crop
+  #     brightness: 1.0                # 0.0 to 1.0
+  #     gamma: 1.0                     # Gamma correction
+  #     mirror_x: false
+  #     mirror_y: false
+
+persistence:
+  enabled: true
+  file: "~/.config/ltp/routes.yaml"  # Save routes to file (not yet implemented)
+
+logging:
+  level: "info"      # debug, info, warning, error
+  file: null         # Optional log file path

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Sources - LTP Controller{% endblock %}
+
+{% block content %}
+<h1>Sources</h1>
+
+<p class="subtitle">Discovered data sources on the network</p>
+
+{% if sources %}
+<div class="device-grid">
+    {% for source in sources %}
+    <div class="device-card {% if source.online %}online{% else %}offline{% endif %}">
+        <div class="device-header">
+            <span class="status-dot"></span>
+            <h3>{{ source.name }}</h3>
+        </div>
+        <p class="device-description">{{ source.description or 'No description' }}</p>
+
+        <div class="device-details">
+            <div class="detail-row">
+                <span class="label">Address:</span>
+                <span class="value">{{ source.host }}:{{ source.port }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">ID:</span>
+                <span class="value">{{ source.id[:8] }}...</span>
+            </div>
+            {% if source.device.properties.output %}
+            <div class="detail-row">
+                <span class="label">Output:</span>
+                <span class="value">{{ source.device.properties.output }}</span>
+            </div>
+            {% endif %}
+            {% if source.device.properties.rate %}
+            <div class="detail-row">
+                <span class="label">Rate:</span>
+                <span class="value">{{ source.device.properties.rate }} Hz</span>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if source.controls %}
+        <div class="device-controls">
+            <h4>Controls</h4>
+            <ul class="control-list">
+                {% for control in source.controls %}
+                <li>
+                    <span class="control-name">{{ control.name }}</span>
+                    <span class="control-value">{{ source.control_values.get(control.id, control.get('value', '-')) }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="device-actions">
+            <button class="btn btn-sm" onclick="refreshDevice('source', '{{ source.id }}')">Refresh</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state-large">
+    <p>No sources discovered on the network.</p>
+    <p>Start an ltp-source to see it here.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshDevice(type, id) {
+    fetch(`/api/${type}s/${id}/refresh`, { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                location.reload();
+            }
+        });
+}
+</script>
+{% endblock %}

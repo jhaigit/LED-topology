@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - LTP Controller{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ sources|selectattr('online')|list|length }} / {{ sources|length }}</div>
+        <div class="stat-label">Sources Online</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ sinks|selectattr('online')|list|length }} / {{ sinks|length }}</div>
+        <div class="stat-label">Sinks Online</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ routes|selectattr('enabled')|list|length }} / {{ routes|length }}</div>
+        <div class="stat-label">Routes Active</div>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <section class="panel">
+        <h2>Sources</h2>
+        {% if sources %}
+        <ul class="device-list">
+            {% for source in sources %}
+            <li class="device-item {% if source.online %}online{% else %}offline{% endif %}">
+                <span class="status-dot"></span>
+                <div class="device-info">
+                    <strong>{{ source.name }}</strong>
+                    <span class="device-meta">{{ source.description or 'No description' }}</span>
+                </div>
+                <span class="device-address">{{ source.host }}:{{ source.port }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">No sources discovered</p>
+        {% endif %}
+        <a href="/sources" class="btn">View All Sources</a>
+    </section>
+
+    <section class="panel">
+        <h2>Sinks</h2>
+        {% if sinks %}
+        <ul class="device-list">
+            {% for sink in sinks %}
+            <li class="device-item {% if sink.online %}online{% else %}offline{% endif %}">
+                <span class="status-dot"></span>
+                <div class="device-info">
+                    <strong>{{ sink.name }}</strong>
+                    <span class="device-meta">{{ sink.description or 'No description' }}</span>
+                </div>
+                <span class="device-address">{{ sink.host }}:{{ sink.port }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">No sinks discovered</p>
+        {% endif %}
+        <a href="/sinks" class="btn">View All Sinks</a>
+    </section>
+</div>
+
+<section class="panel">
+    <h2>Active Routes</h2>
+    {% if routes %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Source</th>
+                <th>Sink</th>
+                <th>Status</th>
+                <th>Mode</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for route in routes %}
+            <tr>
+                <td>{{ route.name }}</td>
+                <td>{{ route.source_id }}</td>
+                <td>{{ route.sink_id }}</td>
+                <td>
+                    <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
+                </td>
+                <td>{{ route.mode.value }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No routes configured</p>
+    {% endif %}
+    <a href="/routes" class="btn">Manage Routes</a>
+</section>
+{% endblock %}

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Sinks - LTP Controller{% endblock %}
+
+{% block content %}
+<h1>Sinks</h1>
+
+<p class="subtitle">Discovered display devices on the network</p>
+
+{% if sinks %}
+<div class="device-grid">
+    {% for sink in sinks %}
+    <div class="device-card {% if sink.online %}online{% else %}offline{% endif %}">
+        <div class="device-header">
+            <span class="status-dot"></span>
+            <h3>{{ sink.name }}</h3>
+        </div>
+        <p class="device-description">{{ sink.description or 'No description' }}</p>
+
+        <div class="device-details">
+            <div class="detail-row">
+                <span class="label">Address:</span>
+                <span class="value">{{ sink.host }}:{{ sink.port }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">ID:</span>
+                <span class="value">{{ sink.id[:8] }}...</span>
+            </div>
+            {% if sink.device.properties.type %}
+            <div class="detail-row">
+                <span class="label">Type:</span>
+                <span class="value">{{ sink.device.properties.type }}</span>
+            </div>
+            {% endif %}
+            {% if sink.device.properties.dim %}
+            <div class="detail-row">
+                <span class="label">Dimensions:</span>
+                <span class="value">{{ sink.device.properties.dim }}</span>
+            </div>
+            {% endif %}
+            {% if sink.device.properties.pixels %}
+            <div class="detail-row">
+                <span class="label">Pixels:</span>
+                <span class="value">{{ sink.device.properties.pixels }}</span>
+            </div>
+            {% endif %}
+            {% if sink.device.properties.rate %}
+            <div class="detail-row">
+                <span class="label">Max Rate:</span>
+                <span class="value">{{ sink.device.properties.rate }} Hz</span>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if sink.controls %}
+        <div class="device-controls">
+            <h4>Controls</h4>
+            <ul class="control-list">
+                {% for control in sink.controls %}
+                <li>
+                    <span class="control-name">{{ control.name }}</span>
+                    <span class="control-value">{{ sink.control_values.get(control.id, control.get('value', '-')) }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="device-actions">
+            <button class="btn btn-sm" onclick="refreshDevice('sink', '{{ sink.id }}')">Refresh</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state-large">
+    <p>No sinks discovered on the network.</p>
+    <p>Start an ltp-sink to see it here.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshDevice(type, id) {
+    fetch(`/api/${type}s/${id}/refresh`, { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                location.reload();
+            }
+        });
+}
+</script>
+{% endblock %}
