@@ -1,0 +1,64 @@
+# LTP Sink Example Configuration
+
+device:
+  id: auto  # UUID will be auto-generated
+  name: "Virtual LED Strip"
+  description: "60-pixel virtual WS2812B strip"
+
+display:
+  type: string  # single, string, matrix, array, custom
+  pixels: 60
+  dimensions: [60]  # [length] for 1D, [width, height] for 2D
+  color_format: rgb  # rgb, rgbw, hsv
+  max_refresh_hz: 60
+
+  # For matrix displays:
+  # topology:
+  #   origin: top-left  # top-left, top-right, bottom-left, bottom-right
+  #   order: row-major  # row-major, column-major
+  #   serpentine: true  # zigzag wiring pattern
+
+network:
+  control_port: 0  # 0 = auto-assign
+  data_port: 0
+
+renderer:
+  type: terminal  # terminal, gui, headless
+
+  # Terminal renderer options
+  style: block  # block, braille, ascii, bar
+  show_info: true
+  show_border: true
+
+  # GUI renderer options (requires pygame)
+  # pixel_size: 20
+  # spacing: 2
+  # background: "#1a1a1a"
+
+# Device controls
+controls:
+  - id: brightness
+    name: Global Brightness
+    description: Master brightness applied to display
+    type: number
+    value: 255
+    min: 0
+    max: 255
+    group: output
+
+  - id: gamma
+    name: Gamma Correction
+    description: Gamma value for color correction
+    type: number
+    value: 2.2
+    min: 1.0
+    max: 3.0
+    step: 0.1
+    group: output
+
+  - id: test_mode
+    name: Test Mode
+    description: Display test pattern instead of input
+    type: boolean
+    value: false
+    group: general

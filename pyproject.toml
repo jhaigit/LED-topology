@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ltp"
+version = "0.1.0"
+description = "LED Topology Protocol - discover and stream data to LED displays"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "jhaigit", email = "aigit@pangolin-systems.com"}
+]
+keywords = ["led", "ws2812", "neopixel", "mdns", "zeroconf", "lighting"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Home Automation",
+    "Topic :: Multimedia :: Graphics",
+]
+
+dependencies = [
+    "zeroconf>=0.80.0",
+    "numpy>=1.24.0",
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+gui = [
+    "pygame>=2.5.0",
+]
+controller = [
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+all = [
+    "ltp[gui,controller,dev]",
+]
+
+[project.scripts]
+ltp-source = "ltp_source.__main__:main"
+ltp-sink = "ltp_sink.__main__:main"
+ltp-controller = "ltp_controller.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/jhaigit/LED-topology"
+Repository = "https://github.com/jhaigit/LED-topology"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true

@@ -1,0 +1,54 @@
+# LTP Source Example Configuration
+
+device:
+  id: auto  # UUID will be auto-generated
+  name: "Rainbow Generator"
+  description: "Generates animated rainbow patterns"
+
+output:
+  dimensions: [60]  # 60-pixel strip, or [16, 16] for 16x16 matrix
+  color_format: rgb
+  rate: 30  # frames per second
+
+pattern:
+  type: rainbow
+  params:
+    speed: 1.0
+    saturation: 1.0
+    brightness: 1.0
+    scale: 1.0
+
+network:
+  control_port: 0  # 0 = auto-assign
+
+# Multiple outputs example (for future use):
+# outputs:
+#   - name: "strip-60"
+#     dimensions: [60]
+#     color_format: rgb
+#     rate: 30
+#     pattern:
+#       type: rainbow
+#       params:
+#         speed: 1.0
+#
+#   - name: "matrix-16x16"
+#     dimensions: [16, 16]
+#     color_format: rgb
+#     rate: 24
+#     pattern:
+#       type: plasma
+#       params:
+#         scale: 4.0
+#         speed: 0.5
+
+# Custom controls (in addition to pattern controls)
+# controls:
+#   - id: master_brightness
+#     name: Master Brightness
+#     description: Global brightness multiplier
+#     type: number
+#     value: 1.0
+#     min: 0.0
+#     max: 1.0
+#     group: output
