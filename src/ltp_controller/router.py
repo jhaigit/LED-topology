@@ -138,6 +138,9 @@ class RoutingEngine:
         self._routes: dict[str, Route] = {}
         self._running = False
         self._route_tasks: dict[str, asyncio.Task] = {}
+        self._pending_starts: set[str] = set()
+        self._pending_stops: set[str] = set()
+        self._monitor_task: asyncio.Task | None = None
 
     @property
     def routes(self) -> list[Route]:
@@ -190,11 +193,9 @@ class RoutingEngine:
         self._routes[route_id] = route
         logger.info(f"Created route: {name} ({source_id} -> {sink_id})")
 
-        # Start if engine is running and route is enabled
+        # Mark for starting (will be picked up by _check_pending_routes)
         if self._running and enabled:
-            self._route_tasks[route_id] = asyncio.create_task(
-                self._run_route(route)
-            )
+            self._pending_starts.add(route_id)
 
         return route
 
@@ -223,13 +224,11 @@ class RoutingEngine:
             route.enabled = enabled
             if self._running:
                 if enabled:
-                    # Start the route
-                    self._route_tasks[route_id] = asyncio.create_task(
-                        self._run_route(route)
-                    )
+                    # Mark for starting
+                    self._pending_starts.add(route_id)
                 else:
-                    # Stop the route
-                    asyncio.create_task(self._stop_route(route))
+                    # Mark for stopping
+                    self._pending_stops.add(route_id)
 
         return route
 
@@ -252,9 +251,7 @@ class RoutingEngine:
         if not route.enabled:
             route.enabled = True
             if self._running:
-                self._route_tasks[route_id] = asyncio.create_task(
-                    self._run_route(route)
-                )
+                self._pending_starts.add(route_id)
         return True
 
     async def disable_route(self, route_id: str) -> bool:
@@ -265,7 +262,8 @@ class RoutingEngine:
 
         if route.enabled:
             route.enabled = False
-            await self._stop_route(route)
+            if self._running:
+                self._pending_stops.add(route_id)
         return True
 
     async def _run_route(self, route: Route) -> None:
@@ -561,6 +559,27 @@ class RoutingEngine:
 
         logger.info(f"Route {route.name} cleaned up")
 
+    async def _monitor_loop(self) -> None:
+        """Monitor for pending route starts/stops from sync context."""
+        while self._running:
+            # Process pending starts
+            while self._pending_starts:
+                route_id = self._pending_starts.pop()
+                route = self._routes.get(route_id)
+                if route and route.enabled and route_id not in self._route_tasks:
+                    self._route_tasks[route_id] = asyncio.create_task(
+                        self._run_route(route)
+                    )
+
+            # Process pending stops
+            while self._pending_stops:
+                route_id = self._pending_stops.pop()
+                route = self._routes.get(route_id)
+                if route:
+                    await self._stop_route(route)
+
+            await asyncio.sleep(0.1)
+
     async def start(self) -> None:
         """Start the routing engine."""
         if self._running:
@@ -575,6 +594,9 @@ class RoutingEngine:
                     self._run_route(route)
                 )
 
+        # Start monitor loop for handling routes from sync context
+        self._monitor_task = asyncio.create_task(self._monitor_loop())
+
         logger.info("Routing engine started")
 
     async def stop(self) -> None:
@@ -584,11 +606,22 @@ class RoutingEngine:
 
         self._running = False
 
+        # Stop monitor task
+        if self._monitor_task:
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            self._monitor_task = None
+
         # Stop all routes
         for route in self._routes.values():
             await self._stop_route(route)
 
         self._route_tasks.clear()
+        self._pending_starts.clear()
+        self._pending_stops.clear()
         logger.info("Routing engine stopped")
 
     def load_routes(self, routes_data: list[dict[str, Any]]) -> None:
