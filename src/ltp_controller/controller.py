@@ -33,13 +33,23 @@ class DeviceState:
     capabilities: dict[str, Any] | None = None
     controls: dict[str, Any] | None = None
     control_values: dict[str, Any] = field(default_factory=dict)
+    # Stable ID that persists across device restarts
+    _stable_id: str | None = field(default=None, repr=False)
 
     @property
     def id(self) -> str:
-        """Get device ID as string."""
+        """Get device ID as string (stable across restarts)."""
+        # Use stable ID if set, otherwise use device's current ID
+        if self._stable_id:
+            return self._stable_id
         if self.device.device_id:
             return str(self.device.device_id)
         return self.device.name
+
+    def set_stable_id(self) -> None:
+        """Lock in the current device ID as the stable ID."""
+        if self._stable_id is None:
+            self._stable_id = self.id
 
     @property
     def name(self) -> str:
@@ -163,8 +173,9 @@ class Controller:
             else:
                 # New source
                 state = DeviceState(device=device)
+                state.set_stable_id()  # Lock in the ID for route references
                 self._sources[device_key] = state
-                logger.info(f"Source discovered: {state.name}")
+                logger.info(f"Source discovered: {state.name} (ID: {state.id})")
                 # Fetch capabilities async
                 asyncio.create_task(self._fetch_device_info(state))
 
@@ -193,8 +204,9 @@ class Controller:
             else:
                 # New sink
                 state = DeviceState(device=device)
+                state.set_stable_id()  # Lock in the ID for route references
                 self._sinks[device_key] = state
-                logger.info(f"Sink discovered: {state.name}")
+                logger.info(f"Sink discovered: {state.name} (ID: {state.id})")
                 # Fetch capabilities async
                 asyncio.create_task(self._fetch_device_info(state))
 

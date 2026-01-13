@@ -267,44 +267,69 @@ class RoutingEngine:
         return True
 
     async def _run_route(self, route: Route) -> None:
-        """Run a route's data flow."""
-        route.status = RouteStatus.CONNECTING
-        route.error_message = None
+        """Run a route's data flow with automatic reconnection."""
+        reconnect_delay = 2.0
+        max_reconnect_delay = 30.0
 
-        try:
-            # Get source and sink devices
-            source = self.controller.get_source(route.source_id)
-            sink = self.controller.get_sink(route.sink_id)
+        while route.enabled and self._running:
+            route.status = RouteStatus.CONNECTING
+            route.error_message = None
 
-            if not source:
-                raise ValueError(f"Source not found: {route.source_id}")
-            if not sink:
-                raise ValueError(f"Sink not found: {route.sink_id}")
-            if not source.online:
-                raise ValueError(f"Source is offline: {source.name}")
-            if not sink.online:
-                raise ValueError(f"Sink is offline: {sink.name}")
+            try:
+                # Get source and sink devices
+                source = self.controller.get_source(route.source_id)
+                sink = self.controller.get_sink(route.sink_id)
 
-            if route.mode == RouteMode.PROXY:
-                await self._run_proxy_route(route, source, sink)
-            else:
-                await self._run_direct_route(route, source, sink)
+                if not source:
+                    raise ValueError(f"Source not found: {route.source_id}")
+                if not sink:
+                    raise ValueError(f"Sink not found: {route.sink_id}")
 
-        except asyncio.CancelledError:
-            logger.info(f"Route {route.name} cancelled")
-            route.status = RouteStatus.DISCONNECTED
-        except asyncio.TimeoutError:
-            logger.error(f"Route {route.name} error: Connection timeout")
-            route.status = RouteStatus.ERROR
-            route.error_message = "Connection timeout"
-        except Exception as e:
-            import traceback
-            logger.error(f"Route {route.name} error: {type(e).__name__}: {e}")
-            logger.debug(traceback.format_exc())
-            route.status = RouteStatus.ERROR
-            route.error_message = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
-        finally:
-            await self._cleanup_route(route)
+                # Wait for devices to be online
+                if not source.online or not sink.online:
+                    route.status = RouteStatus.DISCONNECTED
+                    offline = []
+                    if not source.online:
+                        offline.append(source.name)
+                    if not sink.online:
+                        offline.append(sink.name)
+                    route.error_message = f"Waiting for: {', '.join(offline)}"
+                    logger.info(f"Route {route.name}: {route.error_message}")
+                    await asyncio.sleep(reconnect_delay)
+                    continue
+
+                if route.mode == RouteMode.PROXY:
+                    await self._run_proxy_route(route, source, sink)
+                else:
+                    await self._run_direct_route(route, source, sink)
+
+                # If we get here normally (route disabled), exit loop
+                break
+
+            except asyncio.CancelledError:
+                logger.info(f"Route {route.name} cancelled")
+                route.status = RouteStatus.DISCONNECTED
+                break
+            except asyncio.TimeoutError:
+                logger.warning(f"Route {route.name}: Connection timeout, will retry")
+                route.status = RouteStatus.DISCONNECTED
+                route.error_message = "Connection timeout, retrying..."
+            except Exception as e:
+                import traceback
+                logger.warning(f"Route {route.name} error: {type(e).__name__}: {e}")
+                logger.debug(traceback.format_exc())
+                route.status = RouteStatus.DISCONNECTED
+                route.error_message = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            finally:
+                await self._cleanup_route(route)
+
+            # Wait before reconnecting (with backoff)
+            if route.enabled and self._running:
+                logger.info(f"Route {route.name}: Reconnecting in {reconnect_delay:.1f}s...")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 1.5, max_reconnect_delay)
+
+        route.status = RouteStatus.DISCONNECTED
 
     async def _run_proxy_route(
         self, route: Route, source: DeviceState, sink: DeviceState
@@ -374,9 +399,21 @@ class RoutingEngine:
             f"{source.name} -> controller:{receiver_port} -> {sink.name}:{sink_udp_port}"
         )
 
-        # Keep running until cancelled
+        # Keep running until cancelled or device goes offline
         while route.enabled:
             await asyncio.sleep(1.0)
+
+            # Check if devices are still online
+            current_sink = self.controller.get_sink(route.sink_id)
+            current_source = self.controller.get_source(route.source_id)
+
+            if not current_sink or not current_sink.online:
+                logger.warning(f"Route {route.name}: Sink went offline")
+                raise ConnectionError("Sink went offline")
+
+            if not current_source or not current_source.online:
+                logger.warning(f"Route {route.name}: Source went offline")
+                raise ConnectionError("Source went offline")
 
     async def _run_direct_route(
         self, route: Route, source: DeviceState, sink: DeviceState
@@ -421,9 +458,21 @@ class RoutingEngine:
             f"{source.name} -> {sink.name}:{sink_udp_port}"
         )
 
-        # Keep running until cancelled
+        # Keep running until cancelled or device goes offline
         while route.enabled:
             await asyncio.sleep(1.0)
+
+            # Check if devices are still online
+            current_sink = self.controller.get_sink(route.sink_id)
+            current_source = self.controller.get_source(route.source_id)
+
+            if not current_sink or not current_sink.online:
+                logger.warning(f"Route {route.name}: Sink went offline")
+                raise ConnectionError("Sink went offline")
+
+            if not current_source or not current_source.online:
+                logger.warning(f"Route {route.name}: Source went offline")
+                raise ConnectionError("Source went offline")
 
     def _handle_packet(
         self,
