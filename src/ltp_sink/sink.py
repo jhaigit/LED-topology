@@ -28,6 +28,7 @@ from libltp import (
     create_linear_topology,
     stream_setup_response,
 )
+from libltp.types import StreamAction
 from libltp.transport import ControlServer, DataReceiver, StreamManager
 from ltp_sink.renderers.base import Renderer
 from ltp_sink.renderers.terminal import TerminalConfig, TerminalRenderer
@@ -162,6 +163,8 @@ class Sink:
             return self._handle_capability_request(message)
         elif message.type == MessageType.STREAM_SETUP:
             return self._handle_stream_setup(message)
+        elif message.type == MessageType.STREAM_CONTROL:
+            return self._handle_stream_control(message)
         elif message.type == MessageType.CONTROL_GET:
             return self._handle_control_get(message)
         elif message.type == MessageType.CONTROL_SET:
@@ -203,6 +206,27 @@ class Sink:
             message.seq,
             status="ok",
             udp_port=self._data_receiver.actual_port if self._data_receiver else 0,
+            stream_id=stream_id,
+        )
+
+    def _handle_stream_control(self, message: Message) -> Message:
+        """Handle stream control request (start/stop/pause)."""
+        stream_id = message.data.get("stream_id")
+        action = StreamAction(message.data.get("action", "start"))
+
+        if action == StreamAction.START:
+            self._stream_manager.start_stream(stream_id)
+            logger.info(f"Started stream: {stream_id}")
+        elif action == StreamAction.STOP:
+            self._stream_manager.stop_stream(stream_id)
+            logger.info(f"Stopped stream: {stream_id}")
+        elif action == StreamAction.PAUSE:
+            logger.info(f"Paused stream: {stream_id}")
+
+        return Message(
+            MessageType.STREAM_CONTROL_RESPONSE,
+            message.seq,
+            status="ok",
             stream_id=stream_id,
         )
 

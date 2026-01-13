@@ -176,14 +176,29 @@ def control_changed(values: dict[str, Any]) -> Message:
 
 
 def subscribe(
-    seq: int, dimensions: list[int], color: str = "rgb", rate: int = 30
+    seq: int,
+    dimensions: list[int],
+    color: str = "rgb",
+    rate: int = 30,
+    callback_host: str | None = None,
+    callback_port: int | None = None,
 ) -> Message:
-    """Create a subscribe request."""
-    return Message(
-        MessageType.SUBSCRIBE,
-        seq,
-        target={"dimensions": dimensions, "color": color, "rate": rate},
-    )
+    """Create a subscribe request.
+
+    Args:
+        seq: Sequence number for the request
+        dimensions: Requested output dimensions
+        color: Color format (rgb, rgbw, etc.)
+        rate: Requested frame rate
+        callback_host: Host address where source should send data
+        callback_port: UDP port where source should send data
+    """
+    data: dict[str, Any] = {
+        "target": {"dimensions": dimensions, "color": color, "rate": rate},
+    }
+    if callback_host and callback_port:
+        data["callback"] = {"host": callback_host, "port": callback_port}
+    return Message(MessageType.SUBSCRIBE, seq, **data)
 
 
 def subscribe_response(

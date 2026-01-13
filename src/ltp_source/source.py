@@ -170,14 +170,41 @@ class Source:
     def _handle_subscribe(self, message: Message) -> Message:
         """Handle subscribe request from a sink or controller."""
         target = message.data.get("target", {})
+        callback = message.data.get("callback", {})
 
         # Create stream for this subscriber
         stream_id = self._stream_manager.create_stream(
             color_format=self.config.color_format,
         )
 
-        # We'll need the subscriber to tell us where to send data
-        # For now, return that they need to set up UDP
+        # If callback address provided, create sender and start streaming
+        if callback.get("host") and callback.get("port"):
+            callback_host = callback["host"]
+            callback_port = callback["port"]
+            logger.info(f"Creating data sender to {callback_host}:{callback_port}")
+
+            # Create sender for this subscriber
+            sender = DataSender(callback_host, callback_port)
+
+            # Start sender in background (can't await in sync handler)
+            async def start_sender() -> None:
+                await sender.start()
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(start_sender())
+            except RuntimeError:
+                # No running loop, try to run directly
+                asyncio.run(sender.start())
+
+            # Associate sender with stream
+            stream = self._stream_manager.get_stream(stream_id)
+            if stream:
+                stream["sender"] = sender
+
+            self._data_senders[stream_id] = sender
+            self._stream_manager.start_stream(stream_id)
+
         return subscribe_response(
             message.seq,
             status="ok",

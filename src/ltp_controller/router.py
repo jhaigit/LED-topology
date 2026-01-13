@@ -293,10 +293,16 @@ class RoutingEngine:
         except asyncio.CancelledError:
             logger.info(f"Route {route.name} cancelled")
             route.status = RouteStatus.DISCONNECTED
-        except Exception as e:
-            logger.error(f"Route {route.name} error: {e}")
+        except asyncio.TimeoutError:
+            logger.error(f"Route {route.name} error: Connection timeout")
             route.status = RouteStatus.ERROR
-            route.error_message = str(e)
+            route.error_message = "Connection timeout"
+        except Exception as e:
+            import traceback
+            logger.error(f"Route {route.name} error: {type(e).__name__}: {e}")
+            logger.debug(traceback.format_exc())
+            route.status = RouteStatus.ERROR
+            route.error_message = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         finally:
             await self._cleanup_route(route)
 
@@ -329,22 +335,8 @@ class RoutingEngine:
         start_req = stream_control(0, route._sink_stream_id, StreamAction.START)
         await route._sink_client.request(start_req)
 
-        # Connect to source
-        route._source_client = ControlClient(source.host, source.port)
-        await route._source_client.connect()
-
-        # Subscribe to source
+        # Start data receiver FIRST to get the port for callback
         source_dims = self._get_dimensions(source)
-        sub_req = subscribe(0, source_dims, "rgb", 30)
-        sub_resp = await route._source_client.request(sub_req)
-
-        if sub_resp.data.get("status") != "ok":
-            raise ValueError(f"Source subscribe failed: {sub_resp.data}")
-
-        source_udp_port = sub_resp.data.get("udp_port", 0)
-        route._source_stream_id = sub_resp.data["stream_id"]
-
-        # Start data receiver from source
         route._receiver = DataReceiver("0.0.0.0", 0)
 
         def on_data(packet: DataPacket) -> None:
@@ -353,10 +345,33 @@ class RoutingEngine:
         route._receiver.handler = on_data
         await route._receiver.start()
 
+        receiver_port = route._receiver.actual_port
+
+        # Get our local IP address (the one the source can reach us on)
+        local_ip = self._get_local_ip(source.host)
+
+        # Connect to source
+        route._source_client = ControlClient(source.host, source.port)
+        await route._source_client.connect()
+
+        # Subscribe to source with callback address
+        logger.info(f"Subscribing to source with callback {local_ip}:{receiver_port}")
+        sub_req = subscribe(
+            0, source_dims, "rgb", 30,
+            callback_host=local_ip,
+            callback_port=receiver_port,
+        )
+        sub_resp = await route._source_client.request(sub_req)
+
+        if sub_resp.data.get("status") != "ok":
+            raise ValueError(f"Source subscribe failed: {sub_resp.data}")
+
+        route._source_stream_id = sub_resp.data["stream_id"]
+
         route.status = RouteStatus.CONNECTED
         logger.info(
             f"Route {route.name} connected: "
-            f"{source.name}:{source_udp_port} -> controller -> {sink.name}:{sink_udp_port}"
+            f"{source.name} -> controller:{receiver_port} -> {sink.name}:{sink_udp_port}"
         )
 
         # Keep running until cancelled
@@ -484,6 +499,26 @@ class RoutingEngine:
             return result[:sink_count].astype(np.uint8)
 
         return pixels
+
+    def _get_local_ip(self, remote_host: str) -> str:
+        """Get local IP address that can reach the remote host."""
+        import socket
+
+        try:
+            # Create a socket to determine our local IP that routes to the remote host
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(0)
+            # Doesn't actually connect, just figures out routing
+            sock.connect((remote_host, 1))
+            local_ip = sock.getsockname()[0]
+            sock.close()
+            return local_ip
+        except Exception:
+            # Fallback to getting hostname IP
+            try:
+                return socket.gethostbyname(socket.gethostname())
+            except Exception:
+                return "127.0.0.1"
 
     def _get_dimensions(self, device: DeviceState) -> list[int]:
         """Get pixel dimensions from device."""
