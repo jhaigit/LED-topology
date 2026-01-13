@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block title %}LED Preview - LTP Controller{% endblock %}
+
+{% block content %}
+<h1>LED Preview</h1>
+
+<p class="subtitle">Live visualization of LED data</p>
+
+{% if routes %}
+<div class="preview-grid">
+    {% for route in routes %}
+    <div class="preview-card">
+        <div class="preview-header">
+            <h3>{{ route.name }}</h3>
+            <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
+        </div>
+        <div class="preview-info">
+            <span>{{ route.source_id }} &rarr; {{ route.sink_id }}</span>
+            <span class="frame-count">Frames: <span id="frames-{{ route.id }}">{{ route._frames_routed }}</span></span>
+        </div>
+        <div class="led-preview" id="preview-{{ route.id }}">
+            <img src="/api/routes/{{ route.id }}/preview" alt="LED Preview" class="led-strip">
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state-large">
+    <p>No routes configured.</p>
+    <p><a href="/routes">Create a route</a> to see LED previews.</p>
+</div>
+{% endif %}
+
+<style>
+.preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+    gap: 1.5rem;
+}
+
+.preview-card {
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    padding: 1.5rem;
+    border: 1px solid var(--border);
+}
+
+.preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.preview-header h3 {
+    margin: 0;
+}
+
+.preview-info {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+}
+
+.led-preview {
+    background: #111;
+    border-radius: 4px;
+    padding: 1rem;
+    overflow-x: auto;
+}
+
+.led-strip {
+    display: block;
+    max-width: 100%;
+    height: auto;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Refresh previews every 100ms for smooth animation
+setInterval(() => {
+    document.querySelectorAll('.led-strip').forEach(img => {
+        const src = img.src.split('?')[0];
+        img.src = src + '?t=' + Date.now();
+    });
+}, 100);
+
+// Update frame counts every second
+setInterval(() => {
+    fetch('/api/routes')
+        .then(r => r.json())
+        .then(routes => {
+            routes.forEach(route => {
+                const el = document.getElementById('frames-' + route.id);
+                if (el) el.textContent = route.frames_routed;
+            });
+        });
+}, 1000);
+</script>
+{% endblock %}

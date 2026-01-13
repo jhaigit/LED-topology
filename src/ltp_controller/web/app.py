@@ -28,10 +28,21 @@ def create_app(controller: Controller, router: RoutingEngine) -> Flask:
     app.config["controller"] = controller
     app.config["router"] = router
 
-    # Helper to run async code
+    # Helper to run async code from sync Flask handlers
     def run_async(coro: Any) -> Any:
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(coro)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Create a new loop in a thread-safe way
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, coro)
+                return future.result(timeout=10)
+        else:
+            return asyncio.run(coro)
 
     # ==================== Pages ====================
 
@@ -190,6 +201,9 @@ def create_app(controller: Controller, router: RoutingEngine) -> Flask:
             enabled=data.get("enabled", True),
         )
 
+        if route is None:
+            return jsonify({"error": "Route already exists for this source/sink pair"}), 409
+
         return jsonify(route.to_dict()), 201
 
     @app.route("/api/routes/<route_id>", methods=["GET", "PUT", "DELETE"])
@@ -260,6 +274,65 @@ def create_app(controller: Controller, router: RoutingEngine) -> Flask:
                     "active": len(router.active_routes),
                 },
             }
+        )
+
+    # ==================== API: Preview ====================
+
+    @app.route("/api/routes/<route_id>/preview")
+    def api_route_preview(route_id: str) -> Any:
+        """Get LED preview for a route as SVG."""
+        route = router.get_route(route_id)
+        if not route:
+            return jsonify({"error": "Route not found"}), 404
+
+        # Get the last frame data if available
+        if route._last_frame is None:
+            # Return empty preview
+            return _generate_led_svg([], 60)
+
+        pixels = route._last_frame
+        return _generate_led_svg(pixels, len(pixels))
+
+    def _generate_led_svg(pixels: list, count: int) -> Any:
+        """Generate an SVG visualization of LED pixels."""
+        from flask import Response
+
+        led_width = 12
+        led_height = 20
+        spacing = 2
+        total_width = count * (led_width + spacing)
+
+        svg_parts = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total_width} {led_height + 4}" '
+            f'width="{min(total_width, 800)}" height="{led_height + 4}">'
+        ]
+
+        for i in range(count):
+            if i < len(pixels) and len(pixels[i]) >= 3:
+                r, g, b = int(pixels[i][0]), int(pixels[i][1]), int(pixels[i][2])
+                color = f"rgb({r},{g},{b})"
+            else:
+                color = "#333"
+
+            x = i * (led_width + spacing)
+            svg_parts.append(
+                f'<rect x="{x}" y="2" width="{led_width}" height="{led_height}" '
+                f'rx="2" fill="{color}" stroke="#555" stroke-width="1"/>'
+            )
+
+        svg_parts.append("</svg>")
+        svg_content = "".join(svg_parts)
+
+        return Response(svg_content, mimetype="image/svg+xml")
+
+    @app.route("/preview")
+    def preview_page() -> str:
+        """Live LED preview page."""
+        return render_template(
+            "preview.html",
+            routes=router.routes,
+            sources=controller.sources,
+            sinks=controller.sinks,
         )
 
     return app

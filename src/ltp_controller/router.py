@@ -96,6 +96,7 @@ class Route:
     _sink_stream_id: str | None = field(default=None, repr=False)
     _frames_routed: int = field(default=0, repr=False)
     _last_frame_time: datetime | None = field(default=None, repr=False)
+    _last_frame: list | None = field(default=None, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +153,13 @@ class RoutingEngine:
             if r.enabled and r.status == RouteStatus.CONNECTED
         ]
 
+    def route_exists(self, source_id: str, sink_id: str) -> bool:
+        """Check if a route already exists for this source/sink pair."""
+        for route in self._routes.values():
+            if route.source_id == source_id and route.sink_id == sink_id:
+                return True
+        return False
+
     def create_route(
         self,
         name: str,
@@ -160,8 +168,13 @@ class RoutingEngine:
         mode: RouteMode = RouteMode.PROXY,
         transform: RouteTransform | None = None,
         enabled: bool = True,
-    ) -> Route:
-        """Create a new route."""
+    ) -> Route | None:
+        """Create a new route. Returns None if route already exists."""
+        # Check for duplicate
+        if self.route_exists(source_id, sink_id):
+            logger.warning(f"Route already exists: {source_id} -> {sink_id}")
+            return None
+
         route_id = str(uuid4())[:8]
 
         route = Route(
@@ -424,6 +437,9 @@ class RoutingEngine:
                 normalized = pixels / 255.0
                 corrected = np.power(normalized, route.transform.gamma)
                 pixels = (corrected * 255).astype(np.uint8)
+
+            # Store for preview (convert to list for JSON serialization)
+            route._last_frame = pixels.tolist()
 
             # Send to sink
             if route._sender:
