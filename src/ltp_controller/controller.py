@@ -35,6 +35,8 @@ class DeviceState:
     control_values: dict[str, Any] = field(default_factory=dict)
     # Stable ID that persists across device restarts
     _stable_id: str | None = field(default=None, repr=False)
+    # Track consecutive failures before marking offline
+    _consecutive_failures: int = field(default=0, repr=False)
 
     @property
     def id(self) -> str:
@@ -260,16 +262,21 @@ class Controller:
 
     async def _ping_device(self, state: DeviceState) -> None:
         """Ping a device to check if it's still online."""
+        # Require 3 consecutive failures before marking offline
+        FAILURES_BEFORE_OFFLINE = 3
+
         try:
             client = ControlClient(state.host, state.port)
-            await asyncio.wait_for(client.connect(), timeout=3.0)
+            await asyncio.wait_for(client.connect(), timeout=5.0)
 
             try:
                 # Send capability request as a ping
                 cap_req = capability_request(0)
-                await client.request(cap_req, timeout=3.0)
+                await client.request(cap_req, timeout=5.0)
 
-                # Device responded - mark as online
+                # Device responded - reset failure count and mark as online
+                state._consecutive_failures = 0
+
                 if not state.online:
                     state.online = True
                     logger.info(f"Device came online: {state.name}")
@@ -283,11 +290,17 @@ class Controller:
             finally:
                 await client.close()
 
-        except Exception:
-            # Device didn't respond - mark as offline
-            if state.online:
+        except Exception as e:
+            # Increment failure count
+            state._consecutive_failures += 1
+            logger.debug(
+                f"Health check failed for {state.name} ({state._consecutive_failures}/{FAILURES_BEFORE_OFFLINE}): {e}"
+            )
+
+            # Only mark offline after multiple consecutive failures
+            if state.online and state._consecutive_failures >= FAILURES_BEFORE_OFFLINE:
                 state.online = False
-                logger.info(f"Device went offline: {state.name}")
+                logger.info(f"Device went offline: {state.name} (after {state._consecutive_failures} failed health checks)")
                 if state.device.is_source and self._on_source_change:
                     self._on_source_change(state, False)
                 elif state.device.is_sink and self._on_sink_change:
