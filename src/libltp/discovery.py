@@ -173,8 +173,10 @@ class ServiceAdvertiser:
             str(self.port),
         ]
 
-        # Add TXT records
+        # Add TXT records (decode bytes values to strings)
         for key, value in properties.items():
+            if isinstance(value, bytes):
+                value = value.decode("utf-8")
             cmd.append(f"{key}={value}")
 
         logger.info(
