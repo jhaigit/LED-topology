@@ -150,6 +150,9 @@ class ScaleMode(str, Enum):
     FIT = "fit"
     FILL = "fill"
     STRETCH = "stretch"
+    PAD_BLACK = "pad_black"  # Pad shorter source with black pixels
+    PAD_REPEAT = "pad_repeat"  # Repeat/tile source pattern to fill sink
+    TRUNCATE = "truncate"  # Truncate longer source to fit sink
 
 
 class MirrorMode(str, Enum):

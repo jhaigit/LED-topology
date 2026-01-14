@@ -9,11 +9,16 @@ from flask import Flask, jsonify, render_template, request
 
 from ltp_controller.controller import Controller
 from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngine
+from ltp_controller.sink_control import SinkController
 
 logger = logging.getLogger(__name__)
 
 
-def create_app(controller: Controller, router: RoutingEngine) -> Flask:
+def create_app(
+    controller: Controller,
+    router: RoutingEngine,
+    sink_controller: SinkController | None = None,
+) -> Flask:
     """Create and configure the Flask application."""
     template_dir = Path(__file__).parent / "templates"
     static_dir = Path(__file__).parent / "static"
@@ -27,6 +32,7 @@ def create_app(controller: Controller, router: RoutingEngine) -> Flask:
     # Store references
     app.config["controller"] = controller
     app.config["router"] = router
+    app.config["sink_controller"] = sink_controller
 
     # Helper to run async code from sync Flask handlers
     def run_async(coro: Any) -> Any:
@@ -169,6 +175,67 @@ def create_app(controller: Controller, router: RoutingEngine) -> Flask:
 
         run_async(controller.refresh_device(sink))
         return jsonify({"status": "ok"})
+
+    # ==================== API: Sink Fill ====================
+
+    @app.route("/api/sinks/<sink_id>/fill", methods=["POST"])
+    def api_sink_fill(sink_id: str) -> Any:
+        """Fill sink with color/pattern.
+
+        Body formats:
+        - {"type": "solid", "color": [255, 0, 0]}
+        - {"type": "gradient", "colors": [[255,0,0], [0,0,255]]}
+        - {"type": "sections", "sections": [{"start": 0, "end": 30, "color": [255,0,0]}]}
+        """
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not initialized"}), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        fill_type = data.get("type", "solid")
+
+        if fill_type == "solid":
+            color = data.get("color", [255, 255, 255])
+            if len(color) < 3:
+                return jsonify({"error": "Color must have 3 components (RGB)"}), 400
+            result = run_async(sink_controller.fill_solid(sink_id, tuple(color[:3])))
+
+        elif fill_type == "gradient":
+            colors = data.get("colors", [])
+            if len(colors) < 2:
+                return jsonify({"error": "Gradient requires at least 2 colors"}), 400
+            color_tuples = [tuple(c[:3]) for c in colors if len(c) >= 3]
+            result = run_async(sink_controller.fill_gradient(sink_id, color_tuples))
+
+        elif fill_type == "sections":
+            sections = data.get("sections", [])
+            if not sections:
+                return jsonify({"error": "No sections provided"}), 400
+            background = tuple(data.get("background", [0, 0, 0])[:3])
+            result = run_async(sink_controller.fill_sections(sink_id, sections, background))
+
+        else:
+            return jsonify({"error": f"Unknown fill type: {fill_type}"}), 400
+
+        if result.get("status") == "error":
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    @app.route("/api/sinks/<sink_id>/clear", methods=["POST"])
+    def api_sink_clear(sink_id: str) -> Any:
+        """Clear sink (fill with black)."""
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not initialized"}), 503
+
+        result = run_async(sink_controller.clear(sink_id))
+
+        if result.get("status") == "error":
+            return jsonify(result), 400
+
+        return jsonify(result)
 
     # ==================== API: Routes ====================
 

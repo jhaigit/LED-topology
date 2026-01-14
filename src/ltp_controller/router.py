@@ -98,6 +98,13 @@ class Route:
     _last_frame_time: datetime | None = field(default=None, repr=False)
     _last_frame: list | None = field(default=None, repr=False)
 
+    # Dimension tracking and warnings
+    _source_dims: list[int] | None = field(default=None, repr=False)
+    _sink_dims: list[int] | None = field(default=None, repr=False)
+    _scaling_active: bool = field(default=False, repr=False)
+    _no_data_warning: bool = field(default=False, repr=False)
+    _connected_at: datetime | None = field(default=None, repr=False)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -111,6 +118,10 @@ class Route:
             "error_message": self.error_message,
             "created_at": self.created_at.isoformat(),
             "frames_routed": self._frames_routed,
+            "source_dims": self._source_dims,
+            "sink_dims": self._sink_dims,
+            "scaling_active": self._scaling_active,
+            "no_data_warning": self._no_data_warning,
         }
 
     @classmethod
@@ -393,6 +404,19 @@ class RoutingEngine:
 
         route._source_stream_id = sub_resp.data["stream_id"]
 
+        # Store dimension info and detect scaling
+        route._source_dims = source_dims
+        route._sink_dims = sink_dims
+        route._scaling_active = source_dims != sink_dims
+        route._connected_at = datetime.now()
+        route._no_data_warning = False
+
+        if route._scaling_active:
+            logger.info(
+                f"Route {route.name}: Scaling active "
+                f"({source_dims} -> {sink_dims}, mode={route.transform.scale_mode.value})"
+            )
+
         route.status = RouteStatus.CONNECTED
         logger.info(
             f"Route {route.name} connected: "
@@ -400,6 +424,9 @@ class RoutingEngine:
         )
 
         # Keep running until cancelled or device goes offline
+        no_data_check_time = datetime.now()
+        initial_frames = route._frames_routed
+
         while route.enabled:
             await asyncio.sleep(1.0)
 
@@ -414,6 +441,21 @@ class RoutingEngine:
             if not current_source or not current_source.online:
                 logger.warning(f"Route {route.name}: Source went offline")
                 raise ConnectionError("Source went offline")
+
+            # Check for no-data warning (no frames in 5 seconds after connection)
+            elapsed = (datetime.now() - no_data_check_time).total_seconds()
+            if elapsed >= 5.0 and route._frames_routed == initial_frames:
+                if not route._no_data_warning:
+                    route._no_data_warning = True
+                    route.error_message = "No data received - check source output"
+                    logger.warning(f"Route {route.name}: {route.error_message}")
+            elif route._frames_routed > initial_frames:
+                # Data flowing, clear warning
+                if route._no_data_warning:
+                    route._no_data_warning = False
+                    route.error_message = None
+                no_data_check_time = datetime.now()
+                initial_frames = route._frames_routed
 
     async def _run_direct_route(
         self, route: Route, source: DeviceState, sink: DeviceState
@@ -443,6 +485,7 @@ class RoutingEngine:
         await route._source_client.connect()
 
         # Subscribe with sink's UDP port as target
+        source_dims = self._get_dimensions(source)
         sink_dims = self._get_dimensions(sink)
         sub_req = subscribe(0, sink_dims, "rgb", 30)
         sub_resp = await route._source_client.request(sub_req)
@@ -451,6 +494,19 @@ class RoutingEngine:
             raise ValueError(f"Source subscribe failed: {sub_resp.data}")
 
         route._source_stream_id = sub_resp.data["stream_id"]
+
+        # Store dimension info and detect scaling
+        route._source_dims = source_dims
+        route._sink_dims = sink_dims
+        route._scaling_active = source_dims != sink_dims
+        route._connected_at = datetime.now()
+        route._no_data_warning = False
+
+        if route._scaling_active:
+            logger.warning(
+                f"Route {route.name}: Dimension mismatch in direct mode "
+                f"({source_dims} -> {sink_dims}) - scaling not applied in direct mode"
+            )
 
         route.status = RouteStatus.CONNECTED
         logger.info(

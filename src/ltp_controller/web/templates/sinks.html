@@ -68,10 +68,106 @@
 
         <div class="device-actions">
             <button class="btn btn-sm" onclick="refreshDevice('sink', '{{ sink.id }}')">Refresh</button>
+            {% if sink.online %}
+            <button class="btn btn-sm btn-primary" onclick="showFillModal('{{ sink.id }}', '{{ sink.name }}', {{ sink.device.properties.pixels or sink.device.properties.dim|replace('x','*')|int if sink.device.properties.dim else 60 }})">Fill</button>
+            <button class="btn btn-sm" onclick="clearSink('{{ sink.id }}')">Clear</button>
+            {% endif %}
         </div>
     </div>
     {% endfor %}
 </div>
+
+<!-- Fill Modal -->
+<div id="fillModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Fill Sink: <span id="fillSinkName"></span></h2>
+            <button class="close-btn" onclick="hideFillModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="fillSinkId">
+            <input type="hidden" id="fillPixelCount">
+
+            <div class="fill-tabs">
+                <button class="tab-btn active" onclick="showFillTab('solid')">Solid</button>
+                <button class="tab-btn" onclick="showFillTab('gradient')">Gradient</button>
+                <button class="tab-btn" onclick="showFillTab('sections')">Sections</button>
+            </div>
+
+            <!-- Solid Fill Tab -->
+            <div id="solidTab" class="fill-tab">
+                <div class="form-group">
+                    <label for="solidColor">Color</label>
+                    <input type="color" id="solidColor" value="#ff0000">
+                </div>
+                <button class="btn btn-primary" onclick="fillSolid()">Apply</button>
+            </div>
+
+            <!-- Gradient Fill Tab -->
+            <div id="gradientTab" class="fill-tab" style="display: none;">
+                <div class="form-group">
+                    <label>Start Color</label>
+                    <input type="color" id="gradientStart" value="#ff0000">
+                </div>
+                <div class="form-group">
+                    <label>End Color</label>
+                    <input type="color" id="gradientEnd" value="#0000ff">
+                </div>
+                <button class="btn btn-primary" onclick="fillGradient()">Apply</button>
+            </div>
+
+            <!-- Sections Fill Tab -->
+            <div id="sectionsTab" class="fill-tab" style="display: none;">
+                <div id="sectionsList">
+                    <div class="section-row">
+                        <input type="number" class="section-start" placeholder="Start" min="0" value="0">
+                        <input type="number" class="section-end" placeholder="End" min="0" value="30">
+                        <input type="color" class="section-color" value="#ff0000">
+                        <button class="btn btn-sm btn-danger" onclick="removeSection(this)">X</button>
+                    </div>
+                </div>
+                <button class="btn btn-sm" onclick="addSection()">+ Add Section</button>
+                <button class="btn btn-primary" onclick="fillSections()">Apply</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.fill-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.tab-btn {
+    padding: 8px 16px;
+    border: 1px solid var(--border, #ccc);
+    background: var(--bg-secondary, #f5f5f5);
+    cursor: pointer;
+    border-radius: 4px;
+}
+.tab-btn.active {
+    background: var(--primary, #007bff);
+    color: white;
+    border-color: var(--primary, #007bff);
+}
+.fill-tab {
+    padding: 16px 0;
+}
+.section-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: center;
+}
+.section-row input[type="number"] {
+    width: 80px;
+}
+#sectionsList {
+    margin-bottom: 12px;
+}
+</style>
+
 {% else %}
 <div class="empty-state-large">
     <p>No sinks discovered on the network.</p>
@@ -88,6 +184,139 @@ function refreshDevice(type, id) {
         .then(data => {
             if (data.status === 'ok') {
                 location.reload();
+            }
+        });
+}
+
+// Fill modal functions
+function showFillModal(sinkId, sinkName, pixelCount) {
+    document.getElementById('fillSinkId').value = sinkId;
+    document.getElementById('fillSinkName').textContent = sinkName;
+    document.getElementById('fillPixelCount').value = pixelCount;
+    document.getElementById('fillModal').style.display = 'flex';
+
+    // Update section end default
+    document.querySelector('.section-end').value = pixelCount;
+}
+
+function hideFillModal() {
+    document.getElementById('fillModal').style.display = 'none';
+}
+
+function showFillTab(tab) {
+    // Hide all tabs
+    document.querySelectorAll('.fill-tab').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+
+    // Show selected tab
+    document.getElementById(tab + 'Tab').style.display = 'block';
+    event.target.classList.add('active');
+}
+
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? [
+        parseInt(result[1], 16),
+        parseInt(result[2], 16),
+        parseInt(result[3], 16)
+    ] : [255, 255, 255];
+}
+
+function fillSolid() {
+    const sinkId = document.getElementById('fillSinkId').value;
+    const color = hexToRgb(document.getElementById('solidColor').value);
+
+    fetch(`/api/sinks/${sinkId}/fill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'solid', color: color })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            hideFillModal();
+        } else {
+            alert('Error: ' + (data.message || data.error));
+        }
+    });
+}
+
+function fillGradient() {
+    const sinkId = document.getElementById('fillSinkId').value;
+    const startColor = hexToRgb(document.getElementById('gradientStart').value);
+    const endColor = hexToRgb(document.getElementById('gradientEnd').value);
+
+    fetch(`/api/sinks/${sinkId}/fill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'gradient', colors: [startColor, endColor] })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            hideFillModal();
+        } else {
+            alert('Error: ' + (data.message || data.error));
+        }
+    });
+}
+
+function fillSections() {
+    const sinkId = document.getElementById('fillSinkId').value;
+    const rows = document.querySelectorAll('.section-row');
+    const sections = [];
+
+    rows.forEach(row => {
+        const start = parseInt(row.querySelector('.section-start').value);
+        const end = parseInt(row.querySelector('.section-end').value);
+        const color = hexToRgb(row.querySelector('.section-color').value);
+        if (!isNaN(start) && !isNaN(end)) {
+            sections.push({ start, end, color });
+        }
+    });
+
+    fetch(`/api/sinks/${sinkId}/fill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'sections', sections: sections })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            hideFillModal();
+        } else {
+            alert('Error: ' + (data.message || data.error));
+        }
+    });
+}
+
+function addSection() {
+    const pixelCount = document.getElementById('fillPixelCount').value;
+    const list = document.getElementById('sectionsList');
+    const row = document.createElement('div');
+    row.className = 'section-row';
+    row.innerHTML = `
+        <input type="number" class="section-start" placeholder="Start" min="0" value="0">
+        <input type="number" class="section-end" placeholder="End" min="0" value="${pixelCount}">
+        <input type="color" class="section-color" value="#00ff00">
+        <button class="btn btn-sm btn-danger" onclick="removeSection(this)">X</button>
+    `;
+    list.appendChild(row);
+}
+
+function removeSection(btn) {
+    const rows = document.querySelectorAll('.section-row');
+    if (rows.length > 1) {
+        btn.parentElement.remove();
+    }
+}
+
+function clearSink(sinkId) {
+    fetch(`/api/sinks/${sinkId}/clear`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                alert('Error: ' + (data.message || data.error));
             }
         });
 }

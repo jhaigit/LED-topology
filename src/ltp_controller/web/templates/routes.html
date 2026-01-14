@@ -18,6 +18,7 @@
             <th>Name</th>
             <th>Source</th>
             <th>Sink</th>
+            <th>Dimensions</th>
             <th>Mode</th>
             <th>Status</th>
             <th>Frames</th>
@@ -42,6 +43,21 @@
                     {{ route.sink_id[:8] }}...
                 {% endfor %}
             </td>
+            <td id="dims-{{ route.id }}">
+                <span class="dims-info">
+                    {% if route._source_dims and route._sink_dims %}
+                        {{ route._source_dims|join('x') }} &rarr; {{ route._sink_dims|join('x') }}
+                        {% if route._scaling_active %}
+                        <span class="scaling-badge" title="Scaling active: {{ route.transform.scale_mode.value }}">S</span>
+                        {% endif %}
+                    {% else %}
+                        --
+                    {% endif %}
+                </span>
+                <small class="warning-msg" id="nodata-{{ route.id }}" style="display: {% if route._no_data_warning %}block{% else %}none{% endif %}; color: var(--warning);">
+                    No data
+                </small>
+            </td>
             <td>{{ route.mode.value }}</td>
             <td>
                 <span class="status-badge {{ route.status.value }}" id="status-{{ route.id }}">{{ route.status.value }}</span>
@@ -62,6 +78,27 @@
         {% endfor %}
     </tbody>
 </table>
+
+<style>
+.scaling-badge {
+    display: inline-block;
+    background: var(--info, #17a2b8);
+    color: white;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.7em;
+    margin-left: 4px;
+    cursor: help;
+}
+.dims-info {
+    font-family: monospace;
+    font-size: 0.9em;
+}
+.warning-msg {
+    display: block;
+    font-size: 0.8em;
+}
+</style>
 {% else %}
 <div class="empty-state-large">
     <p>No routes configured.</p>
@@ -111,6 +148,17 @@
                 </select>
             </div>
             <div class="form-group">
+                <label for="scale_mode">Scale Mode</label>
+                <select id="scale_mode" name="scale_mode">
+                    <option value="fit">Fit (interpolate)</option>
+                    <option value="pad_black">Pad Black (extend with black)</option>
+                    <option value="pad_repeat">Pad Repeat (tile pattern)</option>
+                    <option value="truncate">Truncate (cut to fit)</option>
+                    <option value="stretch">Stretch</option>
+                    <option value="none">None (pad/truncate)</option>
+                </select>
+            </div>
+            <div class="form-group">
                 <label for="brightness">Brightness</label>
                 <input type="range" id="brightness" name="brightness" min="0" max="1" step="0.05" value="1">
                 <span id="brightnessValue">100%</span>
@@ -147,7 +195,8 @@ function createRoute(event) {
         sink_id: form.sink_id.value,
         mode: form.mode.value,
         transform: {
-            brightness: parseFloat(form.brightness.value)
+            brightness: parseFloat(form.brightness.value),
+            scale_mode: form.scale_mode.value
         }
     };
 
@@ -211,6 +260,22 @@ function updateRouteStatus() {
                 const framesEl = document.getElementById('frames-' + route.id);
                 if (framesEl) {
                     framesEl.textContent = route.frames_routed;
+                }
+
+                // Update dimensions
+                const dimsEl = document.getElementById('dims-' + route.id);
+                if (dimsEl && route.source_dims && route.sink_dims) {
+                    const srcDims = route.source_dims.join('x');
+                    const sinkDims = route.sink_dims.join('x');
+                    const scalingBadge = route.scaling_active ?
+                        `<span class="scaling-badge" title="Scaling active: ${route.transform?.scale_mode || 'fit'}">S</span>` : '';
+                    dimsEl.querySelector('.dims-info').innerHTML = `${srcDims} &rarr; ${sinkDims} ${scalingBadge}`;
+                }
+
+                // Update no-data warning
+                const nodataEl = document.getElementById('nodata-' + route.id);
+                if (nodataEl) {
+                    nodataEl.style.display = route.no_data_warning ? 'block' : 'none';
                 }
             });
         })

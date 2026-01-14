@@ -14,6 +14,7 @@ import yaml
 
 from ltp_controller.controller import Controller
 from ltp_controller.router import RouteMode, RouteTransform, RoutingEngine
+from ltp_controller.sink_control import SinkController
 
 logger = logging.getLogger("ltp_controller")
 
@@ -104,6 +105,7 @@ def parse_args() -> argparse.Namespace:
 async def run_controller(
     controller: Controller,
     router: RoutingEngine,
+    sink_controller: SinkController,
     web_enabled: bool = True,
     web_host: str = "0.0.0.0",
     web_port: int = 8080,
@@ -131,7 +133,7 @@ async def run_controller(
         if web_enabled:
             from ltp_controller.web import create_app
 
-            app = create_app(controller, router)
+            app = create_app(controller, router, sink_controller)
 
             def run_web() -> None:
                 app.run(host=web_host, port=web_port, threaded=True, use_reloader=False)
@@ -147,6 +149,7 @@ async def run_controller(
 
     finally:
         # Cleanup
+        await sink_controller.cleanup_all()
         await router.stop()
         await controller.stop()
 
@@ -204,6 +207,9 @@ def main() -> int:
     # Create routing engine
     router = RoutingEngine(controller)
 
+    # Create sink controller for direct fills
+    sink_controller = SinkController(controller)
+
     # Load pre-configured routes
     routes_config = config.get("routes", [])
     for route_data in routes_config:
@@ -229,6 +235,7 @@ def main() -> int:
             run_controller(
                 controller=controller,
                 router=router,
+                sink_controller=sink_controller,
                 web_enabled=web_enabled,
                 web_host=web_host,
                 web_port=web_port,

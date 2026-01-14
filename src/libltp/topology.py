@@ -312,37 +312,72 @@ def scale_buffer(
     Args:
         source: Source buffer (pixels, channels) or (height, width, channels)
         target_shape: Target shape
-        mode: "fit", "fill", "stretch", or "none"
+        mode: "fit", "fill", "stretch", "none", "pad_black", "pad_repeat", "truncate"
 
     Returns:
         Scaled buffer
     """
     from scipy.ndimage import zoom
 
-    if mode == "none":
-        # Just truncate or pad
-        result = np.zeros(target_shape + (source.shape[-1],), dtype=source.dtype)
-        copy_shape = tuple(min(s, t) for s, t in zip(source.shape[:-1], target_shape))
-        slices = tuple(slice(0, s) for s in copy_shape)
-        result[slices] = source[slices]
-        return result
+    # Handle enum values if passed
+    if hasattr(mode, "value"):
+        mode = mode.value
 
-    # Handle 1D to 1D scaling
+    # Handle 1D arrays
     if source.ndim == 2 and len(target_shape) == 1:
         src_len = source.shape[0]
         tgt_len = target_shape[0]
+        channels = source.shape[1]
+
         if src_len == tgt_len:
             return source.copy()
 
-        # Simple linear interpolation
+        # Handle new padding/truncation modes for 1D
+        if mode == "truncate":
+            # Simply truncate to target length
+            return source[:tgt_len].copy()
+
+        if mode == "pad_black":
+            # Pad with black (zeros) if source is shorter
+            if src_len >= tgt_len:
+                return source[:tgt_len].copy()
+            result = np.zeros((tgt_len, channels), dtype=source.dtype)
+            result[:src_len] = source
+            return result
+
+        if mode == "pad_repeat":
+            # Tile/repeat the source pattern to fill target
+            if src_len >= tgt_len:
+                return source[:tgt_len].copy()
+            result = np.zeros((tgt_len, channels), dtype=source.dtype)
+            for i in range(tgt_len):
+                result[i] = source[i % src_len]
+            return result
+
+        if mode == "none":
+            # Truncate or pad with black (same as pad_black)
+            result = np.zeros((tgt_len, channels), dtype=source.dtype)
+            copy_len = min(src_len, tgt_len)
+            result[:copy_len] = source[:copy_len]
+            return result
+
+        # Default: interpolation-based scaling (fit, fill, stretch)
         indices = np.linspace(0, src_len - 1, tgt_len)
-        result = np.zeros((tgt_len, source.shape[1]), dtype=source.dtype)
+        result = np.zeros((tgt_len, channels), dtype=source.dtype)
         for i, idx in enumerate(indices):
             low = int(idx)
             high = min(low + 1, src_len - 1)
             frac = idx - low
             result[i] = (1 - frac) * source[low] + frac * source[high]
         return result.astype(source.dtype)
+
+    # Handle 2D arrays (legacy behavior for none mode)
+    if mode == "none":
+        result = np.zeros(target_shape + (source.shape[-1],), dtype=source.dtype)
+        copy_shape = tuple(min(s, t) for s, t in zip(source.shape[:-1], target_shape))
+        slices = tuple(slice(0, s) for s in copy_shape)
+        result[slices] = source[slices]
+        return result
 
     # For 2D scaling, use scipy zoom
     if source.ndim == 3 and len(target_shape) == 2:
