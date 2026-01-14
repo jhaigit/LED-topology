@@ -23,6 +23,12 @@ from libltp.types import ColorFormat, Encoding, ScaleMode, StreamAction
 
 from ltp_controller.controller import Controller, DeviceState
 
+# Type hints only - actual import at runtime to avoid circular imports
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ltp_controller.virtual_sources import VirtualSourceManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -144,14 +150,29 @@ class Route:
 class RoutingEngine:
     """Manages routes between sources and sinks."""
 
-    def __init__(self, controller: Controller):
+    def __init__(
+        self,
+        controller: Controller,
+        virtual_source_manager: "VirtualSourceManager | None" = None,
+    ):
         self.controller = controller
+        self._virtual_source_manager = virtual_source_manager
         self._routes: dict[str, Route] = {}
         self._running = False
         self._route_tasks: dict[str, asyncio.Task] = {}
         self._pending_starts: set[str] = set()
         self._pending_stops: set[str] = set()
         self._monitor_task: asyncio.Task | None = None
+
+    def set_virtual_source_manager(self, manager: "VirtualSourceManager") -> None:
+        """Set the virtual source manager (for late binding)."""
+        self._virtual_source_manager = manager
+
+    def _is_virtual_source(self, source_id: str) -> bool:
+        """Check if a source ID refers to a virtual source."""
+        if not self._virtual_source_manager:
+            return False
+        return self._virtual_source_manager.get(source_id) is not None
 
     @property
     def routes(self) -> list[Route]:
@@ -287,6 +308,28 @@ class RoutingEngine:
             route.error_message = None
 
             try:
+                # Check if source is a virtual source
+                if self._is_virtual_source(route.source_id):
+                    # Virtual source route
+                    virtual_source = self._virtual_source_manager.get(route.source_id)
+                    sink = self.controller.get_sink(route.sink_id)
+
+                    if not virtual_source:
+                        raise ValueError(f"Virtual source not found: {route.source_id}")
+                    if not sink:
+                        raise ValueError(f"Sink not found: {route.sink_id}")
+
+                    # Wait for sink to be online
+                    if not sink.online:
+                        route.status = RouteStatus.DISCONNECTED
+                        route.error_message = f"Waiting for: {sink.name}"
+                        logger.info(f"Route {route.name}: {route.error_message}")
+                        await asyncio.sleep(reconnect_delay)
+                        continue
+
+                    await self._run_virtual_source_route(route, virtual_source, sink)
+                    break
+
                 # Get source and sink devices
                 source = self.controller.get_source(route.source_id)
                 sink = self.controller.get_sink(route.sink_id)
@@ -529,6 +572,110 @@ class RoutingEngine:
             if not current_source or not current_source.online:
                 logger.warning(f"Route {route.name}: Source went offline")
                 raise ConnectionError("Source went offline")
+
+    async def _run_virtual_source_route(
+        self, route: Route, virtual_source: "VirtualSource", sink: DeviceState
+    ) -> None:
+        """Run a route from a virtual source to a sink."""
+        from ltp_controller.virtual_sources.base import VirtualSource
+
+        logger.info(f"Starting virtual source route: {route.name}")
+
+        # Connect to sink
+        route._sink_client = ControlClient(sink.host, sink.port)
+        await route._sink_client.connect()
+
+        # Get sink dimensions
+        sink_dims = self._get_dimensions(sink)
+        num_pixels = np.prod(sink_dims)
+
+        # Set up stream to sink
+        setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
+        setup_resp = await route._sink_client.request(setup_req)
+
+        if setup_resp.data.get("status") != "ok":
+            raise ValueError(f"Sink stream setup failed: {setup_resp.data}")
+
+        sink_udp_port = setup_resp.data["udp_port"]
+        route._sink_stream_id = setup_resp.data["stream_id"]
+
+        # Start data sender to sink
+        route._sender = DataSender(sink.host, sink_udp_port)
+        await route._sender.start()
+
+        # Start stream on sink
+        start_req = stream_control(0, route._sink_stream_id, StreamAction.START)
+        await route._sink_client.request(start_req)
+
+        # Store dimension info
+        source_dims = virtual_source.config.output_dimensions
+        route._source_dims = source_dims
+        route._sink_dims = sink_dims
+        route._scaling_active = source_dims != sink_dims
+        route._connected_at = datetime.now()
+        route._no_data_warning = False
+
+        if route._scaling_active:
+            logger.info(
+                f"Route {route.name}: Scaling active "
+                f"({source_dims} -> {sink_dims}, mode={route.transform.scale_mode.value})"
+            )
+
+        # Start the virtual source if not already running
+        if not virtual_source.is_running:
+            virtual_source.start()
+
+        route.status = RouteStatus.CONNECTED
+        logger.info(
+            f"Virtual source route {route.name} connected: "
+            f"{virtual_source.name} -> {sink.name}:{sink_udp_port}"
+        )
+
+        # Get frame interval from virtual source config
+        frame_interval = 1.0 / virtual_source.config.frame_rate
+
+        # Render loop
+        while route.enabled and self._running:
+            try:
+                # Render frame from virtual source
+                pixels = virtual_source.render_frame(num_pixels)
+
+                # Apply transforms
+                if route._scaling_active:
+                    pixels = self._scale_pixels(
+                        pixels, source_dims, sink_dims, route.transform
+                    )
+
+                # Apply brightness from route transform
+                if route.transform.brightness != 1.0:
+                    pixels = (pixels * route.transform.brightness).astype(np.uint8)
+
+                # Apply gamma
+                if route.transform.gamma != 1.0:
+                    normalized = pixels / 255.0
+                    corrected = np.power(normalized, route.transform.gamma)
+                    pixels = (corrected * 255).astype(np.uint8)
+
+                # Store for preview
+                route._last_frame = pixels.tolist()
+
+                # Send to sink
+                if route._sender:
+                    route._sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                    route._frames_routed += 1
+                    route._last_frame_time = datetime.now()
+
+            except Exception as e:
+                logger.warning(f"Error rendering virtual source for route {route.name}: {e}")
+
+            # Check if sink is still online (every second or so)
+            if route._frames_routed % int(1.0 / frame_interval) == 0:
+                current_sink = self.controller.get_sink(route.sink_id)
+                if not current_sink or not current_sink.online:
+                    logger.warning(f"Route {route.name}: Sink went offline")
+                    raise ConnectionError("Sink went offline")
+
+            await asyncio.sleep(frame_interval)
 
     def _handle_packet(
         self,

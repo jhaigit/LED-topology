@@ -15,6 +15,7 @@ import yaml
 from ltp_controller.controller import Controller
 from ltp_controller.router import RouteMode, RouteTransform, RoutingEngine
 from ltp_controller.sink_control import SinkController
+from ltp_controller.virtual_sources import VirtualSourceManager
 
 logger = logging.getLogger("ltp_controller")
 
@@ -106,6 +107,7 @@ async def run_controller(
     controller: Controller,
     router: RoutingEngine,
     sink_controller: SinkController,
+    virtual_source_manager: VirtualSourceManager,
     web_enabled: bool = True,
     web_host: str = "0.0.0.0",
     web_port: int = 8080,
@@ -128,13 +130,20 @@ async def run_controller(
         # Start routing engine
         await router.start()
 
+        # Start virtual source manager
+        virtual_source_manager.start()
+
         # Start web interface in a separate thread
         web_thread = None
         if web_enabled:
             from ltp_controller.web import create_app
 
             # Pass the event loop so Flask can schedule async work on it
-            app = create_app(controller, router, sink_controller, event_loop=loop)
+            app = create_app(
+                controller, router, sink_controller,
+                virtual_source_manager=virtual_source_manager,
+                event_loop=loop,
+            )
 
             def run_web() -> None:
                 app.run(host=web_host, port=web_port, threaded=True, use_reloader=False)
@@ -150,6 +159,7 @@ async def run_controller(
 
     finally:
         # Cleanup
+        virtual_source_manager.stop()
         await sink_controller.cleanup_all()
         await router.stop()
         await controller.stop()
@@ -205,8 +215,17 @@ def main() -> int:
         health_check_interval=config.get("discovery", {}).get("health_check_interval", 10.0),
     )
 
-    # Create routing engine
-    router = RoutingEngine(controller)
+    # Create virtual source manager
+    virtual_source_manager = VirtualSourceManager()
+
+    # Load pre-configured virtual sources
+    vs_config = config.get("virtual_sources", [])
+    if vs_config:
+        virtual_source_manager.load_from_config(vs_config)
+        logger.info(f"Loaded {len(vs_config)} virtual sources from config")
+
+    # Create routing engine with virtual source manager
+    router = RoutingEngine(controller, virtual_source_manager)
 
     # Create sink controller for direct fills
     sink_controller = SinkController(controller)
@@ -237,6 +256,7 @@ def main() -> int:
                 controller=controller,
                 router=router,
                 sink_controller=sink_controller,
+                virtual_source_manager=virtual_source_manager,
                 web_enabled=web_enabled,
                 web_host=web_host,
                 web_port=web_port,

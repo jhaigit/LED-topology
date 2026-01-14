@@ -30,11 +30,20 @@
         <tr data-route-id="{{ route.id }}">
             <td>{{ route.name }}</td>
             <td class="source-name" data-source-id="{{ route.source_id }}">
+                {% set source_found = false %}
                 {% for source in sources if source.id == route.source_id %}
                     {{ source.name }}
-                {% else %}
-                    {{ route.source_id[:8] }}...
+                    {% set source_found = true %}
                 {% endfor %}
+                {% if not source_found %}
+                    {% for vs in virtual_sources if vs.id == route.source_id %}
+                        <span class="virtual-badge">VS</span> {{ vs.name }}
+                        {% set source_found = true %}
+                    {% endfor %}
+                {% endif %}
+                {% if not source_found %}
+                    {{ route.source_id[:8] }}...
+                {% endif %}
             </td>
             <td class="sink-name" data-sink-id="{{ route.sink_id }}">
                 {% for sink in sinks if sink.id == route.sink_id %}
@@ -90,6 +99,15 @@
     margin-left: 4px;
     cursor: help;
 }
+.virtual-badge {
+    display: inline-block;
+    background: var(--success, #28a745);
+    color: white;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.7em;
+    margin-right: 4px;
+}
 .dims-info {
     font-family: monospace;
     font-size: 0.9em;
@@ -122,11 +140,24 @@
                 <label for="source_id">Source</label>
                 <select id="source_id" name="source_id" required>
                     <option value="">Select a source...</option>
-                    {% for source in sources %}
-                    <option value="{{ source.id }}" {% if not source.online %}disabled{% endif %}>
-                        {{ source.name }} {% if not source.online %}(offline){% endif %}
-                    </option>
-                    {% endfor %}
+                    {% if sources %}
+                    <optgroup label="Physical Sources">
+                        {% for source in sources %}
+                        <option value="{{ source.id }}" {% if not source.online %}disabled{% endif %}>
+                            {{ source.name }} {% if not source.online %}(offline){% endif %}
+                        </option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endif %}
+                    {% if virtual_sources %}
+                    <optgroup label="Virtual Sources">
+                        {% for vs in virtual_sources %}
+                        <option value="{{ vs.id }}">
+                            {{ vs.name }} ({{ vs.source_type }})
+                        </option>
+                        {% endfor %}
+                    </optgroup>
+                    {% endif %}
                 </select>
             </div>
             <div class="form-group">

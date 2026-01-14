@@ -10,6 +10,7 @@ from flask import Flask, jsonify, render_template, request
 from ltp_controller.controller import Controller
 from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngine
 from ltp_controller.sink_control import SinkController
+from ltp_controller.virtual_sources import VirtualSourceManager, VIRTUAL_SOURCE_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,7 @@ def create_app(
     controller: Controller,
     router: RoutingEngine,
     sink_controller: SinkController | None = None,
+    virtual_source_manager: VirtualSourceManager | None = None,
     event_loop: asyncio.AbstractEventLoop | None = None,
 ) -> Flask:
     """Create and configure the Flask application."""
@@ -34,6 +36,7 @@ def create_app(
     app.config["controller"] = controller
     app.config["router"] = router
     app.config["sink_controller"] = sink_controller
+    app.config["virtual_source_manager"] = virtual_source_manager
     app.config["event_loop"] = event_loop
 
     # Helper to run async code from sync Flask handlers
@@ -78,6 +81,15 @@ def create_app(
             routes=router.routes,
             sources=controller.sources,
             sinks=controller.sinks,
+            virtual_sources=virtual_source_manager.sources if virtual_source_manager else [],
+        )
+
+    @app.route("/virtual-sources")
+    def virtual_sources_page() -> str:
+        """Virtual sources management page."""
+        return render_template(
+            "virtual_sources.html",
+            virtual_sources=virtual_source_manager.sources if virtual_source_manager else [],
         )
 
     # ==================== API: Sources ====================
@@ -235,13 +247,58 @@ def create_app(
 
         return jsonify(result)
 
+    # ==================== API: All Sources (Physical + Virtual) ====================
+
+    @app.route("/api/all-sources")
+    def api_all_sources() -> Any:
+        """List all sources (physical and virtual) for route selection."""
+        sources = []
+
+        # Add physical sources
+        for s in controller.sources:
+            sources.append({
+                "id": s.device.id,
+                "name": s.name,
+                "type": "physical",
+                "online": s.online,
+                "properties": s.device.properties,
+            })
+
+        # Add virtual sources
+        if virtual_source_manager:
+            for vs in virtual_source_manager.sources:
+                sources.append({
+                    "id": vs.id,
+                    "name": vs.name,
+                    "type": "virtual",
+                    "online": True,  # Virtual sources are always "online"
+                    "source_type": vs.source_type,
+                    "running": vs.is_running,
+                })
+
+        return jsonify(sources)
+
     # ==================== API: Routes ====================
 
     def _enrich_route(route_dict: dict) -> dict:
         """Add source and sink names to route data."""
-        source = controller.get_source(route_dict["source_id"])
+        source_id = route_dict["source_id"]
+        source = controller.get_source(source_id)
+
+        # Check if it's a virtual source
+        if not source and virtual_source_manager:
+            vs = virtual_source_manager.get(source_id)
+            if vs:
+                route_dict["source_name"] = vs.name
+                route_dict["source_type"] = "virtual"
+            else:
+                route_dict["source_name"] = "Unknown"
+                route_dict["source_type"] = "unknown"
+        else:
+            route_dict["source_name"] = source.name if source else "Unknown"
+            route_dict["source_type"] = "physical"
+
         sink = controller.get_sink(route_dict["sink_id"])
-        route_dict["source_name"] = source.name if source else "Unknown"
         route_dict["sink_name"] = sink.name if sink else "Unknown"
         return route_dict
 
@@ -355,6 +412,80 @@ def create_app(
         run_async(controller.refresh_discovery())
         return jsonify({"status": "ok", "message": "Discovery refresh triggered"})
 
+    # ==================== API: Configuration ====================
+
+    @app.route("/api/config/export")
+    def api_config_export() -> Any:
+        """Export current configuration as YAML."""
+        import yaml
+
+        config = {
+            "virtual_sources": virtual_source_manager.to_config() if virtual_source_manager else [],
+            "routes": [],
+        }
+
+        # Export routes
+        for route in router.routes:
+            route_data = {
+                "name": route.name,
+                "source": route.source_id,
+                "sink": route.sink_id,
+                "mode": route.mode.value,
+                "enabled": route.enabled,
+            }
+            if route.transform:
+                route_data["transform"] = route.transform.to_dict()
+            config["routes"].append(route_data)
+
+        yaml_content = yaml.dump(config, default_flow_style=False, sort_keys=False)
+        return yaml_content, 200, {"Content-Type": "text/yaml"}
+
+    @app.route("/api/config/virtual-sources/export")
+    def api_config_vs_export() -> Any:
+        """Export virtual sources configuration."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+        return jsonify(virtual_source_manager.to_config())
+
+    @app.route("/api/config/save", methods=["POST"])
+    def api_config_save() -> Any:
+        """Save current configuration to file.
+
+        Request body: {"path": "/path/to/config.yaml"} or empty for default
+        """
+        import yaml
+
+        data = request.get_json() or {}
+        config_path = data.get("path")
+
+        if not config_path:
+            return jsonify({"error": "Config path not specified"}), 400
+
+        config = {
+            "virtual_sources": virtual_source_manager.to_config() if virtual_source_manager else [],
+            "routes": [],
+        }
+
+        # Export routes
+        for route in router.routes:
+            route_data = {
+                "name": route.name,
+                "source": route.source_id,
+                "sink": route.sink_id,
+                "mode": route.mode.value,
+                "enabled": route.enabled,
+            }
+            if route.transform:
+                route_data["transform"] = route.transform.to_dict()
+            config["routes"].append(route_data)
+
+        try:
+            with open(config_path, "w") as f:
+                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            return jsonify({"status": "ok", "path": config_path})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
     # ==================== API: Preview ====================
 
     @app.route("/api/routes/<route_id>/preview")
@@ -413,5 +544,179 @@ def create_app(
             sources=controller.sources,
             sinks=controller.sinks,
         )
+
+    # ==================== API: Virtual Sources ====================
+
+    @app.route("/api/virtual-sources")
+    def api_virtual_sources_list() -> Any:
+        """List all virtual sources."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+        return jsonify(virtual_source_manager.to_list())
+
+    @app.route("/api/virtual-sources/types")
+    def api_virtual_source_types() -> Any:
+        """List available virtual source types."""
+        types = []
+        for type_name, type_class in VIRTUAL_SOURCE_TYPES.items():
+            types.append({
+                "type": type_name,
+                "name": type_name.replace("_", " ").title(),
+                "category": "pattern" if "Pattern" in type_class.__name__ else "visualizer",
+            })
+        return jsonify(types)
+
+    @app.route("/api/virtual-sources", methods=["POST"])
+    def api_virtual_sources_create() -> Any:
+        """Create a new virtual source."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        source_type = data.get("type")
+        if not source_type:
+            return jsonify({"error": "Missing 'type' field"}), 400
+
+        if source_type not in VIRTUAL_SOURCE_TYPES:
+            return jsonify({"error": f"Unknown source type: {source_type}"}), 400
+
+        source = virtual_source_manager.create(
+            source_type=source_type,
+            name=data.get("name"),
+            output_dimensions=data.get("output_dimensions", [60]),
+            frame_rate=data.get("frame_rate", 30.0),
+            adaptive_dimensions=data.get("adaptive_dimensions", False),
+            enabled=data.get("enabled", True),
+            control_values=data.get("control_values", {}),
+        )
+
+        if source:
+            return jsonify(source.to_dict()), 201
+        return jsonify({"error": "Failed to create virtual source"}), 500
+
+    @app.route("/api/virtual-sources/<source_id>")
+    def api_virtual_source_get(source_id: str) -> Any:
+        """Get a virtual source."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+        return jsonify(source.to_dict())
+
+    @app.route("/api/virtual-sources/<source_id>", methods=["PUT"])
+    def api_virtual_source_update(source_id: str) -> Any:
+        """Update a virtual source."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Update name if provided
+        if "name" in data:
+            source.config.name = data["name"]
+
+        # Update enabled state
+        if "enabled" in data:
+            source.config.enabled = data["enabled"]
+            if data["enabled"] and not source.is_running:
+                source.start()
+            elif not data["enabled"] and source.is_running:
+                source.stop()
+
+        # Update control values
+        if "control_values" in data:
+            for control_id, value in data["control_values"].items():
+                source.set_control(control_id, value)
+
+        return jsonify(source.to_dict())
+
+    @app.route("/api/virtual-sources/<source_id>", methods=["DELETE"])
+    def api_virtual_source_delete(source_id: str) -> Any:
+        """Delete a virtual source."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        if virtual_source_manager.remove(source_id):
+            return jsonify({"status": "ok"})
+        return jsonify({"error": "Virtual source not found"}), 404
+
+    @app.route("/api/virtual-sources/<source_id>/controls", methods=["GET", "PUT"])
+    def api_virtual_source_controls(source_id: str) -> Any:
+        """Get or set virtual source controls."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        if request.method == "GET":
+            return jsonify(source.controls.get_values())
+
+        # PUT
+        values = request.get_json()
+        if not values:
+            return jsonify({"error": "No values provided"}), 400
+
+        results = {}
+        for control_id, value in values.items():
+            success = source.set_control(control_id, value)
+            results[control_id] = "ok" if success else "error"
+
+        return jsonify({"status": "ok", "results": results})
+
+    @app.route("/api/virtual-sources/<source_id>/data", methods=["POST"])
+    def api_virtual_source_data(source_id: str) -> Any:
+        """Push data to a virtual source (for visualizers)."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        data = request.get_json()
+        if data is None:
+            return jsonify({"error": "No data provided"}), 400
+
+        source.set_data(data)
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/virtual-sources/<source_id>/start", methods=["POST"])
+    def api_virtual_source_start(source_id: str) -> Any:
+        """Start a virtual source."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        source.start()
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/virtual-sources/<source_id>/stop", methods=["POST"])
+    def api_virtual_source_stop(source_id: str) -> Any:
+        """Stop a virtual source."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        source.stop()
+        return jsonify({"status": "ok"})
 
     return app

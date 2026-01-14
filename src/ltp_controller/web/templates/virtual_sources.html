@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+
+{% block title %}Virtual Sources - LTP Controller{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Virtual Sources</h1>
+        <p class="subtitle">Controller-generated pattern and data sources</p>
+    </div>
+    <button class="btn btn-primary" onclick="showCreateModal()">Create Virtual Source</button>
+</div>
+
+{% if virtual_sources %}
+<div class="device-grid">
+    {% for vs in virtual_sources %}
+    <div class="device-card {% if vs.is_running %}online{% else %}offline{% endif %}">
+        <div class="device-header">
+            <span class="status-dot"></span>
+            <h3>{{ vs.name }}</h3>
+        </div>
+        <p class="device-description">Type: {{ vs.source_type }}</p>
+
+        <div class="device-details">
+            <div class="detail-row">
+                <span class="label">ID:</span>
+                <span class="value">{{ vs.id }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Dimensions:</span>
+                <span class="value">{{ vs.config.output_dimensions|join('x') }}</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Frame Rate:</span>
+                <span class="value">{{ vs.config.frame_rate }} Hz</span>
+            </div>
+            <div class="detail-row">
+                <span class="label">Status:</span>
+                <span class="value">{% if vs.is_running %}Running{% else %}Stopped{% endif %}</span>
+            </div>
+        </div>
+
+        <div class="device-controls">
+            <h4>Controls</h4>
+            <ul class="control-list" id="controls-{{ vs.id }}">
+                {% for control in vs.controls.to_list() %}
+                <li class="control-item" data-control-id="{{ control.id }}">
+                    <span class="control-name">{{ control.name }}</span>
+                    {% if control.type == 'number' %}
+                    <input type="range"
+                           class="control-slider"
+                           data-source-id="{{ vs.id }}"
+                           data-control-id="{{ control.id }}"
+                           min="{{ control.min }}"
+                           max="{{ control.max }}"
+                           step="{{ control.step }}"
+                           value="{{ vs.controls.get_value(control.id) }}"
+                           onchange="updateControl('{{ vs.id }}', '{{ control.id }}', parseFloat(this.value))">
+                    <span class="control-value">{{ vs.controls.get_value(control.id) }}</span>
+                    {% elif control.type == 'boolean' %}
+                    <label class="toggle">
+                        <input type="checkbox"
+                               data-source-id="{{ vs.id }}"
+                               data-control-id="{{ control.id }}"
+                               {% if vs.controls.get_value(control.id) %}checked{% endif %}
+                               onchange="updateControl('{{ vs.id }}', '{{ control.id }}', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    {% elif control.type == 'enum' %}
+                    <select data-source-id="{{ vs.id }}"
+                            data-control-id="{{ control.id }}"
+                            onchange="updateControl('{{ vs.id }}', '{{ control.id }}', this.value)">
+                        {% for opt in control.options %}
+                        <option value="{{ opt.value }}" {% if opt.value == vs.controls.get_value(control.id) %}selected{% endif %}>
+                            {{ opt.label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    {% elif control.type == 'color' %}
+                    <input type="color"
+                           data-source-id="{{ vs.id }}"
+                           data-control-id="{{ control.id }}"
+                           value="{{ vs.controls.get_value(control.id) }}"
+                           onchange="updateControl('{{ vs.id }}', '{{ control.id }}', this.value)">
+                    {% else %}
+                    <span class="control-value">{{ vs.controls.get_value(control.id) }}</span>
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+
+        <div class="device-actions">
+            {% if vs.is_running %}
+            <button class="btn btn-sm btn-warning" onclick="stopSource('{{ vs.id }}')">Stop</button>
+            {% else %}
+            <button class="btn btn-sm btn-success" onclick="startSource('{{ vs.id }}')">Start</button>
+            {% endif %}
+            <button class="btn btn-sm btn-danger" onclick="deleteSource('{{ vs.id }}')">Delete</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state-large">
+    <p>No virtual sources created.</p>
+    <p>Create a virtual source to generate patterns or visualize data.</p>
+</div>
+{% endif %}
+
+<!-- Create Modal -->
+<div id="createModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Create Virtual Source</h2>
+            <button class="close-btn" onclick="hideCreateModal()">&times;</button>
+        </div>
+        <form id="createForm" onsubmit="createSource(event)">
+            <div class="form-group">
+                <label for="vs-name">Name</label>
+                <input type="text" id="vs-name" name="name" required placeholder="My Pattern">
+            </div>
+            <div class="form-group">
+                <label for="vs-type">Type</label>
+                <select id="vs-type" name="type" required>
+                    <option value="">Select type...</option>
+                    <optgroup label="Patterns">
+                        <option value="rainbow">Rainbow</option>
+                        <option value="chase">Chase</option>
+                        <option value="cylon">Cylon Eye</option>
+                        <option value="flame">Flame</option>
+                        <option value="sparkle">Sparkle</option>
+                        <option value="solid">Solid Color</option>
+                        <option value="gradient">Gradient</option>
+                        <option value="breathe">Breathe</option>
+                        <option value="strobe">Strobe</option>
+                    </optgroup>
+                    <optgroup label="Visualizers">
+                        <option value="bar_graph">Bar Graph</option>
+                        <option value="multi_bar">Multi-Bar</option>
+                        <option value="vu_meter">VU Meter</option>
+                    </optgroup>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="vs-pixels">Pixel Count</label>
+                <input type="number" id="vs-pixels" name="pixels" value="60" min="1" max="1000">
+            </div>
+            <div class="form-group">
+                <label for="vs-fps">Frame Rate (Hz)</label>
+                <input type="number" id="vs-fps" name="fps" value="30" min="1" max="120" step="1">
+            </div>
+            <div class="form-actions">
+                <button type="button" class="btn" onclick="hideCreateModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showCreateModal() {
+    document.getElementById('createModal').style.display = 'flex';
+}
+
+function hideCreateModal() {
+    document.getElementById('createModal').style.display = 'none';
+}
+
+function createSource(event) {
+    event.preventDefault();
+    const form = event.target;
+    const data = {
+        name: form.name.value,
+        type: form.type.value,
+        output_dimensions: [parseInt(form.pixels.value)],
+        frame_rate: parseFloat(form.fps.value),
+        enabled: true
+    };
+
+    fetch('/api/virtual-sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.id) {
+            location.reload();
+        } else {
+            alert('Error creating source: ' + (data.error || 'Unknown error'));
+        }
+    });
+}
+
+function updateControl(sourceId, controlId, value) {
+    fetch(`/api/virtual-sources/${sourceId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [controlId]: value })
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Update displayed value if it's a slider
+        const li = document.querySelector(`#controls-${sourceId} [data-control-id="${controlId}"]`);
+        if (li) {
+            const valueSpan = li.querySelector('.control-value');
+            if (valueSpan && typeof value === 'number') {
+                valueSpan.textContent = value.toFixed(2);
+            }
+        }
+    });
+}
+
+function startSource(id) {
+    fetch(`/api/virtual-sources/${id}/start`, { method: 'POST' })
+        .then(() => location.reload());
+}
+
+function stopSource(id) {
+    fetch(`/api/virtual-sources/${id}/stop`, { method: 'POST' })
+        .then(() => location.reload());
+}
+
+function deleteSource(id) {
+    if (confirm('Are you sure you want to delete this virtual source?')) {
+        fetch(`/api/virtual-sources/${id}`, { method: 'DELETE' })
+            .then(() => location.reload());
+    }
+}
+</script>
+<style>
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+.page-header h1 {
+    margin: 0;
+}
+.page-header .subtitle {
+    margin: 0.25rem 0 0 0;
+}
+.control-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--border, #333);
+}
+.control-item:last-child {
+    border-bottom: none;
+}
+.control-name {
+    flex: 1;
+    font-size: 0.9em;
+}
+.control-slider {
+    width: 80px;
+    margin: 0 0.5rem;
+}
+.control-value {
+    min-width: 50px;
+    text-align: right;
+    font-family: monospace;
+    font-size: 0.85em;
+}
+.toggle {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 20px;
+}
+.toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #333;
+    transition: 0.2s;
+    border-radius: 20px;
+}
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.2s;
+    border-radius: 50%;
+}
+.toggle input:checked + .toggle-slider {
+    background-color: var(--success, #28a745);
+}
+.toggle input:checked + .toggle-slider:before {
+    transform: translateX(20px);
+}
+</style>
+{% endblock %}
