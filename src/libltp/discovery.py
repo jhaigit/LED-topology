@@ -19,8 +19,10 @@ def _avahi_available() -> bool:
 
 from libltp.types import (
     ColorFormat,
+    DataType,
     DeviceType,
     PROTOCOL_VERSION,
+    ScalarFormat,
     SERVICE_TYPE_CONTROLLER,
     SERVICE_TYPE_SINK,
     SERVICE_TYPE_SOURCE,
@@ -292,9 +294,28 @@ class SinkAdvertiser(ServiceAdvertiser):
         color_format: ColorFormat = ColorFormat.RGB,
         max_rate: int = 60,
         has_controls: bool = False,
+        data_type: DataType = DataType.VISUAL,
+        scalar_format: ScalarFormat | None = None,
+        channels: int = 0,
     ):
         dims = dimensions or [pixels]
         dim_str = "x".join(str(d) for d in dims)
+
+        properties = {
+            "type": device_type.value,
+            "pixels": str(pixels),
+            "dim": dim_str,
+            "color": color_format.name.lower(),
+            "rate": str(max_rate),
+            "data": data_type.value,
+        }
+
+        # Add scalar-specific properties
+        if data_type == DataType.SCALAR:
+            if scalar_format:
+                properties["scalar"] = scalar_format.name.lower()
+            if channels > 0:
+                properties["channels"] = str(channels)
 
         super().__init__(
             service_type=SERVICE_TYPE_SINK,
@@ -304,13 +325,7 @@ class SinkAdvertiser(ServiceAdvertiser):
             display_name=display_name,
             description=description,
             has_controls=has_controls,
-            properties={
-                "type": device_type.value,
-                "pixels": str(pixels),
-                "dim": dim_str,
-                "color": color_format.name.lower(),
-                "rate": str(max_rate),
-            },
+            properties=properties,
         )
 
 
@@ -329,9 +344,27 @@ class SourceAdvertiser(ServiceAdvertiser):
         rate: int = 30,
         mode: SourceMode = SourceMode.STREAM,
         has_controls: bool = False,
+        data_type: DataType = DataType.VISUAL,
+        scalar_format: ScalarFormat | None = None,
+        channels: int = 0,
     ):
         dims = dimensions or [60]
         output_str = "x".join(str(d) for d in dims)
+
+        properties = {
+            "output": output_str,
+            "color": color_format.name.lower(),
+            "rate": str(rate),
+            "mode": mode.value,
+            "data": data_type.value,
+        }
+
+        # Add scalar-specific properties
+        if data_type == DataType.SCALAR:
+            if scalar_format:
+                properties["scalar"] = scalar_format.name.lower()
+            if channels > 0:
+                properties["channels"] = str(channels)
 
         super().__init__(
             service_type=SERVICE_TYPE_SOURCE,
@@ -341,12 +374,7 @@ class SourceAdvertiser(ServiceAdvertiser):
             display_name=display_name,
             description=description,
             has_controls=has_controls,
-            properties={
-                "output": output_str,
-                "color": color_format.name.lower(),
-                "rate": str(rate),
-                "mode": mode.value,
-            },
+            properties=properties,
         )
 
 

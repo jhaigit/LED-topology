@@ -13,6 +13,7 @@ from libltp.types import (
     ErrorCode,
     MessageType,
     PACKET_MAGIC,
+    ScalarFormat,
     StreamAction,
 )
 
@@ -402,6 +403,200 @@ class DataPacket:
         return result
 
 
+class ScalarDataPacket:
+    """Binary data packet for scalar sensor/control data over UDP.
+
+    Supports multiple scalar formats:
+    - FLOAT32: 4 bytes per channel, IEEE 754 float
+    - INT16: 2 bytes per channel, signed integer
+    - UINT8: 1 byte per channel, unsigned integer
+    - BOOLEAN: 1 bit per channel, packed into bytes
+    """
+
+    HEADER_FORMAT = ">HBBI"  # magic(2), ver+flags(1), reserved(1), seq(4)
+    HEADER_SIZE = 8
+    FRAME_HEADER_FORMAT = ">BBH"  # scalar_fmt(1), encoding(1), channel_count(2)
+    FRAME_HEADER_SIZE = 4
+
+    # Flag to distinguish scalar from visual packets
+    FLAG_SCALAR = 0x08
+
+    def __init__(
+        self,
+        sequence: int,
+        scalar_format: ScalarFormat,
+        channel_data: np.ndarray | list[float] | list[int] | list[bool],
+        encoding: Encoding = Encoding.RAW,
+    ):
+        self.sequence = sequence
+        self.scalar_format = scalar_format
+        self.encoding = encoding
+        self.flags = self.FLAG_SCALAR
+
+        # Convert input to numpy array with appropriate dtype
+        if isinstance(channel_data, np.ndarray):
+            self.channel_data = channel_data
+        else:
+            self.channel_data = self._to_numpy(channel_data)
+
+    def _to_numpy(self, data: list) -> np.ndarray:
+        """Convert list data to numpy array with appropriate dtype."""
+        if self.scalar_format == ScalarFormat.FLOAT32:
+            return np.array(data, dtype=np.float32)
+        elif self.scalar_format == ScalarFormat.INT16:
+            return np.array(data, dtype=np.int16)
+        elif self.scalar_format == ScalarFormat.UINT8:
+            return np.array(data, dtype=np.uint8)
+        elif self.scalar_format == ScalarFormat.BOOLEAN:
+            return np.array(data, dtype=np.bool_)
+        raise ProtocolError(
+            ErrorCode.INVALID_FORMAT, f"Unknown scalar format: {self.scalar_format}"
+        )
+
+    @property
+    def channel_count(self) -> int:
+        """Return the number of channels in this packet."""
+        return len(self.channel_data)
+
+    def to_bytes(self) -> bytes:
+        """Serialize packet to bytes."""
+        # Packet header
+        ver_flags = (0 << 4) | (self.flags & 0x0F)
+        header = struct.pack(
+            self.HEADER_FORMAT,
+            PACKET_MAGIC,
+            ver_flags,
+            0,  # reserved
+            self.sequence & 0xFFFFFFFF,
+        )
+
+        # Frame header
+        frame_header = struct.pack(
+            self.FRAME_HEADER_FORMAT,
+            self.scalar_format.value,
+            self.encoding.value,
+            self.channel_count,
+        )
+
+        # Channel data
+        channel_bytes = self._encode_data()
+
+        return header + frame_header + channel_bytes
+
+    def _encode_data(self) -> bytes:
+        """Encode channel data to bytes."""
+        if self.scalar_format == ScalarFormat.FLOAT32:
+            return self.channel_data.astype(np.float32).tobytes()
+        elif self.scalar_format == ScalarFormat.INT16:
+            return self.channel_data.astype(np.int16).tobytes()
+        elif self.scalar_format == ScalarFormat.UINT8:
+            return self.channel_data.astype(np.uint8).tobytes()
+        elif self.scalar_format == ScalarFormat.BOOLEAN:
+            # Bit-pack boolean values
+            result = bytearray()
+            for i in range(0, len(self.channel_data), 8):
+                byte = 0
+                for j in range(8):
+                    if i + j < len(self.channel_data) and self.channel_data[i + j]:
+                        byte |= 1 << (7 - j)
+                result.append(byte)
+            return bytes(result)
+        raise ProtocolError(
+            ErrorCode.INVALID_FORMAT, f"Unknown scalar format: {self.scalar_format}"
+        )
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "ScalarDataPacket":
+        """Parse packet from bytes."""
+        if len(data) < cls.HEADER_SIZE + cls.FRAME_HEADER_SIZE:
+            raise ProtocolError(ErrorCode.INVALID_FORMAT, "Packet too small")
+
+        # Parse packet header
+        magic, ver_flags, _, sequence = struct.unpack(
+            cls.HEADER_FORMAT, data[: cls.HEADER_SIZE]
+        )
+
+        if magic != PACKET_MAGIC:
+            raise ProtocolError(
+                ErrorCode.INVALID_FORMAT, f"Invalid magic: 0x{magic:04X}"
+            )
+
+        flags = ver_flags & 0x0F
+        if not (flags & cls.FLAG_SCALAR):
+            raise ProtocolError(
+                ErrorCode.INVALID_FORMAT, "Not a scalar packet (FLAG_SCALAR not set)"
+            )
+
+        # Parse frame header
+        frame_start = cls.HEADER_SIZE
+        scalar_fmt, encoding, channel_count = struct.unpack(
+            cls.FRAME_HEADER_FORMAT,
+            data[frame_start : frame_start + cls.FRAME_HEADER_SIZE],
+        )
+
+        scalar_format = ScalarFormat(scalar_fmt)
+        encoding = Encoding(encoding)
+
+        # Parse channel data
+        data_start = frame_start + cls.FRAME_HEADER_SIZE
+        data_bytes = data[data_start:]
+
+        channel_data = cls._decode_data(data_bytes, scalar_format, channel_count)
+
+        packet = cls(sequence, scalar_format, channel_data, encoding)
+        return packet
+
+    @staticmethod
+    def _decode_data(
+        data: bytes, scalar_format: ScalarFormat, channel_count: int
+    ) -> np.ndarray:
+        """Decode channel data from bytes."""
+        if scalar_format == ScalarFormat.FLOAT32:
+            expected_size = channel_count * 4
+            if len(data) < expected_size:
+                raise ProtocolError(
+                    ErrorCode.INVALID_FORMAT,
+                    f"Insufficient data: expected {expected_size}, got {len(data)}",
+                )
+            return np.frombuffer(data[:expected_size], dtype=np.float32)
+
+        elif scalar_format == ScalarFormat.INT16:
+            expected_size = channel_count * 2
+            if len(data) < expected_size:
+                raise ProtocolError(
+                    ErrorCode.INVALID_FORMAT,
+                    f"Insufficient data: expected {expected_size}, got {len(data)}",
+                )
+            return np.frombuffer(data[:expected_size], dtype=np.int16)
+
+        elif scalar_format == ScalarFormat.UINT8:
+            if len(data) < channel_count:
+                raise ProtocolError(
+                    ErrorCode.INVALID_FORMAT,
+                    f"Insufficient data: expected {channel_count}, got {len(data)}",
+                )
+            return np.frombuffer(data[:channel_count], dtype=np.uint8)
+
+        elif scalar_format == ScalarFormat.BOOLEAN:
+            # Unpack bit-packed booleans
+            expected_bytes = (channel_count + 7) // 8
+            if len(data) < expected_bytes:
+                raise ProtocolError(
+                    ErrorCode.INVALID_FORMAT,
+                    f"Insufficient data: expected {expected_bytes}, got {len(data)}",
+                )
+            result = np.zeros(channel_count, dtype=np.bool_)
+            for i in range(channel_count):
+                byte_idx = i // 8
+                bit_idx = 7 - (i % 8)
+                result[i] = bool(data[byte_idx] & (1 << bit_idx))
+            return result
+
+        raise ProtocolError(
+            ErrorCode.INVALID_FORMAT, f"Unknown scalar format: {scalar_format}"
+        )
+
+
 def create_pixel_buffer(
     pixel_count: int, color_format: ColorFormat = ColorFormat.RGB
 ) -> np.ndarray:
@@ -414,3 +609,16 @@ def create_matrix_buffer(
 ) -> np.ndarray:
     """Create an empty matrix pixel buffer."""
     return np.zeros((height, width, color_format.bytes_per_pixel), dtype=np.uint8)
+
+
+def create_scalar_buffer(
+    channel_count: int, scalar_format: ScalarFormat = ScalarFormat.FLOAT32
+) -> np.ndarray:
+    """Create an empty scalar channel buffer."""
+    dtype_map = {
+        ScalarFormat.FLOAT32: np.float32,
+        ScalarFormat.INT16: np.int16,
+        ScalarFormat.UINT8: np.uint8,
+        ScalarFormat.BOOLEAN: np.bool_,
+    }
+    return np.zeros(channel_count, dtype=dtype_map[scalar_format])

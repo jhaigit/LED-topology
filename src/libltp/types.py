@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class ColorFormat(IntEnum):
-    """Color format identifiers for data channel."""
+    """Color format identifiers for visual data channel."""
 
     RGB = 0x01
     RGBW = 0x02
@@ -24,6 +24,46 @@ class ColorFormat(IntEnum):
             ColorFormat.HSV: 3,
             ColorFormat.GRAYSCALE: 1,
         }[self]
+
+
+class ScalarFormat(IntEnum):
+    """Data format identifiers for scalar data channels."""
+
+    FLOAT32 = 0x10  # 4 bytes per channel, IEEE 754 float
+    INT16 = 0x11    # 2 bytes per channel, signed integer
+    UINT8 = 0x12    # 1 byte per channel, unsigned integer
+    BOOLEAN = 0x13  # 1 bit per channel, packed into bytes
+
+    @property
+    def bytes_per_channel(self) -> int:
+        """Return the number of bytes per channel for this format."""
+        return {
+            ScalarFormat.FLOAT32: 4,
+            ScalarFormat.INT16: 2,
+            ScalarFormat.UINT8: 1,
+            ScalarFormat.BOOLEAN: 0,  # Special: bit-packed, use bits_per_channel
+        }[self]
+
+    @property
+    def bits_per_channel(self) -> int:
+        """Return the number of bits per channel (for BOOLEAN)."""
+        return {
+            ScalarFormat.FLOAT32: 32,
+            ScalarFormat.INT16: 16,
+            ScalarFormat.UINT8: 8,
+            ScalarFormat.BOOLEAN: 1,
+        }[self]
+
+
+# Combined data format type for protocol use
+DataFormat = ColorFormat | ScalarFormat
+
+
+class DataType(str, Enum):
+    """Data type category for sources and sinks."""
+
+    VISUAL = "visual"   # LED pixel data (RGB, RGBW, etc.)
+    SCALAR = "scalar"   # Sensor/control data (float, int, bool)
 
 
 class Encoding(IntEnum):
@@ -176,6 +216,33 @@ class Coordinate(BaseModel):
     z: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+class Channel(BaseModel):
+    """Metadata for a single scalar data channel."""
+
+    index: int
+    id: str  # Unique identifier (e.g., "temperature", "motion")
+    name: str  # Human-readable name
+    type: str = "float32"  # float32, int16, uint8, boolean
+    unit: str = ""  # Optional unit (e.g., "°C", "%", "Hz")
+    min: float | None = None  # Optional minimum value
+    max: float | None = None  # Optional maximum value
+    readonly: bool = True  # True for sensors, False for outputs
+
+
+class ChannelArray(BaseModel):
+    """Metadata for an array of homogeneous scalar data channels."""
+
+    id: str  # Unique identifier (e.g., "cpu_cores", "zone_temps")
+    name: str  # Human-readable name
+    type: str = "float32"  # float32, int16, uint8, boolean
+    unit: str = ""  # Optional unit
+    min: float | None = None
+    max: float | None = None
+    count: int  # Number of channels in this array
+    start_index: int = 0  # Starting index in the data packet
+    readonly: bool = True
+
+
 class LinearTopology(BaseModel):
     """Linear (1D) topology description."""
 
@@ -225,6 +292,12 @@ class SinkCapabilities(BaseModel):
     max_refresh_hz: int = 60
     controls: list[Any] = Field(default_factory=list)
 
+    # Scalar data support (for dimmers, switches, relays)
+    data_type: DataType = DataType.VISUAL  # visual or scalar
+    scalar_formats: list[ScalarFormat] = Field(default_factory=list)  # Supported scalar formats
+    channels: list[Channel] = Field(default_factory=list)  # Individual channel metadata
+    channel_arrays: list[ChannelArray] = Field(default_factory=list)  # Array channel metadata
+
 
 class SourceCapabilities(BaseModel):
     """Source device capabilities."""
@@ -236,6 +309,12 @@ class SourceCapabilities(BaseModel):
     mode: SourceMode
     source_type: SourceType = SourceType.PATTERN
     controls: list[Any] = Field(default_factory=list)
+
+    # Scalar data support (for sensors)
+    data_type: DataType = DataType.VISUAL  # visual or scalar
+    scalar_format: ScalarFormat | None = None  # Primary scalar format if data_type is scalar
+    channels: list[Channel] = Field(default_factory=list)  # Individual channel metadata
+    channel_arrays: list[ChannelArray] = Field(default_factory=list)  # Array channel metadata
 
 
 class StreamConfig(BaseModel):
@@ -277,11 +356,26 @@ class PacketHeader(BaseModel):
 
 
 class FrameHeader(BaseModel):
-    """Frame header within data packet."""
+    """Frame header within data packet (visual data)."""
 
     color_format: ColorFormat
     encoding: Encoding
     pixel_count: int
+
+
+class ScalarFrameHeader(BaseModel):
+    """Frame header for scalar data packets."""
+
+    scalar_format: ScalarFormat
+    encoding: Encoding = Encoding.RAW
+    channel_count: int
+
+    def data_size(self) -> int:
+        """Calculate the data payload size in bytes."""
+        if self.scalar_format == ScalarFormat.BOOLEAN:
+            # Bit-packed: ceil(channels / 8)
+            return (self.channel_count + 7) // 8
+        return self.channel_count * self.scalar_format.bytes_per_channel
 
 
 # Service type constants
