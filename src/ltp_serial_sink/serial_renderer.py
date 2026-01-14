@@ -114,6 +114,14 @@ class SerialRenderer:
         self._connected = False
         logger.info("Serial port closed")
 
+    def clear(self) -> None:
+        """Clear renderer state (called when stream stops).
+
+        Resets the last frame buffer so the next data is treated as new.
+        """
+        self._last_frame = None
+        logger.debug("Serial renderer state cleared")
+
     def render(self, pixels: np.ndarray) -> int:
         """Render pixel data to serial device.
 
@@ -144,10 +152,24 @@ class SerialRenderer:
 
         # Generate and send commands
         commands = self._generate_commands(changes)
+        total_commands = len(commands)
 
         # Limit commands per frame
+        truncated = False
         if len(commands) > self.config.max_commands_per_frame:
             commands = commands[:self.config.max_commands_per_frame]
+            truncated = True
+
+        # Log command stats at debug level
+        if truncated:
+            logger.warning(
+                f"Frame {self._frame_count}: truncated {total_commands} -> {len(commands)} commands "
+                f"(max_commands_per_frame={self.config.max_commands_per_frame})"
+            )
+        else:
+            logger.debug(
+                f"Frame {self._frame_count}: {len(commands)} commands from {len(changes)} changes"
+            )
 
         sent = 0
         for cmd in commands:
@@ -159,6 +181,10 @@ class SerialRenderer:
                 time.sleep(self.config.command_delay)
 
         self._frame_count += 1
+
+        if sent < len(commands):
+            logger.warning(f"Frame {self._frame_count - 1}: only sent {sent}/{len(commands)} commands")
+
         return sent
 
     def _detect_changes(self, pixels: np.ndarray) -> list[tuple[int, int, tuple[int, int, int]]]:

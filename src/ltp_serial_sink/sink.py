@@ -232,14 +232,19 @@ class SerialSink:
     def _handle_stream_control(self, message: Message) -> Message:
         """Handle stream control request (start/stop/pause)."""
         stream_id = message.data.get("stream_id")
-        action = StreamAction(message.data.get("action", "start"))
+        action_str = message.data.get("action", "start")
+        logger.info(f"STREAM_CONTROL received: stream_id={stream_id}, action={action_str}")
+        action = StreamAction(action_str)
 
         if action == StreamAction.START:
             self._stream_manager.start_stream(stream_id)
             logger.info(f"Started stream: {stream_id}")
         elif action == StreamAction.STOP:
+            logger.info(f"Processing STOP for stream {stream_id}")
             self._stream_manager.stop_stream(stream_id)
-            logger.info(f"Stopped stream: {stream_id}")
+            # Clear renderer state so next data is treated as new
+            self._renderer.clear()
+            logger.info(f"Stopped stream: {stream_id}, renderer cleared")
         elif action == StreamAction.PAUSE:
             logger.info(f"Paused stream: {stream_id}")
 
@@ -280,6 +285,11 @@ class SerialSink:
         We offload the blocking serial I/O to a thread pool to avoid
         blocking the event loop and causing health check failures.
         """
+        # Only process data if there's an active stream
+        if not self._stream_manager.active_streams:
+            logger.debug("Ignoring data packet - no active streams")
+            return
+
         # Update packet statistics
         pixel_count = packet.pixel_count
         packet_bytes = len(packet.pixel_data) * packet.pixel_data.itemsize if hasattr(packet.pixel_data, 'itemsize') else len(packet.pixel_data)
