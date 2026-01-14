@@ -287,6 +287,66 @@ If the sink doesn't appear, check:
 2. No firewall blocking mDNS (UDP port 5353)
 3. The sink is running: `sudo systemctl status ltp-serial-sink`
 
+### Sink Discovered but Shows Offline (Greyed Out)
+
+The sink appears in the controller but is greyed out / marked offline. This means mDNS discovery worked but the controller cannot connect to the sink's TCP control port.
+
+**On the sink machine** (Raspberry Pi):
+
+```bash
+# Check which port the sink is using (look for "Control:" in output)
+journalctl -u ltp-serial-sink | grep -i "control\|started"
+
+# Example output: "Serial sink started - Control: 45678, Data: 45679"
+# The control port in this example is 45678
+
+# Test if the port is listening
+ss -tlnp | grep python
+
+# Check firewall status
+sudo iptables -L -n
+# or if using ufw:
+sudo ufw status
+```
+
+**Open the firewall** (if blocking):
+
+```bash
+# Option 1: Disable firewall entirely (for testing)
+sudo ufw disable
+# or
+sudo iptables -F
+
+# Option 2: Allow LTP ports (more secure)
+# Allow a range for dynamic ports (LTP uses ephemeral ports by default)
+sudo ufw allow 40000:50000/tcp
+sudo ufw allow 40000:50000/udp
+
+# Or allow all from your local network
+sudo ufw allow from 192.168.1.0/24
+```
+
+**Test connectivity from the controller machine**:
+
+```bash
+# Replace IP and port with your sink's values
+nc -zv 192.168.1.100 45678
+
+# If it says "Connection refused" - sink not running or wrong port
+# If it hangs - firewall is blocking
+# If it says "succeeded" - connection works, check logs for other issues
+```
+
+**Check sink logs for errors**:
+
+```bash
+# On the sink machine
+journalctl -u ltp-serial-sink -f
+
+# Or if running manually:
+ltp-serial-sink --port /dev/ttyUSB0 --verbose
+```
+
 ### Python Version Too Old
 
 ```bash
