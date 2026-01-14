@@ -44,7 +44,9 @@ class DataFormat(IntEnum):
 
 ### 1.2 Channel Metadata
 
-New optional field in CAPABILITY_RESPONSE for non-visual devices:
+New optional field in CAPABILITY_RESPONSE for non-visual devices.
+
+#### Individual Channels (heterogeneous data)
 
 ```json
 {
@@ -76,6 +78,62 @@ New optional field in CAPABILITY_RESPONSE for non-visual devices:
       "type": "boolean",
       "readonly": true
     }
+  ]
+}
+```
+
+#### Channel Arrays (homogeneous data)
+
+For arrays of similar values (CPU cores, multi-zone sensors, etc.), use `channel_arrays`:
+
+```json
+{
+  "channel_arrays": [
+    {
+      "id": "cpu_cores",
+      "name": "CPU Core Usage",
+      "type": "float32",
+      "unit": "%",
+      "min": 0.0,
+      "max": 100.0,
+      "count": 8,
+      "start_index": 0,
+      "readonly": true
+    },
+    {
+      "id": "zone_temps",
+      "name": "Zone Temperatures",
+      "type": "float32",
+      "unit": "°C",
+      "min": -40.0,
+      "max": 85.0,
+      "count": 4,
+      "start_index": 8,
+      "readonly": true
+    }
+  ]
+}
+```
+
+This defines:
+- Channels 0-7: CPU core usage (8 × float32)
+- Channels 8-11: Zone temperatures (4 × float32)
+- Total: 12 channels, 48 bytes per packet
+
+**Dynamic array sizes**: The `count` can change between capability queries (e.g., different CPU counts). Controllers should re-query capabilities when a device reconnects.
+
+#### Mixed Channels and Arrays
+
+Both `channels` and `channel_arrays` can coexist:
+
+```json
+{
+  "channels": [
+    {"index": 12, "id": "ambient_temp", "name": "Ambient", "type": "float32", "unit": "°C"}
+  ],
+  "channel_arrays": [
+    {"id": "cpu_cores", "count": 8, "start_index": 0, "type": "float32"},
+    {"id": "zone_temps", "count": 4, "start_index": 8, "type": "float32"}
   ]
 }
 ```
