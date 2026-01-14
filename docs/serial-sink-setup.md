@@ -258,13 +258,34 @@ Error: [Errno 2] No such file or directory: '/dev/ttyUSB0'
 
 ### mDNS Discovery Not Working
 
+**On the sink machine** (Raspberry Pi running ltp-serial-sink):
+
 ```bash
-# Ensure avahi is running
+# Ensure avahi daemon is running
 sudo systemctl status avahi-daemon
 
-# Test mDNS
-avahi-browse -a
+# If not running, start it
+sudo systemctl start avahi-daemon
+sudo systemctl enable avahi-daemon
 ```
+
+**On any machine** (to verify the sink is discoverable):
+
+```bash
+# Install avahi-utils if avahi-browse is missing
+sudo apt install -y avahi-utils
+
+# Browse for all mDNS services
+avahi-browse -a
+
+# Browse specifically for LTP sinks
+avahi-browse -r _ltp-sink._tcp
+```
+
+If the sink doesn't appear, check:
+1. Both machines are on the same network/subnet
+2. No firewall blocking mDNS (UDP port 5353)
+3. The sink is running: `sudo systemctl status ltp-serial-sink`
 
 ### Python Version Too Old
 
