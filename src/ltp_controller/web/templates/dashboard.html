@@ -81,8 +81,20 @@
             {% for route in routes %}
             <tr>
                 <td>{{ route.name }}</td>
-                <td>{{ route.source_id }}</td>
-                <td>{{ route.sink_id }}</td>
+                <td>
+                    {% for source in sources if source.id == route.source_id %}
+                        {{ source.name }}
+                    {% else %}
+                        {{ route.source_id[:8] }}...
+                    {% endfor %}
+                </td>
+                <td>
+                    {% for sink in sinks if sink.id == route.sink_id %}
+                        {{ sink.name }}
+                    {% else %}
+                        {{ route.sink_id[:8] }}...
+                    {% endfor %}
+                </td>
                 <td>
                     <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
                 </td>
