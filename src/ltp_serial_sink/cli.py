@@ -84,6 +84,24 @@ def parse_args() -> argparse.Namespace:
         help="Disable run-length optimization",
     )
     parser.add_argument(
+        "--command-delay",
+        type=float,
+        default=0.001,
+        help="Delay between serial commands in seconds (default: 0.001)",
+    )
+    parser.add_argument(
+        "--frame-delay",
+        type=float,
+        default=0.0,
+        help="Minimum delay between frames in seconds (default: 0.0)",
+    )
+    parser.add_argument(
+        "--max-commands",
+        type=int,
+        default=100,
+        help="Maximum commands per frame (default: 100)",
+    )
+    parser.add_argument(
         "--log-level",
         type=str,
         choices=["debug", "info", "warning", "error"],
@@ -203,6 +221,9 @@ def config_from_args(args: argparse.Namespace) -> SerialSinkConfig:
         hex_format=args.hex_format,
         change_detection=not args.no_change_detection,
         run_length=not args.no_run_length,
+        command_delay=args.command_delay,
+        frame_delay=args.frame_delay,
+        max_commands_per_frame=args.max_commands,
     )
 
 
