@@ -586,8 +586,8 @@ class RoutingEngine:
 
         # Simple linear scaling for now
         if len(source_dims) == 1 and len(sink_dims) == 1:
-            # Linear to linear
-            result = scale_buffer(pixels, sink_dims[0], transform.scale_mode)
+            # Linear to linear - pass as tuple
+            result = scale_buffer(pixels, (sink_dims[0],), transform.scale_mode)
             return result
 
         # For matrices, reshape and scale
