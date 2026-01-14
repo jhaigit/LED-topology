@@ -45,20 +45,20 @@ Two hexadecimal formats are supported:
 ### 2.3 Command Examples
 
 ```
-# Set pixels 0-9 to red
-0,10=0xFF0000
+# Set pixels 0-9 to red (10 pixels total)
+0,9=0xFF0000
 
 # Set pixels 10-19 to green
-10,20=#00FF00
+10,19=#00FF00
 
 # Set single pixel 50 to blue
-50,51=0x0000FF
+50=0x0000FF
 
 # Set entire 160-pixel strip to white
-0,160=#FFFFFF
+0,159=#FFFFFF
 
-# Set pixels 100-159 to yellow
-100,160=0xFFFF00
+# Set pixels 100-159 to yellow (60 pixels)
+100,159=0xFFFF00
 ```
 
 ### 2.4 Serial Parameters
@@ -82,10 +82,10 @@ To minimize serial traffic and latency, the sink uses an intelligent transmissio
 
 Example optimized transmission for a frame:
 ```
-0,30=0xFF0000
-30,60=#00FF00
-60,90=0x0000FF
-90,160=#000000
+0,29=0xFF0000
+30,59=#00FF00
+60,89=0x0000FF
+90,159=#000000
 ```
 
 ## 3. Command Line Interface
@@ -550,15 +550,26 @@ void loop() {
 }
 
 void processCommand(String cmd) {
-    // Parse: start,end=0xRRGGBB or start,end=#RRGGBB
+    // Parse: start[,end]=0xRRGGBB or start[,end]=#RRGGBB
+    // end is optional and inclusive (last LED to set)
     int commaPos = cmd.indexOf(',');
     int equalsPos = cmd.indexOf('=');
 
-    if (commaPos < 0 || equalsPos < 0) return;
+    if (equalsPos < 0) return;
 
-    int start = cmd.substring(0, commaPos).toInt();
-    int end = cmd.substring(commaPos + 1, equalsPos).toInt();
-    String colorStr = cmd.substring(equalsPos + 1);
+    int start, end;
+    String colorStr;
+
+    if (commaPos >= 0 && commaPos < equalsPos) {
+        // Format: start,end=color
+        start = cmd.substring(0, commaPos).toInt();
+        end = cmd.substring(commaPos + 1, equalsPos).toInt();
+    } else {
+        // Format: start=color (single pixel)
+        start = cmd.substring(0, equalsPos).toInt();
+        end = start;
+    }
+    colorStr = cmd.substring(equalsPos + 1);
 
     // Parse color (skip 0x or #)
     uint32_t color = 0;
@@ -572,11 +583,11 @@ void processCommand(String cmd) {
     uint8_t g = (color >> 8) & 0xFF;
     uint8_t b = color & 0xFF;
 
-    // Apply to LED range
-    start = constrain(start, 0, NUM_LEDS);
-    end = constrain(end, 0, NUM_LEDS);
+    // Apply to LED range (end is inclusive)
+    start = constrain(start, 0, NUM_LEDS - 1);
+    end = constrain(end, 0, NUM_LEDS - 1);
 
-    for (int i = start; i < end; i++) {
+    for (int i = start; i <= end; i++) {
         leds[i] = CRGB(r, g, b);
     }
 

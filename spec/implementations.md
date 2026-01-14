@@ -5,11 +5,12 @@
 
 ## 1. Overview
 
-This document specifies three example applications that implement the LED Topology Protocol (LTP):
+This document specifies four example applications that implement the LED Topology Protocol (LTP):
 
 1. **ltp-source** - Data source generator with multiple pattern types
 2. **ltp-sink** - Virtual display sink with terminal and GUI visualizations
-3. **ltp-controller** - Discovery and routing controller with web interface
+3. **ltp-serial-sink** - Physical LED sink via serial/USB-serial connection
+4. **ltp-controller** - Discovery and routing controller with web interface
 
 All implementations target Linux and are written in Python 3.10+ for clarity and ease of modification.
 
@@ -41,6 +42,7 @@ libltp/
 | `pygame` | GUI visualization (optional) |
 | `flask` | Web interface for controller |
 | `pydantic` | Data validation |
+| `pyserial` | Serial port communication (for ltp-serial-sink) |
 
 ### 2.3 Configuration
 
@@ -389,13 +391,111 @@ sinks:
       type: "gui"
 ```
 
-## 5. ltp-controller: Discovery and Routing Controller
+## 5. ltp-serial-sink: Serial Output Sink
 
 ### 5.1 Purpose
 
+Receives pixel data via the LTP protocol and outputs to physical LED hardware via a serial or USB-serial connection. Acts as a bridge between the LTP network and serial-controlled LED devices (Arduino, ESP32, custom controllers).
+
+### 6.\1 Command Line Interface
+
+```bash
+# Run with config file
+ltp-serial-sink --config serial-sink.yaml
+
+# Run with inline configuration
+ltp-serial-sink --name "LED Strip" --port /dev/ttyUSB0 --pixels 160
+
+# Specify baud rate
+ltp-serial-sink --port /dev/ttyACM0 --baud 115200 --pixels 300
+
+# List available serial ports
+ltp-serial-sink --list-ports
+
+# Test serial connection
+ltp-serial-sink --port /dev/ttyUSB0 --test
+```
+
+### 6.\1 Configuration Schema
+
+```yaml
+device:
+  id: "auto"
+  name: "Workshop LED Strip"
+  description: "160-pixel WS2812B strip via Arduino"
+
+display:
+  pixels: 160
+  dimensions: [160]
+  color_format: "rgb"
+  max_refresh_hz: 30
+
+serial:
+  port: "/dev/ttyUSB0"
+  baud: 38400
+  timeout: 1.0
+  write_timeout: 1.0
+
+protocol:
+  hex_format: "0x"        # "0x" or "#"
+  line_ending: "\n"       # "\n", "\r", or "\r\n"
+  command_delay: 0.001    # Delay between commands
+
+optimization:
+  change_detection: true  # Only send changed pixels
+  run_length: true        # Combine consecutive same-color pixels
+  max_commands_per_frame: 100
+
+controls:
+  - id: "brightness"
+    name: "Brightness"
+    type: "number"
+    value: 1.0
+    min: 0.0
+    max: 1.0
+    step: 0.05
+    group: "output"
+```
+
+### 6.\1 Serial Protocol
+
+Commands are sent as text with carriage return or newline termination:
+
+```
+<start>[,<end>]=<RGB><CR|LF>
+```
+
+Where:
+- `<start>` - Starting pixel index (0-based, inclusive)
+- `<end>` - Ending pixel index (inclusive, optional)
+- `<RGB>` - Color in `0xRRGGBB` or `#RRGGBB` format
+
+Examples:
+```
+0,29=0xFF0000      # Set pixels 0-29 to red
+30=0x00FF00        # Set pixel 30 to green
+31,59=#0000FF      # Set pixels 31-59 to blue
+```
+
+### 6.\1 Optimization Features
+
+1. **Change Detection**: Only transmit pixels that changed since the last frame
+2. **Run-Length Encoding**: Combine consecutive pixels of the same color into single commands
+3. **Rate Limiting**: Respect serial bandwidth limitations with configurable delays
+
+### 6.\1 Auto-Reconnection
+
+The serial sink automatically monitors the connection and attempts to reconnect with exponential backoff if the serial port is disconnected.
+
+See `spec/serial-sink.md` for the complete serial sink specification including Arduino receiver example code.
+
+## 6. ltp-controller: Discovery and Routing Controller
+
+### 6.1 Purpose
+
 Central hub for discovering, monitoring, and routing between sources and sinks. Provides web-based UI for configuration.
 
-### 5.2 Command Line Interface
+### 6.\1 Command Line Interface
 
 ```bash
 # Run controller
@@ -408,7 +508,7 @@ ltp-controller --web-port 8080
 ltp-controller --cli
 ```
 
-### 5.3 Configuration Schema
+### 6.\1 Configuration Schema
 
 ```yaml
 device:
@@ -440,9 +540,9 @@ persistence:
   file: "~/.config/ltp/routes.yaml"  # Save routes to file
 ```
 
-### 5.4 Web Interface
+### 6.\1 Web Interface
 
-#### 5.4.1 Dashboard (`/`)
+#### 6.\1.1 Dashboard (`/`)
 
 Overview showing:
 - Discovered sources (online/offline status)
@@ -450,14 +550,14 @@ Overview showing:
 - Active routes with data flow indicators
 - System statistics (total data rate, active streams)
 
-#### 5.4.2 Sources Page (`/sources`)
+#### 6.\1.2 Sources Page (`/sources`)
 
 - List all discovered sources
 - View source details (capabilities, controls)
 - Preview source output (if terminal allows)
 - Adjust source controls
 
-#### 5.4.3 Sinks Page (`/sinks`)
+#### 6.\1.3 Sinks Page (`/sinks`)
 
 - List all discovered sinks
 - View sink details (capabilities, topology, controls)
@@ -468,7 +568,7 @@ Overview showing:
   - Section-based fills with start/end pixel ranges
   - Clear (fill with black)
 
-#### 5.4.4 Routes Page (`/routes`)
+#### 6.\1.4 Routes Page (`/routes`)
 
 - Create/edit/delete routes
 - Drag-and-drop source-to-sink connections
@@ -491,7 +591,7 @@ Overview showing:
 - Enable/disable routes
 - Auto-reconnection when devices restart
 
-#### 5.4.5 API Endpoints
+#### 6.\1.5 API Endpoints
 
 RESTful API for programmatic control:
 
@@ -533,7 +633,7 @@ RESTful API for programmatic control:
 }
 ```
 
-### 5.5 Routing Engine
+### 6.\1 Routing Engine
 
 The controller manages data flow between sources and sinks:
 
@@ -556,7 +656,7 @@ The controller manages data flow between sources and sinks:
 5. **Encode** - Encode for sink's preferred format
 6. **Send** - Forward to sink
 
-### 5.6 Direct Mode
+### 6.\1 Direct Mode
 
 For low-latency applications, controller can configure direct source-to-sink connections:
 
@@ -568,7 +668,7 @@ routes:
     mode: "direct"  # Source sends directly to sink, controller only monitors
 ```
 
-### 5.7 Direct Sink Control
+### 6.\1 Direct Sink Control
 
 The controller can send data directly to sinks without requiring a source or route. This is useful for:
 
@@ -601,7 +701,7 @@ await sink_controller.clear(sink_id)
 
 The web UI provides color pickers and section editors for interactive control.
 
-### 5.8 Size Mismatch Handling
+### 6.8 Size Mismatch Handling
 
 When source and sink have different dimensions, the controller:
 
@@ -613,13 +713,14 @@ Routes track dimension information and display warnings:
 - Dimensions shown as "60 → 30" with an "S" badge when scaling is active
 - "No data" warning appears if frames stop flowing after connection
 
-## 6. Project Structure
+## 7. Project Structure
 
 ```
 LED-topology/
 ├── spec/
 │   ├── protocol.md
-│   └── implementations.md
+│   ├── implementations.md
+│   └── serial-sink.md
 ├── src/
 │   ├── libltp/
 │   │   ├── __init__.py
@@ -654,6 +755,12 @@ LED-topology/
 │   │       ├── terminal.py
 │   │       ├── gui.py
 │   │       └── headless.py
+│   ├── ltp_serial_sink/
+│   │   ├── __init__.py
+│   │   ├── __main__.py
+│   │   ├── cli.py
+│   │   ├── sink.py
+│   │   └── serial_renderer.py
 │   └── ltp_controller/
 │       ├── __init__.py
 │       ├── __main__.py
@@ -688,7 +795,7 @@ LED-topology/
 └── README.md
 ```
 
-## 7. Development Priorities
+## 8. Development Priorities
 
 ### Phase 1: Core Library
 - Protocol message handling

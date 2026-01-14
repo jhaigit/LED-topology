@@ -44,6 +44,9 @@ controller = [
     "flask-cors>=4.0.0",
     "scipy>=1.10.0",
 ]
+serial = [
+    "pyserial>=3.5",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -53,12 +56,13 @@ dev = [
     "mypy>=1.0.0",
 ]
 all = [
-    "ltp[gui,controller,dev]",
+    "ltp[gui,controller,serial,dev]",
 ]
 
 [project.scripts]
 ltp-source = "ltp_source.__main__:main"
 ltp-sink = "ltp_sink.__main__:main"
+ltp-serial-sink = "ltp_serial_sink.__main__:main"
 ltp-controller = "ltp_controller.__main__:main"
 
 [project.urls]
