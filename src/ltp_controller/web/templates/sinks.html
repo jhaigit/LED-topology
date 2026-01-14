@@ -23,7 +23,6 @@
 
         <div class="device-geometry">
             <span class="geometry-value">{{ sink.device.properties.pixels or '?' }} pixels</span>
-            <span class="geometry-dim">{{ sink.device.properties.dim or '?' }}</span>
             {% if sink.device.properties.color %}
             <span class="geometry-color">{{ sink.device.properties.color|upper }}</span>
             {% endif %}
@@ -376,10 +375,6 @@ function refreshDiscovery() {
 .geometry-value {
     background: var(--accent-color, #2563eb);
     color: white;
-}
-.geometry-dim {
-    background: var(--secondary-bg, #374151);
-    color: var(--text-color, #e5e7eb);
 }
 .geometry-color {
     background: var(--secondary-bg, #374151);
