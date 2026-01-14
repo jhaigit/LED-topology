@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import threading
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -120,13 +120,19 @@ class SerialSink:
         self._reconnect_task: asyncio.Task | None = None
         self._stats_task: asyncio.Task | None = None
 
-        # Thread pool for non-blocking serial I/O
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="serial")
-        self._loop: asyncio.AbstractEventLoop | None = None
+        # Serial render thread with frame dropping
+        # Uses a single-slot buffer - new frames replace pending ones
+        self._render_thread: threading.Thread | None = None
+        self._render_lock = threading.Lock()
+        self._render_event = threading.Event()
+        self._pending_frame: np.ndarray | None = None
+        self._render_running = False
 
         # Data packet statistics
         self._packet_count = 0
         self._packet_bytes = 0
+        self._frames_dropped = 0
+        self._frames_rendered = 0
         self._last_stats_time = 0.0
         self._last_stats_packets = 0
         self._last_stats_bytes = 0
@@ -323,9 +329,58 @@ class SerialSink:
         # Apply brightness (as float multiplier)
         display_pixels = (display_pixels * brightness).astype(np.uint8)
 
-        # Send to serial renderer in thread pool to avoid blocking event loop
-        if self._renderer.is_connected():
-            self._executor.submit(self._renderer.render, display_pixels)
+        # Submit frame to render thread (with frame dropping)
+        self._submit_frame(display_pixels)
+
+    def _submit_frame(self, pixels: np.ndarray) -> None:
+        """Submit a frame to the render thread.
+
+        Uses a single-slot buffer with frame dropping. If a frame is already
+        pending when a new one arrives, the old frame is dropped and replaced.
+        This ensures we always render the most recent data and don't build up
+        a backlog when serial can't keep up with incoming data rate.
+        """
+        with self._render_lock:
+            if self._pending_frame is not None:
+                # Frame was waiting - it's being dropped
+                self._frames_dropped += 1
+                logger.debug(f"Dropping frame (serial backlog), total dropped: {self._frames_dropped}")
+
+            self._pending_frame = pixels.copy()
+            self._render_event.set()
+
+    def _render_loop(self) -> None:
+        """Render thread main loop.
+
+        Waits for frames and renders them to serial. Only processes the latest
+        frame if multiple arrive while rendering.
+        """
+        logger.info("Serial render thread started")
+
+        while self._render_running:
+            # Wait for a frame to be available
+            if not self._render_event.wait(timeout=0.5):
+                continue
+
+            # Get the pending frame (and clear it)
+            with self._render_lock:
+                frame = self._pending_frame
+                self._pending_frame = None
+                self._render_event.clear()
+
+            if frame is None:
+                continue
+
+            # Render the frame
+            if self._renderer.is_connected():
+                try:
+                    commands_sent = self._renderer.render(frame)
+                    self._frames_rendered += 1
+                    logger.debug(f"Rendered frame {self._frames_rendered}, {commands_sent} commands sent")
+                except Exception as e:
+                    logger.error(f"Error rendering frame: {e}")
+
+        logger.info("Serial render thread stopped")
 
     def _generate_test_pattern(self) -> np.ndarray:
         """Generate RGB sweep test pattern."""
@@ -391,9 +446,10 @@ class SerialSink:
                     rate_str = f"{bytes_per_sec:.0f} B/s"
 
                 if packets_delta > 0:
+                    drop_rate = (self._frames_dropped / max(self._packet_count, 1)) * 100
                     logger.info(
-                        f"Data stats: {packets_per_sec:.1f} packets/s, {rate_str} "
-                        f"(total: {self._packet_count} packets, {self._packet_bytes} bytes)"
+                        f"Data stats: {packets_per_sec:.1f} packets/s, {rate_str}, "
+                        f"rendered: {self._frames_rendered}, dropped: {self._frames_dropped} ({drop_rate:.1f}%)"
                     )
 
                 self._last_stats_time = now
@@ -445,6 +501,15 @@ class SerialSink:
 
         self._running = True
 
+        # Start render thread for serial output
+        self._render_running = True
+        self._render_thread = threading.Thread(
+            target=self._render_loop,
+            name="serial-render",
+            daemon=True,
+        )
+        self._render_thread.start()
+
         # Start serial monitor for reconnection
         self._reconnect_task = asyncio.create_task(self._serial_monitor())
 
@@ -483,13 +548,18 @@ class SerialSink:
                 pass
             self._stats_task = None
 
+        # Stop render thread
+        self._render_running = False
+        self._render_event.set()  # Wake up the thread if it's waiting
+        if self._render_thread:
+            self._render_thread.join(timeout=2.0)
+            self._render_thread = None
+
         # Log final stats
         logger.info(
-            f"Final data stats: {self._packet_count} packets, {self._packet_bytes} bytes received"
+            f"Final data stats: {self._packet_count} packets, {self._packet_bytes} bytes received, "
+            f"{self._frames_rendered} frames rendered, {self._frames_dropped} frames dropped"
         )
-
-        # Shutdown thread pool (wait for pending serial writes)
-        self._executor.shutdown(wait=True)
 
         # Close serial port
         self._renderer.close()
@@ -541,4 +611,6 @@ class SerialSink:
             "data_port": self.data_port,
             "packets_received": self._packet_count,
             "bytes_received": self._packet_bytes,
+            "frames_rendered": self._frames_rendered,
+            "frames_dropped": self._frames_dropped,
         }
