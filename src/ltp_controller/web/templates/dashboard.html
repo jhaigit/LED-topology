@@ -10,11 +10,11 @@
 
 <div class="stats-grid">
     <div class="stat-card">
-        <div class="stat-value">{{ sources|selectattr('online')|list|length }} / {{ sources|length }}</div>
+        <div class="stat-value" id="sources-stat">{{ sources|selectattr('online')|list|length }} / {{ sources|length }}</div>
         <div class="stat-label">Sources Online</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">{{ sinks|selectattr('online')|list|length }} / {{ sinks|length }}</div>
+        <div class="stat-value" id="sinks-stat">{{ sinks|selectattr('online')|list|length }} / {{ sinks|length }}</div>
         <div class="stat-label">Sinks Online</div>
     </div>
     <div class="stat-card">
@@ -29,7 +29,7 @@
         {% if sources %}
         <ul class="device-list">
             {% for source in sources %}
-            <li class="device-item {% if source.online %}online{% else %}offline{% endif %}">
+            <li class="device-item {% if source.online %}online{% else %}offline{% endif %}" data-source-id="{{ source.id }}">
                 <span class="status-dot"></span>
                 <div class="device-info">
                     <strong>{{ source.name }}</strong>
@@ -50,7 +50,7 @@
         {% if sinks %}
         <ul class="device-list">
             {% for sink in sinks %}
-            <li class="device-item {% if sink.online %}online{% else %}offline{% endif %}">
+            <li class="device-item {% if sink.online %}online{% else %}offline{% endif %}" data-sink-id="{{ sink.id }}">
                 <span class="status-dot"></span>
                 <div class="device-info">
                     <strong>{{ sink.name }}</strong>
@@ -139,6 +139,46 @@ function refreshDiscovery() {
             }, 2000);
         });
 }
+
+// Auto-refresh device status every 5 seconds
+function updateStatus() {
+    // Fetch sources
+    fetch('/api/sources')
+        .then(r => r.json())
+        .then(sources => {
+            sources.forEach(source => {
+                const el = document.querySelector(`[data-source-id="${source.id}"]`);
+                if (el) {
+                    el.classList.toggle('online', source.online);
+                    el.classList.toggle('offline', !source.online);
+                }
+            });
+            // Update sources count
+            const onlineSources = sources.filter(s => s.online).length;
+            const sourceStat = document.getElementById('sources-stat');
+            if (sourceStat) sourceStat.textContent = `${onlineSources} / ${sources.length}`;
+        });
+
+    // Fetch sinks
+    fetch('/api/sinks')
+        .then(r => r.json())
+        .then(sinks => {
+            sinks.forEach(sink => {
+                const el = document.querySelector(`[data-sink-id="${sink.id}"]`);
+                if (el) {
+                    el.classList.toggle('online', sink.online);
+                    el.classList.toggle('offline', !sink.online);
+                }
+            });
+            // Update sinks count
+            const onlineSinks = sinks.filter(s => s.online).length;
+            const sinkStat = document.getElementById('sinks-stat');
+            if (sinkStat) sinkStat.textContent = `${onlineSinks} / ${sinks.length}`;
+        });
+}
+
+// Start auto-refresh
+setInterval(updateStatus, 5000);
 </script>
 
 <style>
