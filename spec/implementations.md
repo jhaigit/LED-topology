@@ -462,18 +462,34 @@ Overview showing:
 - List all discovered sinks
 - View sink details (capabilities, topology, controls)
 - Adjust sink controls
-- Test patterns
+- Direct fill controls:
+  - Solid color fill with color picker
+  - Gradient fill between two or more colors
+  - Section-based fills with start/end pixel ranges
+  - Clear (fill with black)
 
 #### 5.4.4 Routes Page (`/routes`)
 
 - Create/edit/delete routes
 - Drag-and-drop source-to-sink connections
+- Real-time status display:
+  - Source and sink dimensions (e.g., "60 → 30")
+  - Scaling indicator when dimensions differ
+  - No-data warning if no frames received
+  - Frame counter
 - Configure transforms:
-  - Dimension scaling (fit, fill, stretch, crop)
+  - Dimension scaling modes:
+    - `fit` - Interpolate to match (default)
+    - `pad_black` - Extend shorter source with black pixels
+    - `pad_repeat` - Tile/repeat source pattern to fill
+    - `truncate` - Cut longer source to fit
+    - `stretch` - Stretch to match dimensions
+    - `none` - No scaling, truncate/pad as needed
   - Brightness adjustment
-  - Color remapping
-  - Mirroring
+  - Gamma correction
+  - Mirroring (horizontal/vertical)
 - Enable/disable routes
+- Auto-reconnection when devices restart
 
 #### 5.4.5 API Endpoints
 
@@ -487,10 +503,35 @@ RESTful API for programmatic control:
 | `/api/sinks` | GET | List all sinks |
 | `/api/sinks/{id}` | GET | Get sink details |
 | `/api/sinks/{id}/controls` | GET/PUT | Get/set sink controls |
+| `/api/sinks/{id}/fill` | POST | Fill sink with color/pattern |
+| `/api/sinks/{id}/clear` | POST | Clear sink (fill with black) |
 | `/api/routes` | GET/POST | List/create routes |
 | `/api/routes/{id}` | GET/PUT/DELETE | Get/update/delete route |
 | `/api/routes/{id}/enable` | POST | Enable route |
 | `/api/routes/{id}/disable` | POST | Disable route |
+| `/api/status` | GET | Get system status summary |
+
+**Sink Fill API:**
+
+```json
+// POST /api/sinks/{id}/fill
+
+// Solid color fill
+{"type": "solid", "color": [255, 0, 0]}
+
+// Gradient fill
+{"type": "gradient", "colors": [[255, 0, 0], [0, 0, 255]]}
+
+// Section-based fill
+{
+  "type": "sections",
+  "sections": [
+    {"start": 0, "end": 30, "color": [255, 0, 0]},
+    {"start": 30, "end": 60, "color": [0, 255, 0]}
+  ],
+  "background": [0, 0, 0]
+}
+```
 
 ### 5.5 Routing Engine
 
@@ -526,6 +567,51 @@ routes:
     sink: "led-strip"
     mode: "direct"  # Source sends directly to sink, controller only monitors
 ```
+
+### 5.7 Direct Sink Control
+
+The controller can send data directly to sinks without requiring a source or route. This is useful for:
+
+- Setting static colors or patterns
+- Testing sink connectivity
+- User-controlled "painting" of LEDs
+- Default/fallback displays
+
+**SinkController** manages direct sink control:
+
+```python
+# Programmatic usage
+sink_controller = SinkController(controller)
+
+# Fill with solid color (sends once, no continuous streaming)
+await sink_controller.fill_solid(sink_id, (255, 0, 0))
+
+# Fill with gradient
+await sink_controller.fill_gradient(sink_id, [(255, 0, 0), (0, 0, 255)])
+
+# Fill specific sections
+await sink_controller.fill_sections(sink_id, [
+    {"start": 0, "end": 30, "color": [255, 0, 0]},
+    {"start": 30, "end": 60, "color": [0, 255, 0]},
+])
+
+# Clear (fill with black)
+await sink_controller.clear(sink_id)
+```
+
+The web UI provides color pickers and section editors for interactive control.
+
+### 5.8 Size Mismatch Handling
+
+When source and sink have different dimensions, the controller:
+
+1. **Detects** the mismatch and displays it in the web UI
+2. **Applies** the configured scale mode to adapt the data
+3. **Warns** if no data is being received (e.g., incompatible formats)
+
+Routes track dimension information and display warnings:
+- Dimensions shown as "60 → 30" with an "S" badge when scaling is active
+- "No data" warning appears if frames stop flowing after connection
 
 ## 6. Project Structure
 
@@ -574,16 +660,17 @@ LED-topology/
 │       ├── cli.py
 │       ├── controller.py
 │       ├── router.py
+│       ├── sink_control.py    # Direct sink fill control
 │       ├── web/
 │       │   ├── __init__.py
 │       │   ├── app.py
-│       │   ├── api.py
 │       │   └── templates/
 │       │       ├── base.html
 │       │       ├── dashboard.html
 │       │       ├── sources.html
 │       │       ├── sinks.html
-│       │       └── routes.html
+│       │       ├── routes.html
+│       │       └── preview.html
 │       └── static/
 │           ├── css/
 │           └── js/
