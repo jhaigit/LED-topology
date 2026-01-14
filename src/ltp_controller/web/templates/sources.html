@@ -3,9 +3,13 @@
 {% block title %}Sources - LTP Controller{% endblock %}
 
 {% block content %}
-<h1>Sources</h1>
-
-<p class="subtitle">Discovered data sources on the network</p>
+<div class="page-header">
+    <div>
+        <h1>Sources</h1>
+        <p class="subtitle">Discovered data sources on the network</p>
+    </div>
+    <button class="btn" onclick="refreshDiscovery()" id="refresh-btn">Refresh Discovery</button>
+</div>
 
 {% if sources %}
 <div class="device-grid">
@@ -79,5 +83,45 @@ function refreshDevice(type, id) {
             }
         });
 }
+
+function refreshDiscovery() {
+    const btn = document.getElementById('refresh-btn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Refreshing...';
+    btn.disabled = true;
+
+    fetch('/api/discovery/refresh', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            btn.textContent = 'Refreshed!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                window.location.reload();
+            }, 1000);
+        })
+        .catch(err => {
+            console.error('Discovery refresh error:', err);
+            btn.textContent = 'Error';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 2000);
+        });
+}
 </script>
+<style>
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+.page-header h1 {
+    margin: 0;
+}
+.page-header .subtitle {
+    margin: 0.25rem 0 0 0;
+}
+</style>
 {% endblock %}

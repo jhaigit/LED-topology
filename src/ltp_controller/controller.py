@@ -419,3 +419,13 @@ class Controller:
         """Refresh device info."""
         await self._fetch_device_info(state)
         state.last_seen = datetime.now()
+
+    async def refresh_discovery(self) -> None:
+        """Force a refresh of mDNS service discovery.
+
+        Restarts the service browser to pick up any missed announcements.
+        """
+        if self._browser:
+            logger.info("Refreshing mDNS discovery...")
+            await self._browser.refresh()
+            logger.info("mDNS discovery refreshed")

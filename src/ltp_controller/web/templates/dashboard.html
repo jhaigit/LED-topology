@@ -3,7 +3,10 @@
 {% block title %}Dashboard - LTP Controller{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <button class="btn" onclick="refreshDiscovery()" id="refresh-btn">Refresh Discovery</button>
+</div>
 
 <div class="stats-grid">
     <div class="stat-card">
@@ -108,4 +111,45 @@
     {% endif %}
     <a href="/routes" class="btn">Manage Routes</a>
 </section>
+
+<script>
+function refreshDiscovery() {
+    const btn = document.getElementById('refresh-btn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Refreshing...';
+    btn.disabled = true;
+
+    fetch('/api/discovery/refresh', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            btn.textContent = 'Refreshed!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                // Reload page to show new devices
+                window.location.reload();
+            }, 1000);
+        })
+        .catch(err => {
+            console.error('Discovery refresh error:', err);
+            btn.textContent = 'Error';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 2000);
+        });
+}
+</script>
+
+<style>
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.page-header h1 {
+    margin: 0;
+}
+</style>
 {% endblock %}

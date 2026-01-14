@@ -351,6 +351,12 @@ def create_app(
             }
         )
 
+    @app.route("/api/discovery/refresh", methods=["POST"])
+    def api_discovery_refresh() -> Any:
+        """Force refresh mDNS service discovery."""
+        run_async(controller.refresh_discovery())
+        return jsonify({"status": "ok", "message": "Discovery refresh triggered"})
+
     # ==================== API: Preview ====================
 
     @app.route("/api/routes/<route_id>/preview")

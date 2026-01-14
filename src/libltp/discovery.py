@@ -96,6 +96,7 @@ class ServiceAdvertiser:
         description: str = "",
         has_controls: bool = False,
         properties: dict[str, str] | None = None,
+        reannounce_interval: float = 30.0,
     ):
         self.service_type = service_type
         self.name = name
@@ -105,9 +106,11 @@ class ServiceAdvertiser:
         self.description = description
         self.has_controls = has_controls
         self.extra_properties = properties or {}
+        self.reannounce_interval = reannounce_interval
 
         self._zeroconf: AsyncZeroconf | None = None
         self._service_info: ServiceInfo | None = None
+        self._reannounce_task: asyncio.Task | None = None
 
     def _build_service_info(self) -> ServiceInfo:
         """Build the ServiceInfo object."""
@@ -145,8 +148,21 @@ class ServiceAdvertiser:
         )
         await self._zeroconf.async_register_service(self._service_info)
 
+        # Start periodic re-announcement
+        if self.reannounce_interval > 0:
+            self._reannounce_task = asyncio.create_task(self._reannounce_loop())
+
     async def stop(self) -> None:
         """Stop advertising the service."""
+        # Cancel reannounce task
+        if self._reannounce_task:
+            self._reannounce_task.cancel()
+            try:
+                await self._reannounce_task
+            except asyncio.CancelledError:
+                pass
+            self._reannounce_task = None
+
         if self._zeroconf is None:
             return
 
@@ -157,6 +173,19 @@ class ServiceAdvertiser:
         self._zeroconf = None
         self._service_info = None
         logger.info(f"Stopped advertising service '{self.name}'")
+
+    async def _reannounce_loop(self) -> None:
+        """Periodically re-announce the service to improve discoverability."""
+        while True:
+            await asyncio.sleep(self.reannounce_interval)
+            if self._zeroconf and self._service_info:
+                try:
+                    # Unregister and re-register to force announcement
+                    await self._zeroconf.async_unregister_service(self._service_info)
+                    await self._zeroconf.async_register_service(self._service_info)
+                    logger.debug(f"Re-announced service '{self.name}'")
+                except Exception as e:
+                    logger.warning(f"Failed to re-announce service: {e}")
 
     async def update_properties(self, **kwargs: str) -> None:
         """Update service properties."""
