@@ -118,10 +118,18 @@ class SerialSink:
             dtype=np.uint8,
         )
         self._reconnect_task: asyncio.Task | None = None
+        self._stats_task: asyncio.Task | None = None
 
         # Thread pool for non-blocking serial I/O
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="serial")
         self._loop: asyncio.AbstractEventLoop | None = None
+
+        # Data packet statistics
+        self._packet_count = 0
+        self._packet_bytes = 0
+        self._last_stats_time = 0.0
+        self._last_stats_packets = 0
+        self._last_stats_bytes = 0
 
     def _setup_controls(self) -> None:
         """Set up device controls."""
@@ -272,6 +280,18 @@ class SerialSink:
         We offload the blocking serial I/O to a thread pool to avoid
         blocking the event loop and causing health check failures.
         """
+        # Update packet statistics
+        pixel_count = packet.pixel_count
+        packet_bytes = len(packet.pixel_data) * packet.pixel_data.itemsize if hasattr(packet.pixel_data, 'itemsize') else len(packet.pixel_data)
+        self._packet_count += 1
+        self._packet_bytes += packet_bytes
+
+        # Debug log each packet
+        logger.debug(
+            f"Data packet #{self._packet_count}: {pixel_count} pixels, "
+            f"{packet_bytes} bytes, format={packet.color_format.name}"
+        )
+
         # Get control values
         brightness = self._controls.get_value("brightness")
         gamma = self._controls.get_value("gamma")
@@ -330,6 +350,46 @@ class SerialSink:
                     continue
             await asyncio.sleep(1.0)
 
+    async def _stats_monitor(self) -> None:
+        """Periodically log data packet statistics."""
+        import time
+
+        self._last_stats_time = time.time()
+        self._last_stats_packets = 0
+        self._last_stats_bytes = 0
+        stats_interval = 5.0  # Log stats every 5 seconds
+
+        while self._running:
+            await asyncio.sleep(stats_interval)
+
+            now = time.time()
+            elapsed = now - self._last_stats_time
+
+            if elapsed > 0:
+                packets_delta = self._packet_count - self._last_stats_packets
+                bytes_delta = self._packet_bytes - self._last_stats_bytes
+
+                packets_per_sec = packets_delta / elapsed
+                bytes_per_sec = bytes_delta / elapsed
+
+                # Format data rate
+                if bytes_per_sec > 1024 * 1024:
+                    rate_str = f"{bytes_per_sec / 1024 / 1024:.2f} MB/s"
+                elif bytes_per_sec > 1024:
+                    rate_str = f"{bytes_per_sec / 1024:.2f} KB/s"
+                else:
+                    rate_str = f"{bytes_per_sec:.0f} B/s"
+
+                if packets_delta > 0:
+                    logger.info(
+                        f"Data stats: {packets_per_sec:.1f} packets/s, {rate_str} "
+                        f"(total: {self._packet_count} packets, {self._packet_bytes} bytes)"
+                    )
+
+                self._last_stats_time = now
+                self._last_stats_packets = self._packet_count
+                self._last_stats_bytes = self._packet_bytes
+
     async def start(self) -> None:
         """Start the serial sink."""
         if self._running:
@@ -378,6 +438,9 @@ class SerialSink:
         # Start serial monitor for reconnection
         self._reconnect_task = asyncio.create_task(self._serial_monitor())
 
+        # Start stats monitor for data packet logging
+        self._stats_task = asyncio.create_task(self._stats_monitor())
+
         logger.info(
             f"Serial sink started - Control: {self._control_server.actual_port}, "
             f"Data: {self._data_receiver.actual_port}, "
@@ -400,6 +463,20 @@ class SerialSink:
             except asyncio.CancelledError:
                 pass
             self._reconnect_task = None
+
+        # Cancel stats task
+        if self._stats_task:
+            self._stats_task.cancel()
+            try:
+                await self._stats_task
+            except asyncio.CancelledError:
+                pass
+            self._stats_task = None
+
+        # Log final stats
+        logger.info(
+            f"Final data stats: {self._packet_count} packets, {self._packet_bytes} bytes received"
+        )
 
         # Shutdown thread pool (wait for pending serial writes)
         self._executor.shutdown(wait=True)
@@ -452,4 +529,6 @@ class SerialSink:
             "serial": self._renderer.get_stats(),
             "control_port": self.control_port,
             "data_port": self.data_port,
+            "packets_received": self._packet_count,
+            "bytes_received": self._packet_bytes,
         }
