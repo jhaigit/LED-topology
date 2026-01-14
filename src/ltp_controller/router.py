@@ -634,11 +634,14 @@ class RoutingEngine:
         # Get frame interval from virtual source config
         frame_interval = 1.0 / virtual_source.config.frame_rate
 
+        # Calculate render size - use source dimensions, scale to sink later
+        source_pixel_count = np.prod(source_dims)
+
         # Render loop
         while route.enabled and self._running:
             try:
-                # Render frame from virtual source
-                pixels = virtual_source.render_frame(num_pixels)
+                # Render frame from virtual source at its configured size
+                pixels = virtual_source.render_frame(source_pixel_count)
 
                 # Apply transforms
                 if route._scaling_active:
@@ -823,8 +826,9 @@ class RoutingEngine:
             try:
                 stop_req = stream_control(0, route._sink_stream_id, StreamAction.STOP)
                 await route._sink_client.request(stop_req, timeout=2.0)
-            except Exception:
-                pass
+                logger.debug(f"Sent STOP to sink for route {route.name}")
+            except Exception as e:
+                logger.warning(f"Failed to send STOP to sink for route {route.name}: {e}")
 
         if route._source_client:
             try:
