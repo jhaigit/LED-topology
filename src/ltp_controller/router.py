@@ -580,6 +580,8 @@ class RoutingEngine:
         from ltp_controller.virtual_sources.base import VirtualSource
 
         logger.info(f"Starting virtual source route: {route.name}")
+        logger.info(f"Virtual source config: output_dimensions={virtual_source.config.output_dimensions}")
+        logger.info(f"Sink properties: {sink.device.properties}")
 
         # Connect to sink
         route._sink_client = ControlClient(sink.host, sink.port)
@@ -694,7 +696,13 @@ class RoutingEngine:
 
             # Scale if dimensions differ
             if source_dims != sink_dims:
+                orig_shape = pixels.shape
                 pixels = self._scale_pixels(pixels, source_dims, sink_dims, route.transform)
+                if route._frames_routed == 0:
+                    logger.info(
+                        f"Route {route.name}: Scaling {orig_shape} -> {pixels.shape} "
+                        f"(dims: {source_dims} -> {sink_dims}, mode: {route.transform.scale_mode})"
+                    )
 
             # Apply brightness
             if route.transform.brightness != 1.0:
@@ -731,13 +739,21 @@ class RoutingEngine:
         source_count = np.prod(source_dims)
         sink_count = np.prod(sink_dims)
 
+        logger.debug(f"_scale_pixels: input shape={pixels.shape}, source_dims={source_dims}, "
+                    f"sink_dims={sink_dims}, mode={transform.scale_mode}")
+
         if source_count == sink_count:
+            logger.debug("_scale_pixels: no scaling needed (same count)")
             return pixels
 
         # Simple linear scaling for now
         if len(source_dims) == 1 and len(sink_dims) == 1:
             # Linear to linear - pass as tuple
+            logger.info(f"_scale_pixels: linear {source_dims[0]} -> {sink_dims[0]}, "
+                       f"input shape={pixels.shape}, mode={transform.scale_mode.value}")
             result = scale_buffer(pixels, (sink_dims[0],), transform.scale_mode)
+            logger.info(f"_scale_pixels: output shape={result.shape}, "
+                       f"non-zero pixels={np.count_nonzero(result.sum(axis=1))}/{len(result)}")
             return result
 
         # For matrices, reshape and scale
@@ -751,8 +767,10 @@ class RoutingEngine:
                 result = zoom(pixels, (factor, 1), order=1)
             else:
                 result = zoom(pixels, factor, order=1)
+            logger.debug(f"_scale_pixels: matrix scaling factor={factor}, output shape={result.shape}")
             return result[:sink_count].astype(np.uint8)
 
+        logger.warning(f"_scale_pixels: no scaling applied, returning input unchanged")
         return pixels
 
     def _get_local_ip(self, remote_host: str) -> str:
@@ -811,6 +829,9 @@ class RoutingEngine:
 
     async def _cleanup_route(self, route: Route) -> None:
         """Clean up route resources."""
+        logger.info(f"Cleaning up route {route.name}: sink_client={route._sink_client is not None}, "
+                   f"sink_stream_id={route._sink_stream_id}")
+
         # Stop receiver
         if route._receiver:
             await route._receiver.stop()
@@ -824,11 +845,14 @@ class RoutingEngine:
         # Stop streams and close connections
         if route._sink_client and route._sink_stream_id:
             try:
+                logger.info(f"Sending STOP command for stream {route._sink_stream_id} to sink")
                 stop_req = stream_control(0, route._sink_stream_id, StreamAction.STOP)
-                await route._sink_client.request(stop_req, timeout=2.0)
-                logger.debug(f"Sent STOP to sink for route {route.name}")
+                resp = await route._sink_client.request(stop_req, timeout=2.0)
+                logger.info(f"STOP response from sink: {resp.data if resp else 'None'}")
             except Exception as e:
                 logger.warning(f"Failed to send STOP to sink for route {route.name}: {e}")
+        else:
+            logger.info(f"Skipping STOP for route {route.name}: no sink_client or sink_stream_id")
 
         if route._source_client:
             try:

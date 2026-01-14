@@ -82,6 +82,9 @@ class TerminalRenderer(Renderer):
 
     def clear(self) -> None:
         """Clear display and show waiting message (called when stream stops)."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("TerminalRenderer.clear() called")
         self._last_pixels = None
         self._last_dimensions = None
         self._last_data_time = 0.0
@@ -89,7 +92,10 @@ class TerminalRenderer(Renderer):
         self._fps = 0.0
         self._data_rate = 0.0
         if self._live:
+            logger.info("Updating live display with empty panel")
             self._live.update(self._render_empty())
+        else:
+            logger.warning("No live display to update in clear()")
 
     def _render_empty(self) -> Panel:
         """Render empty display."""

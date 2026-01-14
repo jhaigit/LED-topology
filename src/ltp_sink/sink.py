@@ -212,16 +212,23 @@ class Sink:
     def _handle_stream_control(self, message: Message) -> Message:
         """Handle stream control request (start/stop/pause)."""
         stream_id = message.data.get("stream_id")
-        action = StreamAction(message.data.get("action", "start"))
+        action_str = message.data.get("action", "start")
+        logger.info(f"STREAM_CONTROL received: stream_id={stream_id}, action={action_str}")
+        action = StreamAction(action_str)
 
         if action == StreamAction.START:
             self._stream_manager.start_stream(stream_id)
             logger.info(f"Started stream: {stream_id}")
         elif action == StreamAction.STOP:
+            logger.info(f"Processing STOP for stream {stream_id}")
             self._stream_manager.stop_stream(stream_id)
             # Clear renderer display when stream stops
+            logger.info(f"Stopping stream {stream_id}, clearing renderer (renderer={self._renderer})")
             if self._renderer:
                 self._renderer.clear()
+                logger.info(f"Renderer cleared for stream {stream_id}")
+            else:
+                logger.warning(f"No renderer to clear for stream {stream_id}")
             logger.info(f"Stopped stream: {stream_id}")
         elif action == StreamAction.PAUSE:
             logger.info(f"Paused stream: {stream_id}")
@@ -249,6 +256,11 @@ class Sink:
 
     def _handle_data_packet(self, packet: DataPacket) -> None:
         """Handle incoming data packet."""
+        # Only process data if there's an active stream
+        if not self._stream_manager.active_streams:
+            logger.debug("Ignoring data packet - no active streams")
+            return
+
         # Apply brightness
         brightness = self._controls.get_value("brightness") / 255.0
 
