@@ -98,8 +98,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-commands",
         type=int,
-        default=100,
-        help="Maximum commands per frame (default: 100)",
+        default=0,
+        help="Maximum commands per frame, 0 = unlimited (default: 0)",
     )
     parser.add_argument(
         "--log-level",

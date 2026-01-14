@@ -43,7 +43,7 @@ class SerialConfig:
     change_detection: bool = True  # Only send changed pixels
     run_length: bool = True  # Combine consecutive same-color pixels
     min_run_length: int = 1  # Minimum pixels to combine
-    max_commands_per_frame: int = 100  # Limit commands per frame
+    max_commands_per_frame: int = 0  # Limit commands per frame (0 = unlimited)
 
     # Debugging
     trace_commands: bool = False  # Log each serial command sent
@@ -157,9 +157,9 @@ class SerialRenderer:
         commands = self._generate_commands(changes)
         total_commands = len(commands)
 
-        # Limit commands per frame
+        # Limit commands per frame (0 = unlimited)
         truncated = False
-        if len(commands) > self.config.max_commands_per_frame:
+        if self.config.max_commands_per_frame > 0 and len(commands) > self.config.max_commands_per_frame:
             commands = commands[:self.config.max_commands_per_frame]
             truncated = True
 
