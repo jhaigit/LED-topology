@@ -17,6 +17,10 @@ from ltp_controller.virtual_sources.visualizers import (
     MultiBar,
     VUMeter,
 )
+from ltp_controller.virtual_sources.monitors import (
+    SystemMonitor,
+    CPUCoreMonitor,
+)
 
 __all__ = [
     "VirtualSource",
@@ -35,6 +39,9 @@ __all__ = [
     "BarGraph",
     "MultiBar",
     "VUMeter",
+    # Monitors
+    "SystemMonitor",
+    "CPUCoreMonitor",
 ]
 
 # Registry of available virtual source types
@@ -53,4 +60,7 @@ VIRTUAL_SOURCE_TYPES: dict[str, type[VirtualSource]] = {
     "bar_graph": BarGraph,
     "multi_bar": MultiBar,
     "vu_meter": VUMeter,
+    # Monitors
+    "system_monitor": SystemMonitor,
+    "cpu_cores": CPUCoreMonitor,
 }
