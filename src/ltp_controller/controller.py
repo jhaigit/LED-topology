@@ -11,7 +11,6 @@ from libltp import (
     ControlClient,
     ControllerAdvertiser,
     DiscoveredDevice,
-    Message,
     ServiceBrowser,
     capability_request,
     control_get,
@@ -106,7 +105,7 @@ class Controller:
         description: str = "Central routing controller",
         device_id: UUID | None = None,
         control_port: int = 0,
-        health_check_interval: float = 10.0,
+        health_check_interval: float = 30.0,
     ):
         self.name = name
         self.display_name = display_name
@@ -261,34 +260,35 @@ class Controller:
                 await self._ping_device(state)
 
     async def _ping_device(self, state: DeviceState) -> None:
-        """Ping a device to check if it's still online."""
-        # Require 3 consecutive failures before marking offline
-        FAILURES_BEFORE_OFFLINE = 3
+        """Ping a device to check if it's still online.
+
+        Uses a simple TCP connect test rather than a full protocol exchange
+        to minimize load on the device and reduce false positives.
+        """
+        # Require 5 consecutive failures before marking offline
+        FAILURES_BEFORE_OFFLINE = 5
 
         try:
-            client = ControlClient(state.host, state.port)
-            await asyncio.wait_for(client.connect(), timeout=5.0)
+            # Simple TCP connect test - just verify the port is reachable
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(state.host, state.port),
+                timeout=10.0,
+            )
+            writer.close()
+            await writer.wait_closed()
 
-            try:
-                # Send capability request as a ping
-                cap_req = capability_request(0)
-                await client.request(cap_req, timeout=5.0)
+            # Device responded - reset failure count and mark as online
+            state._consecutive_failures = 0
 
-                # Device responded - reset failure count and mark as online
-                state._consecutive_failures = 0
+            if not state.online:
+                state.online = True
+                logger.info(f"Device came online: {state.name}")
+                if state.device.is_source and self._on_source_change:
+                    self._on_source_change(state, True)
+                elif state.device.is_sink and self._on_sink_change:
+                    self._on_sink_change(state, True)
 
-                if not state.online:
-                    state.online = True
-                    logger.info(f"Device came online: {state.name}")
-                    if state.device.is_source and self._on_source_change:
-                        self._on_source_change(state, True)
-                    elif state.device.is_sink and self._on_sink_change:
-                        self._on_sink_change(state, True)
-
-                state.last_seen = datetime.now()
-
-            finally:
-                await client.close()
+            state.last_seen = datetime.now()
 
         except Exception as e:
             # Increment failure count
