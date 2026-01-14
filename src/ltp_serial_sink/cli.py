@@ -124,6 +124,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable verbose logging (same as --log-level debug)",
     )
+    parser.add_argument(
+        "--show-commands",
+        action="store_true",
+        help="Log each serial command sent to the LED controller",
+    )
 
     return parser.parse_args()
 
@@ -224,6 +229,7 @@ def config_from_args(args: argparse.Namespace) -> SerialSinkConfig:
         command_delay=args.command_delay,
         frame_delay=args.frame_delay,
         max_commands_per_frame=args.max_commands,
+        trace_commands=args.show_commands,
     )
 
 

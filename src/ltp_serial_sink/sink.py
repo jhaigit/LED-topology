@@ -68,6 +68,9 @@ class SerialSinkConfig(BaseModel):
     run_length: bool = True
     max_commands_per_frame: int = 100
 
+    # Debugging
+    trace_commands: bool = False  # Log each serial command sent
+
 
 class SerialSink:
     """LTP Sink with serial output backend."""
@@ -108,6 +111,7 @@ class SerialSink:
             change_detection=self.config.change_detection,
             run_length=self.config.run_length,
             max_commands_per_frame=self.config.max_commands_per_frame,
+            trace_commands=self.config.trace_commands,
         )
         self._renderer = SerialRenderer(serial_config)
 

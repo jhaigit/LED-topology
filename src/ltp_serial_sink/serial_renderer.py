@@ -45,6 +45,9 @@ class SerialConfig:
     min_run_length: int = 1  # Minimum pixels to combine
     max_commands_per_frame: int = 100  # Limit commands per frame
 
+    # Debugging
+    trace_commands: bool = False  # Log each serial command sent
+
 
 class SerialRenderer:
     """Renders pixel data to serial commands."""
@@ -297,6 +300,11 @@ class SerialRenderer:
         try:
             full_cmd = command + self.config.line_ending
             self._serial.write(full_cmd.encode("ascii"))
+
+            # Log command if tracing is enabled
+            if self.config.trace_commands:
+                logger.info(f"SERIAL TX: {command}")
+
             return True
         except serial.SerialTimeoutException:
             logger.warning(f"Serial write timeout for command: {command}")
