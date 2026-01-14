@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -117,6 +118,10 @@ class SerialSink:
             dtype=np.uint8,
         )
         self._reconnect_task: asyncio.Task | None = None
+
+        # Thread pool for non-blocking serial I/O
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="serial")
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _setup_controls(self) -> None:
         """Set up device controls."""
@@ -261,7 +266,12 @@ class SerialSink:
         return (corrected * 255.0).astype(np.uint8)
 
     def _handle_data_packet(self, packet: DataPacket) -> None:
-        """Handle incoming data packet."""
+        """Handle incoming data packet.
+
+        This is called from the UDP receiver in the event loop.
+        We offload the blocking serial I/O to a thread pool to avoid
+        blocking the event loop and causing health check failures.
+        """
         # Get control values
         brightness = self._controls.get_value("brightness")
         gamma = self._controls.get_value("gamma")
@@ -283,9 +293,9 @@ class SerialSink:
         # Apply brightness (as float multiplier)
         display_pixels = (display_pixels * brightness).astype(np.uint8)
 
-        # Send to serial renderer
+        # Send to serial renderer in thread pool to avoid blocking event loop
         if self._renderer.is_connected():
-            self._renderer.render(display_pixels)
+            self._executor.submit(self._renderer.render, display_pixels)
 
     def _generate_test_pattern(self) -> np.ndarray:
         """Generate RGB sweep test pattern."""
@@ -390,6 +400,9 @@ class SerialSink:
             except asyncio.CancelledError:
                 pass
             self._reconnect_task = None
+
+        # Shutdown thread pool (wait for pending serial writes)
+        self._executor.shutdown(wait=True)
 
         # Close serial port
         self._renderer.close()
