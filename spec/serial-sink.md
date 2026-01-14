@@ -23,13 +23,15 @@ The `ltp-serial-sink` is a data sink that implements the LTP protocol and forwar
 LED data is sent to the serial device using text commands terminated with carriage return (`\r`) or newline (`\n`):
 
 ```
-<start>,<end>=<RGB><CR|LF>
+<start>[,<end>]=<RGB><CR|LF>
 ```
 
 Where:
 - `<start>` - Starting pixel index (0-based, inclusive)
-- `<end>` - Ending pixel index (exclusive)
+- `<end>` - Ending pixel index (inclusive, optional)
 - `<RGB>` - Color value in hexadecimal format
+
+The `,<end>` portion is optional. When omitted, only the single pixel at `<start>` is set.
 
 ### 2.2 RGB Color Formats
 
