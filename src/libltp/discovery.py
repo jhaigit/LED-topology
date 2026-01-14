@@ -2,13 +2,20 @@
 
 import asyncio
 import logging
+import shutil
 import socket
+import subprocess
 from dataclasses import dataclass, field
 from typing import Callable
 from uuid import UUID
 
 from zeroconf import IPVersion, ServiceInfo, ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
+
+
+def _avahi_available() -> bool:
+    """Check if avahi-publish-service is available."""
+    return shutil.which("avahi-publish-service") is not None
 
 from libltp.types import (
     ColorFormat,
@@ -111,6 +118,8 @@ class ServiceAdvertiser:
         self._zeroconf: AsyncZeroconf | None = None
         self._service_info: ServiceInfo | None = None
         self._reannounce_task: asyncio.Task | None = None
+        self._avahi_process: subprocess.Popen | None = None
+        self._use_avahi = _avahi_available()
 
     def _build_service_info(self) -> ServiceInfo:
         """Build the ServiceInfo object."""
@@ -137,6 +146,50 @@ class ServiceAdvertiser:
 
     async def start(self) -> None:
         """Start advertising the service."""
+        if self._use_avahi:
+            await self._start_avahi()
+        else:
+            await self._start_zeroconf()
+
+    async def _start_avahi(self) -> None:
+        """Start advertising using avahi-publish-service."""
+        if self._avahi_process is not None:
+            return
+
+        # Build TXT record arguments
+        properties = _build_txt_properties(
+            self.device_id,
+            self.display_name,
+            self.description,
+            self.has_controls,
+            **self.extra_properties,
+        )
+
+        # avahi-publish-service args: name type port [txt ...]
+        cmd = [
+            "avahi-publish-service",
+            self.name,
+            self.service_type,
+            str(self.port),
+        ]
+
+        # Add TXT records
+        for key, value in properties.items():
+            cmd.append(f"{key}={value}")
+
+        logger.info(
+            f"Advertising {self.service_type} service '{self.name}' on port {self.port} (via avahi)"
+        )
+
+        # Start avahi-publish-service in background
+        self._avahi_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+
+    async def _start_zeroconf(self) -> None:
+        """Start advertising using python-zeroconf."""
         if self._zeroconf is not None:
             return
 
@@ -144,7 +197,7 @@ class ServiceAdvertiser:
         self._service_info = self._build_service_info()
 
         logger.info(
-            f"Advertising {self.service_type} service '{self.name}' on port {self.port}"
+            f"Advertising {self.service_type} service '{self.name}' on port {self.port} (via zeroconf)"
         )
         await self._zeroconf.async_register_service(self._service_info)
 
@@ -163,6 +216,17 @@ class ServiceAdvertiser:
                 pass
             self._reannounce_task = None
 
+        # Stop avahi process if running
+        if self._avahi_process is not None:
+            self._avahi_process.terminate()
+            try:
+                self._avahi_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._avahi_process.kill()
+            self._avahi_process = None
+            logger.info(f"Stopped advertising service '{self.name}' (avahi)")
+            return
+
         if self._zeroconf is None:
             return
 
@@ -172,10 +236,13 @@ class ServiceAdvertiser:
         await self._zeroconf.async_close()
         self._zeroconf = None
         self._service_info = None
-        logger.info(f"Stopped advertising service '{self.name}'")
+        logger.info(f"Stopped advertising service '{self.name}' (zeroconf)")
 
     async def _reannounce_loop(self) -> None:
-        """Periodically re-announce the service to improve discoverability."""
+        """Periodically re-announce the service to improve discoverability.
+
+        Only used for zeroconf; avahi handles re-announcement automatically.
+        """
         while True:
             await asyncio.sleep(self.reannounce_interval)
             if self._zeroconf and self._service_info:
@@ -189,15 +256,17 @@ class ServiceAdvertiser:
 
     async def update_properties(self, **kwargs: str) -> None:
         """Update service properties."""
-        if self._zeroconf is None or self._service_info is None:
-            return
-
         self.extra_properties.update(kwargs)
 
-        # Unregister and re-register with new properties
-        await self._zeroconf.async_unregister_service(self._service_info)
-        self._service_info = self._build_service_info()
-        await self._zeroconf.async_register_service(self._service_info)
+        if self._avahi_process is not None:
+            # Restart avahi with new properties
+            await self.stop()
+            await self._start_avahi()
+        elif self._zeroconf is not None and self._service_info is not None:
+            # Unregister and re-register with new properties
+            await self._zeroconf.async_unregister_service(self._service_info)
+            self._service_info = self._build_service_info()
+            await self._zeroconf.async_register_service(self._service_info)
 
 
 class SinkAdvertiser(ServiceAdvertiser):
