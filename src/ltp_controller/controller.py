@@ -64,10 +64,15 @@ class DeviceState:
 
     @property
     def host(self) -> str:
-        """Get host address."""
+        """Get host address.
+
+        Prefers resolved IP addresses over hostnames to avoid mDNS resolution
+        issues when establishing connections.
+        """
         if self.device.addresses:
             return self.device.addresses[0]
-        return self.device.host.rstrip(".local.")
+        # Keep .local suffix for mDNS resolution, just normalize trailing dot
+        return self.device.host.rstrip(".")
 
     @property
     def port(self) -> int:

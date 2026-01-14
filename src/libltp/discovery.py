@@ -388,8 +388,17 @@ class ServiceBrowser:
             except ValueError:
                 pass
 
-        # Get addresses
+        # Get addresses - prefer IP addresses from mDNS
         addresses = [socket.inet_ntoa(addr) for addr in info.addresses]
+
+        # If no addresses from mDNS, try to resolve the hostname
+        if not addresses and info.server:
+            try:
+                resolved_ip = socket.gethostbyname(info.server)
+                addresses = [resolved_ip]
+                logger.debug(f"Resolved {info.server} to {resolved_ip}")
+            except socket.gaierror as e:
+                logger.warning(f"Could not resolve {info.server}: {e}")
 
         device = DiscoveredDevice(
             name=name,
