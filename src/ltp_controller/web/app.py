@@ -543,6 +543,7 @@ def create_app(
             routes=router.routes,
             sources=controller.sources,
             sinks=controller.sinks,
+            virtual_sources=virtual_source_manager.to_list() if virtual_source_manager else [],
         )
 
     # ==================== API: Virtual Sources ====================

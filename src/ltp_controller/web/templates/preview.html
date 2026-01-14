@@ -16,7 +16,20 @@
             <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
         </div>
         <div class="preview-info">
-            <span>{{ route.source_id }} &rarr; {{ route.sink_id }}</span>
+            <span>
+                {%- set source_name = route.source_id[:8] ~ '...' -%}
+                {%- for source in sources if source.id == route.source_id -%}
+                    {%- set source_name = source.name -%}
+                {%- endfor -%}
+                {%- for vs in virtual_sources if vs.id == route.source_id -%}
+                    {%- set source_name = vs.name -%}
+                {%- endfor -%}
+                {%- set sink_name = route.sink_id[:8] ~ '...' -%}
+                {%- for sink in sinks if sink.id == route.sink_id -%}
+                    {%- set sink_name = sink.name -%}
+                {%- endfor -%}
+                {{ source_name }} &rarr; {{ sink_name }}
+            </span>
             <span class="frame-count">Frames: <span id="frames-{{ route.id }}">{{ route._frames_routed }}</span></span>
         </div>
         <div class="led-preview" id="preview-{{ route.id }}">
