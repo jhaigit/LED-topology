@@ -57,6 +57,13 @@ class Renderer(ABC):
         """
         self._frame_count += 1
 
+    def clear(self) -> None:
+        """Clear the display (called when stream stops).
+
+        Override in subclasses that need to show a waiting state.
+        """
+        pass
+
     def get_stats(self) -> dict[str, Any]:
         """Get renderer statistics."""
         return {

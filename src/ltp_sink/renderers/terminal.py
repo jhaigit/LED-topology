@@ -52,20 +52,23 @@ class TerminalRenderer(Renderer):
         self._console = Console()
         self._live: Live | None = None
         self._last_frame_time = 0.0
+        self._last_data_time = 0.0  # Track when data last arrived
         self._fps_samples: list[float] = []
         self._last_pixels: np.ndarray | None = None
         self._last_dimensions: tuple[int, ...] | None = None
         self._data_rate = 0.0
         self._bytes_received = 0
+        self._data_timeout = 2.0  # Seconds before showing "waiting"
 
     async def start(self) -> None:
         """Start the terminal renderer."""
         await super().start()
         self._last_frame_time = time.time()
+        self._last_data_time = 0.0  # Reset on start
         self._live = Live(
-            self._render_empty(),
+            self._render_display(),
             console=self._console,
-            refresh_per_second=60,
+            refresh_per_second=30,
             transient=True,
         )
         self._live.start()
@@ -77,6 +80,17 @@ class TerminalRenderer(Renderer):
             self._live = None
         await super().stop()
 
+    def clear(self) -> None:
+        """Clear display and show waiting message (called when stream stops)."""
+        self._last_pixels = None
+        self._last_dimensions = None
+        self._last_data_time = 0.0
+        self._fps_samples.clear()
+        self._fps = 0.0
+        self._data_rate = 0.0
+        if self._live:
+            self._live.update(self._render_empty())
+
     def _render_empty(self) -> Panel:
         """Render empty display."""
         return Panel(
@@ -84,6 +98,23 @@ class TerminalRenderer(Renderer):
             title=self.config.title,
             border_style="blue",
         )
+
+    def _render_display(self) -> Panel:
+        """Render current display state - either data or waiting message."""
+        now = time.time()
+
+        # Check if we have data and it's not stale
+        if self._last_pixels is not None and self._last_dimensions is not None:
+            if self._last_data_time > 0 and (now - self._last_data_time) < self._data_timeout:
+                return self._render_frame(self._last_pixels, self._last_dimensions)
+
+        # No data or data is stale - clear FPS samples and show waiting
+        if self._last_data_time > 0 and (now - self._last_data_time) >= self._data_timeout:
+            self._fps_samples.clear()
+            self._fps = 0.0
+            self._data_rate = 0.0
+
+        return self._render_empty()
 
     def render(self, pixels: np.ndarray, dimensions: tuple[int, ...]) -> None:
         """Render a frame of pixel data."""
@@ -99,6 +130,7 @@ class TerminalRenderer(Renderer):
                     self._fps_samples.pop(0)
                 self._fps = sum(self._fps_samples) / len(self._fps_samples)
         self._last_frame_time = now
+        self._last_data_time = now  # Track when data last arrived
 
         # Track data rate
         self._bytes_received += pixels.nbytes
@@ -110,7 +142,7 @@ class TerminalRenderer(Renderer):
 
         # Update display
         if self._live:
-            self._live.update(self._render_frame(pixels, dimensions))
+            self._live.update(self._render_display())
 
     def _render_frame(self, pixels: np.ndarray, dimensions: tuple[int, ...]) -> Panel:
         """Render a frame to a rich Panel."""

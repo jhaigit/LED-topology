@@ -219,6 +219,9 @@ class Sink:
             logger.info(f"Started stream: {stream_id}")
         elif action == StreamAction.STOP:
             self._stream_manager.stop_stream(stream_id)
+            # Clear renderer display when stream stops
+            if self._renderer:
+                self._renderer.clear()
             logger.info(f"Stopped stream: {stream_id}")
         elif action == StreamAction.PAUSE:
             logger.info(f"Paused stream: {stream_id}")
