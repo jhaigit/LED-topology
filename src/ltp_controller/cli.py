@@ -133,7 +133,8 @@ async def run_controller(
         if web_enabled:
             from ltp_controller.web import create_app
 
-            app = create_app(controller, router, sink_controller)
+            # Pass the event loop so Flask can schedule async work on it
+            app = create_app(controller, router, sink_controller, event_loop=loop)
 
             def run_web() -> None:
                 app.run(host=web_host, port=web_port, threaded=True, use_reloader=False)

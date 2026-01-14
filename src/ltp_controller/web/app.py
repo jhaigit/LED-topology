@@ -18,6 +18,7 @@ def create_app(
     controller: Controller,
     router: RoutingEngine,
     sink_controller: SinkController | None = None,
+    event_loop: asyncio.AbstractEventLoop | None = None,
 ) -> Flask:
     """Create and configure the Flask application."""
     template_dir = Path(__file__).parent / "templates"
@@ -33,21 +34,18 @@ def create_app(
     app.config["controller"] = controller
     app.config["router"] = router
     app.config["sink_controller"] = sink_controller
+    app.config["event_loop"] = event_loop
 
     # Helper to run async code from sync Flask handlers
     def run_async(coro: Any) -> Any:
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+        loop = app.config.get("event_loop")
 
         if loop and loop.is_running():
-            # Create a new loop in a thread-safe way
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, coro)
-                return future.result(timeout=10)
+            # Schedule on the controller's event loop
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            return future.result(timeout=10)
         else:
+            # Fallback to creating a new loop
             return asyncio.run(coro)
 
     # ==================== Pages ====================
