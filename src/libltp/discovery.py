@@ -166,10 +166,15 @@ class ServiceAdvertiser:
         )
 
         # avahi-publish-service args: name type port [txt ...]
+        # Strip .local. suffix - avahi doesn't want it
+        service_type = self.service_type
+        if service_type.endswith(".local."):
+            service_type = service_type[:-7]  # Remove ".local."
+
         cmd = [
             "avahi-publish-service",
             self.name,
-            self.service_type,
+            service_type,
             str(self.port),
         ]
 
