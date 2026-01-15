@@ -11,7 +11,7 @@ pip install pyserial
 ## Quick Start
 
 ```python
-from ltp_sink_serial import LtpDevice
+from ltp_serial_cli import LtpDevice
 
 # Connect to device
 device = LtpDevice('/dev/ttyUSB0')
@@ -155,31 +155,31 @@ stats.uptime_seconds    # Device uptime
 
 ```bash
 # Show device info
-python -m ltp_sink_serial /dev/ttyUSB0 info
+python -m ltp_serial_cli /dev/ttyUSB0 info
 
 # Fill with color
-python -m ltp_sink_serial /dev/ttyUSB0 fill 255 0 0
+python -m ltp_serial_cli /dev/ttyUSB0 fill 255 0 0
 
 # Clear
-python -m ltp_sink_serial /dev/ttyUSB0 clear
+python -m ltp_serial_cli /dev/ttyUSB0 clear
 
 # Set brightness
-python -m ltp_sink_serial /dev/ttyUSB0 brightness 128
+python -m ltp_serial_cli /dev/ttyUSB0 brightness 128
 
 # Rainbow pattern
-python -m ltp_sink_serial /dev/ttyUSB0 rainbow
+python -m ltp_serial_cli /dev/ttyUSB0 rainbow
 
 # Chase animation
-python -m ltp_sink_serial /dev/ttyUSB0 chase -r 0 -g 0 -b 255
+python -m ltp_serial_cli /dev/ttyUSB0 chase -r 0 -g 0 -b 255
 
 # Ping
-python -m ltp_sink_serial /dev/ttyUSB0 ping
+python -m ltp_serial_cli /dev/ttyUSB0 ping
 
 # Show status
-python -m ltp_sink_serial /dev/ttyUSB0 status
+python -m ltp_serial_cli /dev/ttyUSB0 status
 
 # Show statistics
-python -m ltp_sink_serial /dev/ttyUSB0 stats
+python -m ltp_serial_cli /dev/ttyUSB0 stats
 ```
 
 ## Low-Level Protocol Access
@@ -187,7 +187,7 @@ python -m ltp_sink_serial /dev/ttyUSB0 stats
 For advanced usage, you can use the protocol layer directly:
 
 ```python
-from ltp_sink_serial import LtpProtocol, CMD_SHOW
+from ltp_serial_cli import LtpProtocol, CMD_SHOW
 
 protocol = LtpProtocol()
 

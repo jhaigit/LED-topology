@@ -5,7 +5,7 @@ Communicate with microcontrollers running the LTP Serial Protocol v2
 for LED strip control.
 
 Example:
-    from ltp_sink_serial import LtpDevice
+    from ltp_serial_cli import LtpDevice
 
     device = LtpDevice('/dev/ttyUSB0')
     device.connect()

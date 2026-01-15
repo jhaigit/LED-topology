@@ -13,7 +13,7 @@ This document lists all dependencies required to build and run components of the
 
 ## Python Host Implementation
 
-**Location:** `src/ltp_sink_serial/`
+**Location:** `src/ltp_serial_cli/`
 
 ### Required Packages
 

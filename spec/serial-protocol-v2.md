@@ -1207,7 +1207,7 @@ Reserved for future versions:
 
 See the following files for reference implementations:
 
-- `src/ltp_sink_serial/protocol_v2.py` - Python host implementation
+- `src/ltp_serial_cli/` - Python host implementation and CLI tool
 - `arduino/ltp_serial_v2/` - Arduino library implementation
 
 ---

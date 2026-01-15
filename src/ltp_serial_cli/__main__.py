@@ -2,10 +2,10 @@
 LTP Serial Protocol v2 - Command Line Interface
 
 Usage:
-    python -m ltp_sink_serial /dev/ttyUSB0 info
-    python -m ltp_sink_serial /dev/ttyUSB0 fill 255 0 0
-    python -m ltp_sink_serial /dev/ttyUSB0 clear
-    python -m ltp_sink_serial /dev/ttyUSB0 brightness 128
+    python -m ltp_serial_cli /dev/ttyUSB0 info
+    python -m ltp_serial_cli /dev/ttyUSB0 fill 255 0 0
+    python -m ltp_serial_cli /dev/ttyUSB0 clear
+    python -m ltp_serial_cli /dev/ttyUSB0 brightness 128
 """
 
 import argparse
