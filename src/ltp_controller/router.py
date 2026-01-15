@@ -527,10 +527,15 @@ class RoutingEngine:
         route._source_client = ControlClient(source.host, source.port)
         await route._source_client.connect()
 
-        # Subscribe with sink's UDP port as target
+        # Subscribe with sink's address as callback target
         source_dims = self._get_dimensions(source)
         sink_dims = self._get_dimensions(sink)
-        sub_req = subscribe(0, sink_dims, "rgb", 30)
+        logger.info(f"Direct route: telling source to send to {sink.host}:{sink_udp_port}")
+        sub_req = subscribe(
+            0, sink_dims, "rgb", 30,
+            callback_host=sink.host,
+            callback_port=sink_udp_port,
+        )
         sub_resp = await route._source_client.request(sub_req)
 
         if sub_resp.data.get("status") != "ok":
