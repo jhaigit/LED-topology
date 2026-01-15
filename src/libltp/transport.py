@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable, Union
 
 import numpy as np
 
@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 # Type aliases for callbacks
-MessageHandler = Callable[[Message], Message | None]
+# MessageHandler can be sync or async
+MessageHandler = Callable[[Message], Union[Message, None, Awaitable[Message | None]]]
 DataHandler = Callable[[DataPacket], None]
 
 
@@ -88,7 +89,12 @@ class ControlConnection:
 
                 if self.handler:
                     try:
-                        response = self.handler(message)
+                        # Support both sync and async handlers
+                        result = self.handler(message)
+                        if asyncio.iscoroutine(result):
+                            response = await result
+                        else:
+                            response = result
                         if response:
                             await self.send(response)
                     except Exception as e:

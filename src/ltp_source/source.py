@@ -136,14 +136,14 @@ class Source:
                 except Exception as e:
                     logger.warning(f"Failed to register pattern control: {e}")
 
-    def _handle_message(self, message: Message) -> Message | None:
+    async def _handle_message(self, message: Message) -> Message | None:
         """Handle incoming control channel messages."""
         logger.debug(f"Handling message: {message.type}")
 
         if message.type == MessageType.CAPABILITY_REQUEST:
             return self._handle_capability_request(message)
         elif message.type == MessageType.SUBSCRIBE:
-            return self._handle_subscribe(message)
+            return await self._handle_subscribe(message)
         elif message.type == MessageType.CONTROL_GET:
             return self._handle_control_get(message)
         elif message.type == MessageType.CONTROL_SET:
@@ -167,7 +167,7 @@ class Source:
         }
         return capability_response(message.seq, device_info)
 
-    def _handle_subscribe(self, message: Message) -> Message:
+    async def _handle_subscribe(self, message: Message) -> Message:
         """Handle subscribe request from a sink or controller."""
         target = message.data.get("target", {})
         callback = message.data.get("callback", {})
@@ -186,16 +186,9 @@ class Source:
             # Create sender for this subscriber
             sender = DataSender(callback_host, callback_port)
 
-            # Start sender in background (can't await in sync handler)
-            async def start_sender() -> None:
-                await sender.start()
-
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(start_sender())
-            except RuntimeError:
-                # No running loop, try to run directly
-                asyncio.run(sender.start())
+            # Start sender and wait for it to be ready
+            await sender.start()
+            logger.info(f"Data sender started to {callback_host}:{callback_port}")
 
             # Associate sender with stream
             stream = self._stream_manager.get_stream(stream_id)
