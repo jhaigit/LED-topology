@@ -5,10 +5,11 @@ Provides a convenient API for communicating with LTP devices.
 """
 
 import struct
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Optional, TextIO
 
 import serial
 
@@ -37,6 +38,7 @@ from .protocol import (
     CAPS_EXTENDED,
     LED_TYPE_NAMES,
     COLOR_FORMAT_NAMES,
+    COMMAND_NAMES,
     STRIP_ALL,
 )
 from .exceptions import (
@@ -175,6 +177,8 @@ class LtpDevice:
         port: str,
         baudrate: int = 115200,
         timeout: float = 1.0,
+        debug: bool = False,
+        debug_file: Optional[TextIO] = None,
     ):
         """
         Initialize device connection.
@@ -183,10 +187,14 @@ class LtpDevice:
             port: Serial port path (e.g., '/dev/ttyUSB0', 'COM3')
             baudrate: Baud rate (default 115200)
             timeout: Response timeout in seconds
+            debug: Enable debug output showing packets sent/received
+            debug_file: File to write debug output (default: stderr)
         """
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
+        self.debug = debug
+        self._debug_file = debug_file or sys.stderr
 
         self._serial: Optional[serial.Serial] = None
         self._protocol = LtpProtocol()
@@ -480,7 +488,44 @@ class LtpDevice:
         """Send a packet to the device."""
         if not self._serial:
             raise LtpConnectionError("Not connected")
+        if self.debug:
+            self._debug_tx(packet)
         self._serial.write(packet)
+
+    def _debug_tx(self, packet: bytes):
+        """Log outgoing packet."""
+        if len(packet) < 6:
+            return
+        cmd = packet[4]
+        length = packet[2] | (packet[3] << 8)
+        cmd_name = COMMAND_NAMES.get(cmd, f"0x{cmd:02X}")
+        payload = packet[5:-1]  # Skip header and checksum
+
+        # Format payload preview
+        if len(payload) <= 16:
+            payload_hex = payload.hex()
+        else:
+            payload_hex = payload[:16].hex() + f"... ({len(payload)} bytes)"
+
+        print(f"TX >> {cmd_name} [{length}] {payload_hex}", file=self._debug_file)
+
+    def _debug_rx(self, packet: LtpPacket):
+        """Log incoming packet."""
+        cmd_name = COMMAND_NAMES.get(packet.cmd, f"0x{packet.cmd:02X}")
+        flags = []
+        if packet.is_response:
+            flags.append("RSP")
+        if packet.is_error:
+            flags.append("ERR")
+        flags_str = f" [{','.join(flags)}]" if flags else ""
+
+        # Format payload preview
+        if len(packet.payload) <= 16:
+            payload_hex = packet.payload.hex()
+        else:
+            payload_hex = packet.payload[:16].hex() + f"... ({len(packet.payload)} bytes)"
+
+        print(f"RX << {cmd_name}{flags_str} [{len(packet.payload)}] {payload_hex}", file=self._debug_file)
 
     def _reader_loop(self):
         """Background thread for reading responses."""
@@ -499,6 +544,9 @@ class LtpDevice:
 
     def _handle_packet(self, packet: LtpPacket):
         """Handle a received packet."""
+        if self.debug:
+            self._debug_rx(packet)
+
         # Handle async events
         if packet.cmd == CMD_INPUT_EVENT:
             if self._input_callback and len(packet.payload) >= 4:
