@@ -66,6 +66,9 @@ class SerialSinkConfig(BaseModel):
     debug: bool = False  # Show packets sent/received
     debug_file: TextIO | None = None
 
+    # Test mode
+    no_serial: bool = False  # Run without serial device (network test only)
+
     model_config = {"arbitrary_types_allowed": True}
 
 
@@ -87,16 +90,19 @@ class SerialSink:
         self._data_receiver: DataReceiver | None = None
         self._stream_manager = StreamManager()
 
-        # Serial renderer (v2 protocol)
-        renderer_config = V2RendererConfig(
-            port=self.config.port,
-            baudrate=self.config.baudrate,
-            timeout=self.config.timeout,
-            debug=self.config.debug,
-            debug_file=self.config.debug_file or sys.stderr,
-            auto_show=True,
-        )
-        self._renderer = V2Renderer(renderer_config)
+        # Serial renderer (v2 protocol) - only if not in no_serial mode
+        if self.config.no_serial:
+            self._renderer = None
+        else:
+            renderer_config = V2RendererConfig(
+                port=self.config.port,
+                baudrate=self.config.baudrate,
+                timeout=self.config.timeout,
+                debug=self.config.debug,
+                debug_file=self.config.debug_file or sys.stderr,
+                auto_show=True,
+            )
+            self._renderer = V2Renderer(renderer_config)
 
         # Controls registry - will be populated after device connection
         self._controls = ControlRegistry()
@@ -143,6 +149,8 @@ class SerialSink:
 
     def _setup_device_controls(self) -> None:
         """Set up controls based on connected device capabilities."""
+        if self._renderer is None:
+            return
         device_info = self._renderer.device_info
         if not device_info:
             return
@@ -190,6 +198,8 @@ class SerialSink:
 
     def _update_from_device(self) -> None:
         """Update configuration from connected device."""
+        if self._renderer is None:
+            return
         device_info = self._renderer.device_info
         if not device_info:
             return
@@ -263,15 +273,15 @@ class SerialSink:
             "protocol_version": "0.1",
             "controls": self._controls.to_list(),
             "backend": {
-                "type": "serial_v2",
+                "type": "serial_v2" if not self.config.no_serial else "no_serial",
                 "port": self.config.port,
                 "baudrate": self.config.baudrate,
-                "connected": self._renderer.is_connected(),
+                "connected": self._renderer.is_connected() if self._renderer else False,
             },
         }
 
         # Add device info if connected
-        if self._renderer.device_info:
+        if self._renderer and self._renderer.device_info:
             device_info["backend"]["firmware"] = self._renderer.device_info.firmware_version
             device_info["backend"]["device_name"] = self._renderer.device_info.device_name
 
@@ -309,7 +319,8 @@ class SerialSink:
         elif action == StreamAction.STOP:
             logger.info(f"Processing STOP for stream {stream_id}")
             self._stream_manager.stop_stream(stream_id)
-            self._renderer.clear()
+            if self._renderer:
+                self._renderer.clear()
             logger.info(f"Stopped stream: {stream_id}, renderer cleared")
         elif action == StreamAction.PAUSE:
             logger.info(f"Paused stream: {stream_id}")
@@ -336,26 +347,32 @@ class SerialSink:
         for control_id, value in values.items():
             # Handle hardware controls specially - forward to device
             if control_id == "hw_brightness":
-                try:
-                    int_value = int(value)
-                    if self._renderer.set_brightness(int_value):
-                        self._controls.set_value(control_id, float(int_value))
-                        applied[control_id] = float(int_value)
-                    else:
-                        errors[control_id] = "Failed to set on device"
-                except Exception as e:
-                    errors[control_id] = str(e)
+                if self._renderer is None:
+                    errors[control_id] = "No serial device connected"
+                else:
+                    try:
+                        int_value = int(value)
+                        if self._renderer.set_brightness(int_value):
+                            self._controls.set_value(control_id, float(int_value))
+                            applied[control_id] = float(int_value)
+                        else:
+                            errors[control_id] = "Failed to set on device"
+                    except Exception as e:
+                        errors[control_id] = str(e)
 
             elif control_id == "hw_gamma":
-                try:
-                    float_value = float(value)
-                    if self._renderer.set_gamma(float_value):
-                        self._controls.set_value(control_id, float_value)
-                        applied[control_id] = float_value
-                    else:
-                        errors[control_id] = "Failed to set on device"
-                except Exception as e:
-                    errors[control_id] = str(e)
+                if self._renderer is None:
+                    errors[control_id] = "No serial device connected"
+                else:
+                    try:
+                        float_value = float(value)
+                        if self._renderer.set_gamma(float_value):
+                            self._controls.set_value(control_id, float_value)
+                            applied[control_id] = float_value
+                        else:
+                            errors[control_id] = "Failed to set on device"
+                    except Exception as e:
+                        errors[control_id] = str(e)
 
             else:
                 # Local control
@@ -418,7 +435,10 @@ class SerialSink:
 
     def _render_loop(self) -> None:
         """Render thread main loop."""
-        logger.info("Serial render thread started (v2 protocol)")
+        if self.config.no_serial:
+            logger.info("Render thread started (NO SERIAL - test mode)")
+        else:
+            logger.info("Serial render thread started (v2 protocol)")
 
         while self._render_running:
             if not self._render_event.wait(timeout=0.5):
@@ -432,7 +452,11 @@ class SerialSink:
             if frame is None:
                 continue
 
-            if self._renderer.is_connected():
+            if self.config.no_serial:
+                # No serial mode - just count frames
+                self._frames_rendered += 1
+                logger.info(f"[NO SERIAL] Frame {self._frames_rendered}: {len(frame)} pixels received")
+            elif self._renderer and self._renderer.is_connected():
                 try:
                     bytes_sent = self._renderer.render(frame)
                     self._frames_rendered += 1
@@ -440,7 +464,7 @@ class SerialSink:
                 except Exception as e:
                     logger.error(f"Error rendering frame: {e}")
 
-        logger.info("Serial render thread stopped")
+        logger.info("Render thread stopped")
 
     def _generate_test_pattern(self) -> np.ndarray:
         """Generate RGB sweep test pattern."""
@@ -462,6 +486,11 @@ class SerialSink:
 
     async def _serial_monitor(self) -> None:
         """Monitor serial connection and reconnect if needed."""
+        # Skip if no serial mode
+        if self.config.no_serial or self._renderer is None:
+            logger.info("Serial monitor disabled (no_serial mode)")
+            return
+
         reconnect_delay = 1.0
         max_delay = 30.0
         was_connected = False
@@ -531,10 +560,22 @@ class SerialSink:
         if self._running:
             return
 
-        logger.info(f"Starting serial sink: {self.config.name} (v2 protocol)")
+        if self.config.no_serial:
+            logger.info(f"Starting serial sink: {self.config.name} (NO SERIAL - test mode)")
+            # In no_serial mode, use configured values directly
+            if self.config.pixels > 0:
+                self._pixel_count = self.config.pixels
+                self._dimensions = self.config.dimensions or [self._pixel_count]
+                self._topology = create_linear_topology(self._pixel_count)
+                self._pixel_buffer = np.zeros(
+                    (self._pixel_count, self.config.color_format.bytes_per_pixel),
+                    dtype=np.uint8,
+                )
+        else:
+            logger.info(f"Starting serial sink: {self.config.name} (v2 protocol)")
 
-        # Try to open serial port
-        if self.config.port:
+        # Try to open serial port (unless no_serial mode)
+        if self.config.port and self._renderer is not None:
             try:
                 self._renderer.open()
                 logger.info(f"Serial device connected")
@@ -555,22 +596,26 @@ class SerialSink:
 
         # Ensure we have at least some pixel count configured
         if self._pixel_count == 0:
-            self._pixel_count = 160  # Default fallback
-            self._dimensions = [160]
-            self._topology = create_linear_topology(160)
-            self._pixel_buffer = np.zeros((160, 3), dtype=np.uint8)
-            logger.warning("No pixel count configured and device not connected, using default: 160")
+            default_pixels = 60
+            self._pixel_count = default_pixels
+            self._dimensions = [default_pixels]
+            self._topology = create_linear_topology(default_pixels)
+            self._pixel_buffer = np.zeros(
+                (default_pixels, self.config.color_format.bytes_per_pixel),
+                dtype=np.uint8,
+            )
+            logger.warning(f"No pixel count configured and device not connected, using default: {default_pixels}")
+
+        # Start data receiver FIRST (must be ready before control server accepts connections)
+        self._data_receiver = DataReceiver(port=self.config.data_port)
+        self._data_receiver.handler = self._handle_data_packet
+        await self._data_receiver.start()
 
         # Start control server
         self._control_server = ControlServer(
             port=self.config.control_port, handler=self._handle_message
         )
         await self._control_server.start()
-
-        # Start data receiver
-        self._data_receiver = DataReceiver(port=self.config.data_port)
-        self._data_receiver.handler = self._handle_data_packet
-        await self._data_receiver.start()
 
         # Start mDNS advertisement
         self._advertiser = SinkAdvertiser(
@@ -603,11 +648,17 @@ class SerialSink:
         self._reconnect_task = asyncio.create_task(self._serial_monitor())
         self._stats_task = asyncio.create_task(self._stats_monitor())
 
-        logger.info(
-            f"Serial sink started - Control: {self._control_server.actual_port}, "
-            f"Data: {self._data_receiver.actual_port}, "
-            f"Serial: {self.config.port} ({self.config.baudrate} baud)"
-        )
+        if self.config.no_serial:
+            logger.info(
+                f"Serial sink started (NO SERIAL) - Control: {self._control_server.actual_port}, "
+                f"Data: {self._data_receiver.actual_port}, Pixels: {self._pixel_count}"
+            )
+        else:
+            logger.info(
+                f"Serial sink started - Control: {self._control_server.actual_port}, "
+                f"Data: {self._data_receiver.actual_port}, "
+                f"Serial: {self.config.port} ({self.config.baudrate} baud)"
+            )
 
     async def stop(self) -> None:
         """Stop the serial sink."""
@@ -644,7 +695,8 @@ class SerialSink:
             f"{self._frames_rendered} frames rendered, {self._frames_dropped} frames dropped"
         )
 
-        self._renderer.close()
+        if self._renderer:
+            self._renderer.close()
 
         if self._advertiser:
             await self._advertiser.stop()
@@ -682,7 +734,7 @@ class SerialSink:
 
     @property
     def serial_connected(self) -> bool:
-        return self._renderer.is_connected()
+        return self._renderer.is_connected() if self._renderer else False
 
     @property
     def pixel_count(self) -> int:
@@ -692,7 +744,7 @@ class SerialSink:
         """Get sink statistics."""
         return {
             "running": self._running,
-            "serial": self._renderer.get_stats(),
+            "serial": self._renderer.get_stats() if self._renderer else {"mode": "no_serial"},
             "control_port": self.control_port,
             "data_port": self.data_port,
             "pixels": self._pixel_count,

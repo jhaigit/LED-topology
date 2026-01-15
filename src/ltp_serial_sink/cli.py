@@ -100,6 +100,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show serial protocol packets sent/received",
     )
+    parser.add_argument(
+        "--no-serial",
+        action="store_true",
+        help="Run without serial device (for testing network data flow)",
+    )
 
     return parser.parse_args()
 
@@ -181,6 +186,7 @@ def config_from_args(args: argparse.Namespace) -> SerialSinkConfig:
         dimensions=dimensions,
         color_format=color_map.get(args.color_format, ColorFormat.RGB),
         debug=args.debug,
+        no_serial=getattr(args, 'no_serial', False),
     )
 
 
@@ -310,24 +316,32 @@ def main() -> int:
     else:
         config = config_from_args(args)
 
-    # Validate port is specified
-    if not config.port:
+    # Validate port is specified (unless no-serial mode)
+    if not config.port and not config.no_serial:
         print("Error: Serial port required. Use --port or specify in config file.", file=sys.stderr)
         print("Use --list-ports to see available ports.", file=sys.stderr)
+        print("Use --no-serial to run without serial device.", file=sys.stderr)
         return 1
 
     # Test mode
     if args.test:
+        if config.no_serial:
+            print("Error: --test requires a serial port", file=sys.stderr)
+            return 1
         return 0 if test_connection(config) else 1
 
     # Print startup info
     print(f"Starting LTP Serial Sink: {config.name}")
-    print(f"  Protocol: v2 (binary)")
-    print(f"  Pixels: {config.pixels if config.pixels > 0 else 'auto-detect'}")
+    if config.no_serial:
+        print(f"  Mode: NO SERIAL (network test only)")
+        print(f"  Pixels: {config.pixels if config.pixels > 0 else 60}")
+    else:
+        print(f"  Protocol: v2 (binary)")
+        print(f"  Pixels: {config.pixels if config.pixels > 0 else 'auto-detect'}")
+        print(f"  Serial port: {config.port}")
+        print(f"  Baud rate: {config.baudrate}")
     if config.dimensions:
         print(f"  Dimensions: {config.dimensions}")
-    print(f"  Serial port: {config.port}")
-    print(f"  Baud rate: {config.baudrate}")
     print(f"  Debug packets: {config.debug}")
     print()
 
