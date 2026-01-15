@@ -9,6 +9,7 @@ from flask import Flask, jsonify, render_template, request
 
 from ltp_controller.controller import Controller
 from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngine
+from ltp_controller.scalar_sources import ScalarSourceManager, SCALAR_SOURCE_TYPES
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager, VIRTUAL_SOURCE_TYPES
 
@@ -20,6 +21,7 @@ def create_app(
     router: RoutingEngine,
     sink_controller: SinkController | None = None,
     virtual_source_manager: VirtualSourceManager | None = None,
+    scalar_source_manager: ScalarSourceManager | None = None,
     event_loop: asyncio.AbstractEventLoop | None = None,
 ) -> Flask:
     """Create and configure the Flask application."""
@@ -37,6 +39,7 @@ def create_app(
     app.config["router"] = router
     app.config["sink_controller"] = sink_controller
     app.config["virtual_source_manager"] = virtual_source_manager
+    app.config["scalar_source_manager"] = scalar_source_manager
     app.config["event_loop"] = event_loop
 
     # Helper to run async code from sync Flask handlers
@@ -718,6 +721,172 @@ def create_app(
             return jsonify({"error": "Virtual source not found"}), 404
 
         source.stop()
+        return jsonify({"status": "ok"})
+
+    # ==================== Page: Scalar Sources ====================
+
+    @app.route("/scalar-sources")
+    def scalar_sources_page() -> str:
+        """Scalar sources (sensors) management page."""
+        return render_template(
+            "scalar_sources.html",
+            scalar_sources=scalar_source_manager.all() if scalar_source_manager else [],
+        )
+
+    # ==================== API: Scalar Sources ====================
+
+    @app.route("/api/scalar-sources")
+    def api_scalar_sources_list() -> Any:
+        """List all scalar sources."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+        return jsonify(scalar_source_manager.to_list())
+
+    @app.route("/api/scalar-sources/types")
+    def api_scalar_source_types() -> Any:
+        """List available scalar source types."""
+        types = []
+        for type_name, type_class in SCALAR_SOURCE_TYPES.items():
+            types.append({
+                "type": type_name,
+                "name": type_name.replace("_", " ").title(),
+                "description": type_class.__doc__.split("\n")[0] if type_class.__doc__ else "",
+            })
+        return jsonify(types)
+
+    @app.route("/api/scalar-sources", methods=["POST"])
+    def api_scalar_sources_create() -> Any:
+        """Create a new scalar source."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        source_type = data.get("type")
+        if not source_type:
+            return jsonify({"error": "Missing 'type' field"}), 400
+
+        if source_type not in SCALAR_SOURCE_TYPES:
+            return jsonify({"error": f"Unknown source type: {source_type}"}), 400
+
+        from ltp_controller.scalar_sources import ScalarSourceConfig
+
+        config = ScalarSourceConfig(
+            name=data.get("name", f"{source_type.replace('_', ' ').title()} Source"),
+            description=data.get("description", ""),
+            sample_rate=data.get("sample_rate", 1.0),
+            enabled=data.get("enabled", True),
+        )
+
+        source_class = SCALAR_SOURCE_TYPES[source_type]
+        source = source_class(config)
+        scalar_source_manager.add(source)
+
+        # Start if enabled
+        if config.enabled:
+            run_async(source.start())
+
+        return jsonify(source.to_dict()), 201
+
+    @app.route("/api/scalar-sources/<source_id>")
+    def api_scalar_source_get(source_id: str) -> Any:
+        """Get a scalar source."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+
+        source = scalar_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Scalar source not found"}), 404
+        return jsonify(source.to_dict())
+
+    @app.route("/api/scalar-sources/<source_id>", methods=["DELETE"])
+    def api_scalar_source_delete(source_id: str) -> Any:
+        """Delete a scalar source."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+
+        source = scalar_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Scalar source not found"}), 404
+
+        # Stop if running
+        if source.is_running:
+            run_async(source.stop())
+
+        scalar_source_manager.remove(source_id)
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/scalar-sources/<source_id>/controls", methods=["GET", "PUT"])
+    def api_scalar_source_controls(source_id: str) -> Any:
+        """Get or set scalar source controls."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+
+        source = scalar_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Scalar source not found"}), 404
+
+        if request.method == "GET":
+            return jsonify(source.controls.get_values())
+
+        # PUT
+        values = request.get_json()
+        if not values:
+            return jsonify({"error": "No values provided"}), 400
+
+        results = {}
+        for control_id, value in values.items():
+            try:
+                source.set_control(control_id, value)
+                results[control_id] = "ok"
+            except Exception:
+                results[control_id] = "error"
+
+        return jsonify({"status": "ok", "results": results})
+
+    @app.route("/api/scalar-sources/<source_id>/sample")
+    def api_scalar_source_sample(source_id: str) -> Any:
+        """Get current sample from scalar source."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+
+        source = scalar_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Scalar source not found"}), 404
+
+        sample = source.sample()
+        return jsonify({
+            "values": sample.tolist(),
+            "channels": [ch.model_dump() for ch in source.channels],
+            "channel_arrays": [arr.model_dump() for arr in source.channel_arrays],
+        })
+
+    @app.route("/api/scalar-sources/<source_id>/start", methods=["POST"])
+    def api_scalar_source_start(source_id: str) -> Any:
+        """Start a scalar source."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+
+        source = scalar_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Scalar source not found"}), 404
+
+        run_async(source.start())
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/scalar-sources/<source_id>/stop", methods=["POST"])
+    def api_scalar_source_stop(source_id: str) -> Any:
+        """Stop a scalar source."""
+        if not scalar_source_manager:
+            return jsonify({"error": "Scalar sources not available"}), 503
+
+        source = scalar_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Scalar source not found"}), 404
+
+        run_async(source.stop())
         return jsonify({"status": "ok"})
 
     return app

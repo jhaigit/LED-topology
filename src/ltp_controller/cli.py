@@ -14,6 +14,7 @@ import yaml
 
 from ltp_controller.controller import Controller
 from ltp_controller.router import RouteMode, RouteTransform, RoutingEngine
+from ltp_controller.scalar_sources import ScalarSourceManager, SCALAR_SOURCE_TYPES
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager
 
@@ -108,6 +109,7 @@ async def run_controller(
     router: RoutingEngine,
     sink_controller: SinkController,
     virtual_source_manager: VirtualSourceManager,
+    scalar_source_manager: ScalarSourceManager | None = None,
     web_enabled: bool = True,
     web_host: str = "0.0.0.0",
     web_port: int = 8080,
@@ -133,6 +135,10 @@ async def run_controller(
         # Start virtual source manager
         virtual_source_manager.start()
 
+        # Start scalar sources
+        if scalar_source_manager:
+            await scalar_source_manager.start_all()
+
         # Start web interface in a separate thread
         web_thread = None
         if web_enabled:
@@ -142,6 +148,7 @@ async def run_controller(
             app = create_app(
                 controller, router, sink_controller,
                 virtual_source_manager=virtual_source_manager,
+                scalar_source_manager=scalar_source_manager,
                 event_loop=loop,
             )
 
@@ -159,6 +166,8 @@ async def run_controller(
 
     finally:
         # Cleanup
+        if scalar_source_manager:
+            await scalar_source_manager.stop_all()
         virtual_source_manager.stop()
         await sink_controller.cleanup_all()
         await router.stop()
@@ -230,6 +239,33 @@ def main() -> int:
     # Create sink controller for direct fills
     sink_controller = SinkController(controller)
 
+    # Create scalar source manager
+    scalar_source_manager = ScalarSourceManager()
+
+    # Load pre-configured scalar sources
+    ss_config = config.get("scalar_sources", [])
+    for ss_data in ss_config:
+        try:
+            source_type = ss_data.get("type")
+            if source_type not in SCALAR_SOURCE_TYPES:
+                logger.error(f"Unknown scalar source type: {source_type}")
+                continue
+
+            from ltp_controller.scalar_sources import ScalarSourceConfig
+
+            ss_config_obj = ScalarSourceConfig(
+                name=ss_data.get("name", f"Scalar Source"),
+                description=ss_data.get("description", ""),
+                sample_rate=ss_data.get("sample_rate", 1.0),
+                enabled=ss_data.get("enabled", True),
+            )
+            source_class = SCALAR_SOURCE_TYPES[source_type]
+            source = source_class(ss_config_obj)
+            scalar_source_manager.add(source)
+            logger.info(f"Created scalar source: {ss_config_obj.name}")
+        except Exception as e:
+            logger.error(f"Failed to create scalar source: {e}")
+
     # Load pre-configured routes
     routes_config = config.get("routes", [])
     for route_data in routes_config:
@@ -257,6 +293,7 @@ def main() -> int:
                 router=router,
                 sink_controller=sink_controller,
                 virtual_source_manager=virtual_source_manager,
+                scalar_source_manager=scalar_source_manager,
                 web_enabled=web_enabled,
                 web_host=web_host,
                 web_port=web_port,
