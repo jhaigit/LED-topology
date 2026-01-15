@@ -859,6 +859,16 @@ class RoutingEngine:
         else:
             logger.info(f"Skipping STOP for route {route.name}: no sink_client or sink_stream_id")
 
+        # Stop stream on source
+        if route._source_client and route._source_stream_id:
+            try:
+                logger.info(f"Sending STOP command for stream {route._source_stream_id} to source")
+                stop_req = stream_control(0, route._source_stream_id, StreamAction.STOP)
+                resp = await route._source_client.request(stop_req, timeout=2.0)
+                logger.info(f"STOP response from source: {resp.data if resp else 'None'}")
+            except Exception as e:
+                logger.warning(f"Failed to send STOP to source for route {route.name}: {e}")
+
         if route._source_client:
             try:
                 await route._source_client.close()

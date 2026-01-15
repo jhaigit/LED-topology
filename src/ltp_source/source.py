@@ -23,6 +23,7 @@ from libltp import (
     control_set_response,
     subscribe_response,
 )
+from libltp.types import StreamAction
 from libltp.transport import ControlClient, ControlServer, DataSender, StreamManager
 from ltp_source.patterns import Pattern, PatternRegistry
 
@@ -144,6 +145,8 @@ class Source:
             return self._handle_capability_request(message)
         elif message.type == MessageType.SUBSCRIBE:
             return await self._handle_subscribe(message)
+        elif message.type == MessageType.STREAM_CONTROL:
+            return await self._handle_stream_control(message)
         elif message.type == MessageType.CONTROL_GET:
             return self._handle_control_get(message)
         elif message.type == MessageType.CONTROL_SET:
@@ -206,6 +209,40 @@ class Source:
                 "color": self.config.color_format.name.lower(),
                 "rate": int(self._controls.get_value("rate")),
             },
+            stream_id=stream_id,
+        )
+
+    async def _handle_stream_control(self, message: Message) -> Message:
+        """Handle stream control request (stop/pause streams)."""
+        stream_id = message.data.get("stream_id")
+        action_str = message.data.get("action", "start")
+        action = StreamAction(action_str)
+
+        logger.info(f"Stream control: {action.value} for stream {stream_id}")
+
+        if action == StreamAction.STOP:
+            # Stop the stream and clean up sender
+            self._stream_manager.stop_stream(stream_id)
+
+            # Close and remove the data sender
+            if stream_id in self._data_senders:
+                sender = self._data_senders.pop(stream_id)
+                await sender.stop()
+                logger.info(f"Stopped and removed sender for stream {stream_id}")
+
+            # Remove from stream manager
+            self._stream_manager.delete_stream(stream_id)
+
+        elif action == StreamAction.PAUSE:
+            self._stream_manager.stop_stream(stream_id)
+
+        elif action == StreamAction.START:
+            self._stream_manager.start_stream(stream_id)
+
+        return Message(
+            MessageType.STREAM_CONTROL_RESPONSE,
+            message.seq,
+            status="ok",
             stream_id=stream_id,
         )
 
