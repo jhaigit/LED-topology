@@ -387,6 +387,8 @@ class SerialSink:
 
     def _handle_data_packet(self, packet: DataPacket) -> None:
         """Handle incoming data packet."""
+        from libltp import scale_buffer
+
         # Only process data if there's an active stream
         if not self._stream_manager.active_streams:
             logger.debug("Ignoring data packet - no active streams")
@@ -410,9 +412,17 @@ class SerialSink:
         # Get control values
         test_mode = self._controls.get_value("test_mode")
 
+        # Scale incoming data if pixel count differs
+        incoming_pixels = packet.pixel_data
+        if len(incoming_pixels) != self._pixel_count:
+            if self._packet_count == 1:
+                logger.info(
+                    f"Scaling incoming data: {len(incoming_pixels)} -> {self._pixel_count} pixels"
+                )
+            incoming_pixels = scale_buffer(incoming_pixels, (self._pixel_count,), mode="fit")
+
         # Store pixel data
-        if len(packet.pixel_data) <= len(self._pixel_buffer):
-            self._pixel_buffer[: len(packet.pixel_data)] = packet.pixel_data
+        self._pixel_buffer[:] = incoming_pixels
 
         # Check test mode
         if test_mode:
