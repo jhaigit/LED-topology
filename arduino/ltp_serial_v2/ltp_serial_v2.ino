@@ -465,8 +465,18 @@ void processPacket(const LtpPacket& pkt) {
             // Send ACK before reset
             protocol.sendAck(CMD_RESET);
             delay(10);
-            // Software reset (jump to address 0)
+            // Software reset - platform specific
+#if defined(__arm__) && defined(CORE_TEENSY)
+            // Teensy 3.x/4.x (ARM)
+            SCB_AIRCR = 0x05FA0004;  // System reset request
+#elif defined(__AVR__)
+            // AVR (Arduino Uno, Nano, Mega, etc.)
             asm volatile ("jmp 0");
+#else
+            // Generic fallback - may not work on all platforms
+            void (*resetFunc)(void) = 0;
+            resetFunc();
+#endif
             break;
 
         case CMD_HELLO:
