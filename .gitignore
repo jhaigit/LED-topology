@@ -49,3 +49,4 @@ htmlcov/
 # Local config
 *.local.yaml
 .env
+.venv-*
