@@ -1,4 +1,4 @@
-"""Command-line interface for LTP Serial Sink."""
+"""Command-line interface for LTP Serial Sink (v2 protocol)."""
 
 import argparse
 import asyncio
@@ -11,14 +11,14 @@ import yaml
 
 from libltp import ColorFormat, DeviceType
 from ltp_serial_sink.sink import SerialSink, SerialSinkConfig
-from ltp_serial_sink.serial_renderer import SerialRenderer, SerialConfig
+from ltp_serial_sink.v2_renderer import V2Renderer, V2RendererConfig
 
 
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         prog="ltp-serial-sink",
-        description="LTP Serial Sink - LED data sink with serial output backend",
+        description="LTP Serial Sink - LED data sink using v2 binary protocol",
     )
 
     parser.add_argument(
@@ -41,17 +41,17 @@ def parse_args() -> argparse.Namespace:
         help="Serial port path (required unless using config file)",
     )
     parser.add_argument(
-        "--baud",
+        "--baudrate",
         "-b",
         type=int,
-        default=38400,
-        help="Baud rate (default: 38400)",
+        default=115200,
+        help="Baud rate (default: 115200)",
     )
     parser.add_argument(
         "--pixels",
         type=int,
-        default=160,
-        help="Number of pixels (default: 160)",
+        default=0,
+        help="Number of pixels (default: auto-detect from device)",
     )
     parser.add_argument(
         "--dimensions",
@@ -67,39 +67,10 @@ def parse_args() -> argparse.Namespace:
         help="Color format (default: rgb)",
     )
     parser.add_argument(
-        "--hex-format",
-        type=str,
-        choices=["0x", "#"],
-        default="0x",
-        help="Output hex format (default: 0x)",
-    )
-    parser.add_argument(
-        "--no-change-detection",
-        action="store_true",
-        help="Disable change detection (send all pixels every frame)",
-    )
-    parser.add_argument(
-        "--no-run-length",
-        action="store_true",
-        help="Disable run-length optimization",
-    )
-    parser.add_argument(
-        "--command-delay",
+        "--timeout",
         type=float,
-        default=0.001,
-        help="Delay between serial commands in seconds (default: 0.001)",
-    )
-    parser.add_argument(
-        "--frame-delay",
-        type=float,
-        default=0.0,
-        help="Minimum delay between frames in seconds (default: 0.0)",
-    )
-    parser.add_argument(
-        "--max-commands",
-        type=int,
-        default=0,
-        help="Maximum commands per frame, 0 = unlimited (default: 0)",
+        default=2.0,
+        help="Serial timeout in seconds (default: 2.0)",
     )
     parser.add_argument(
         "--log-level",
@@ -125,9 +96,9 @@ def parse_args() -> argparse.Namespace:
         help="Enable verbose logging (same as --log-level debug)",
     )
     parser.add_argument(
-        "--show-commands",
+        "--debug",
         action="store_true",
-        help="Log each serial command sent to the LED controller",
+        help="Show serial protocol packets sent/received",
     )
 
     return parser.parse_args()
@@ -144,7 +115,6 @@ def load_config(path: Path) -> SerialSinkConfig:
         device = data["device"]
         if "id" in device and device["id"] != "auto":
             from uuid import UUID
-
             config_dict["device_id"] = UUID(device["id"])
         if "name" in device:
             config_dict["name"] = device["name"]
@@ -168,32 +138,14 @@ def load_config(path: Path) -> SerialSinkConfig:
         serial = data["serial"]
         if "port" in serial:
             config_dict["port"] = serial["port"]
-        if "baud" in serial:
-            config_dict["baud"] = serial["baud"]
+        if "baudrate" in serial:
+            config_dict["baudrate"] = serial["baudrate"]
+        if "baud" in serial:  # Legacy support
+            config_dict["baudrate"] = serial["baud"]
         if "timeout" in serial:
             config_dict["timeout"] = serial["timeout"]
-        if "write_timeout" in serial:
-            config_dict["write_timeout"] = serial["write_timeout"]
-
-    if "protocol" in data:
-        protocol = data["protocol"]
-        if "hex_format" in protocol:
-            config_dict["hex_format"] = protocol["hex_format"]
-        if "line_ending" in protocol:
-            config_dict["line_ending"] = protocol["line_ending"]
-        if "command_delay" in protocol:
-            config_dict["command_delay"] = protocol["command_delay"]
-        if "frame_delay" in protocol:
-            config_dict["frame_delay"] = protocol["frame_delay"]
-
-    if "optimization" in data:
-        opt = data["optimization"]
-        if "change_detection" in opt:
-            config_dict["change_detection"] = opt["change_detection"]
-        if "run_length" in opt:
-            config_dict["run_length"] = opt["run_length"]
-        if "max_commands_per_frame" in opt:
-            config_dict["max_commands_per_frame"] = opt["max_commands_per_frame"]
+        if "debug" in serial:
+            config_dict["debug"] = serial["debug"]
 
     return SerialSinkConfig(**config_dict)
 
@@ -201,14 +153,18 @@ def load_config(path: Path) -> SerialSinkConfig:
 def config_from_args(args: argparse.Namespace) -> SerialSinkConfig:
     """Create configuration from command line arguments."""
     # Parse dimensions
-    dimensions = [args.pixels]
+    pixels = args.pixels
+    dimensions = []
+
     if args.dimensions:
         parts = args.dimensions.lower().split("x")
         dimensions = [int(p) for p in parts]
         if len(dimensions) > 1:
-            args.pixels = dimensions[0] * dimensions[1]
+            pixels = dimensions[0] * dimensions[1]
         else:
-            args.pixels = dimensions[0]
+            pixels = dimensions[0]
+    elif pixels > 0:
+        dimensions = [pixels]
 
     # Map color format
     color_map = {
@@ -219,23 +175,18 @@ def config_from_args(args: argparse.Namespace) -> SerialSinkConfig:
     return SerialSinkConfig(
         name=args.name,
         port=args.port or "",
-        baud=args.baud,
-        pixels=args.pixels,
+        baudrate=args.baudrate,
+        timeout=args.timeout,
+        pixels=pixels,
         dimensions=dimensions,
         color_format=color_map.get(args.color_format, ColorFormat.RGB),
-        hex_format=args.hex_format,
-        change_detection=not args.no_change_detection,
-        run_length=not args.no_run_length,
-        command_delay=args.command_delay,
-        frame_delay=args.frame_delay,
-        max_commands_per_frame=args.max_commands,
-        trace_commands=args.show_commands,
+        debug=args.debug,
     )
 
 
 def list_ports() -> None:
     """Print available serial ports."""
-    ports = SerialRenderer.list_ports()
+    ports = V2Renderer.list_ports()
 
     if not ports:
         print("No serial ports found.")
@@ -253,17 +204,20 @@ def list_ports() -> None:
 
 
 def test_connection(config: SerialSinkConfig) -> bool:
-    """Test serial connection with a pattern."""
-    print(f"Testing serial connection to {config.port} at {config.baud} baud...")
+    """Test serial connection with v2 protocol."""
+    print(f"Testing serial connection to {config.port} at {config.baudrate} baud...")
+    print(f"Using LTP Serial Protocol v2")
     print()
 
-    serial_config = SerialConfig(
+    renderer_config = V2RendererConfig(
         port=config.port,
-        baud=config.baud,
-        hex_format=config.hex_format,
+        baudrate=config.baudrate,
+        timeout=config.timeout,
+        debug=config.debug,
+        debug_file=sys.stderr,
     )
 
-    renderer = SerialRenderer(serial_config)
+    renderer = V2Renderer(renderer_config)
 
     try:
         renderer.open()
@@ -272,35 +226,46 @@ def test_connection(config: SerialSinkConfig) -> bool:
         print(f"  ERROR: Could not open port: {e}")
         return False
 
+    # Show device info
+    device_info = renderer.device_info
+    if device_info:
+        print(f"  Device: {device_info.device_name or 'Unknown'}")
+        print(f"  Firmware: v{device_info.firmware_version}")
+        print(f"  Pixels: {device_info.total_pixels}")
+        print(f"  Strips: {device_info.strip_count}")
+        print()
+
+        # Show capabilities
+        print("  Capabilities:")
+        print(f"    Brightness: {device_info.has_brightness}")
+        print(f"    Gamma: {device_info.has_gamma}")
+        print(f"    RLE: {device_info.has_rle}")
+        print()
+
     # Send test pattern
     print("  Sending test pattern...")
-    print()
+    pixel_count = renderer.pixel_count or 160
 
     # Red, green, blue sections
-    test_patterns = [
-        (f"0,{config.pixels // 3 - 1}", "0xFF0000", "Red"),
-        (f"{config.pixels // 3},{2 * config.pixels // 3 - 1}", "0x00FF00", "Green"),
-        (f"{2 * config.pixels // 3},{config.pixels - 1}", "0x0000FF", "Blue"),
-    ]
-
-    for range_str, color, name in test_patterns:
-        cmd = f"{range_str}={color}"
-        print(f"    {name}: {cmd}")
-        renderer.send_raw(cmd)
-        time.sleep(0.1)
+    renderer.fill(255, 0, 0)  # All red first
+    time.sleep(0.5)
+    renderer.fill(0, 255, 0)  # All green
+    time.sleep(0.5)
+    renderer.fill(0, 0, 255)  # All blue
+    time.sleep(0.5)
 
     print()
-    print("  Pattern sent. Check your LED strip for red/green/blue sections.")
+    print("  Pattern sent. Check your LED strip for red/green/blue sequence.")
     print()
 
     # Clear after a moment
-    time.sleep(2)
+    time.sleep(1)
     print("  Clearing strip...")
-    renderer.send_raw(f"0,{config.pixels - 1}=0x000000")
+    renderer.fill(0, 0, 0)
 
     renderer.close()
     print()
-    print("SUCCESS: Serial connection working")
+    print("SUCCESS: Serial connection working with v2 protocol")
     return True
 
 
@@ -339,6 +304,9 @@ def main() -> int:
             print(f"Error: Config file not found: {args.config}", file=sys.stderr)
             return 1
         config = load_config(args.config)
+        # Override debug from command line
+        if args.debug:
+            config = SerialSinkConfig(**{**config.model_dump(), "debug": True})
     else:
         config = config_from_args(args)
 
@@ -354,12 +322,13 @@ def main() -> int:
 
     # Print startup info
     print(f"Starting LTP Serial Sink: {config.name}")
-    print(f"  Pixels: {config.pixels}")
-    print(f"  Dimensions: {config.dimensions}")
+    print(f"  Protocol: v2 (binary)")
+    print(f"  Pixels: {config.pixels if config.pixels > 0 else 'auto-detect'}")
+    if config.dimensions:
+        print(f"  Dimensions: {config.dimensions}")
     print(f"  Serial port: {config.port}")
-    print(f"  Baud rate: {config.baud}")
-    print(f"  Change detection: {config.change_detection}")
-    print(f"  Run-length optimization: {config.run_length}")
+    print(f"  Baud rate: {config.baudrate}")
+    print(f"  Debug packets: {config.debug}")
     print()
 
     # Run
