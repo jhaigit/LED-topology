@@ -17,18 +17,17 @@
         </div>
         <div class="preview-info">
             <span>
-                {%- set source_name = route.source_id[:8] ~ '...' -%}
+                {%- set ns = namespace(source_name=route.source_id[:8] ~ '...', sink_name=route.sink_id[:8] ~ '...') -%}
                 {%- for source in sources if source.id == route.source_id -%}
-                    {%- set source_name = source.name -%}
+                    {%- set ns.source_name = source.name -%}
                 {%- endfor -%}
                 {%- for vs in virtual_sources if vs.id == route.source_id -%}
-                    {%- set source_name = vs.name -%}
+                    {%- set ns.source_name = vs.name -%}
                 {%- endfor -%}
-                {%- set sink_name = route.sink_id[:8] ~ '...' -%}
                 {%- for sink in sinks if sink.id == route.sink_id -%}
-                    {%- set sink_name = sink.name -%}
+                    {%- set ns.sink_name = sink.name -%}
                 {%- endfor -%}
-                {{ source_name }} &rarr; {{ sink_name }}
+                {{ ns.source_name }} &rarr; {{ ns.sink_name }}
             </span>
             <span class="frame-count">Frames: <span id="frames-{{ route.id }}">{% if route.mode.value == 'direct' %}<em class="na-text">N/A</em>{% else %}{{ route._frames_routed }}{% endif %}</span></span>
         </div>
