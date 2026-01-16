@@ -30,7 +30,7 @@
                 {%- endfor -%}
                 {{ source_name }} &rarr; {{ sink_name }}
             </span>
-            <span class="frame-count">Frames: <span id="frames-{{ route.id }}">{{ route._frames_routed }}</span></span>
+            <span class="frame-count">Frames: <span id="frames-{{ route.id }}">{% if route.mode.value == 'direct' %}<em class="na-text">N/A</em>{% else %}{{ route._frames_routed }}{% endif %}</span></span>
         </div>
         <div class="led-preview" id="preview-{{ route.id }}">
             <img src="/api/routes/{{ route.id }}/preview" alt="LED Preview" class="led-strip">
@@ -75,7 +75,11 @@
     justify-content: space-between;
     color: var(--text-secondary);
     font-size: 0.9rem;
-    margin-bottom: 1rem;
+}
+
+.na-text {
+    color: var(--text-secondary);
+    font-style: italic;
 }
 
 .led-preview {
@@ -103,14 +107,16 @@ setInterval(() => {
     });
 }, 100);
 
-// Update frame counts every second
+// Update frame counts every second (skip direct routes)
 setInterval(() => {
     fetch('/api/routes')
         .then(r => r.json())
         .then(routes => {
             routes.forEach(route => {
                 const el = document.getElementById('frames-' + route.id);
-                if (el) el.textContent = route.frames_routed;
+                if (el && route.mode !== 'direct') {
+                    el.textContent = route.frames_routed;
+                }
             });
         });
 }, 1000);

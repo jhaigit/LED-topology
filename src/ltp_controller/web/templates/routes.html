@@ -74,7 +74,7 @@
                     {{ route.error_message or '' }}
                 </small>
             </td>
-            <td id="frames-{{ route.id }}">{{ route._frames_routed }}</td>
+            <td id="frames-{{ route.id }}">{% if route.mode.value == 'direct' %}<span class="na-badge">N/A</span>{% else %}{{ route._frames_routed }}{% endif %}</td>
             <td class="actions">
                 {% if route.enabled %}
                 <button class="btn btn-sm btn-warning" onclick="disableRoute('{{ route.id }}')">Disable</button>
@@ -98,6 +98,11 @@
     font-size: 0.7em;
     margin-left: 4px;
     cursor: help;
+}
+.na-badge {
+    color: var(--secondary, #6c757d);
+    font-style: italic;
+    font-size: 0.9em;
 }
 .virtual-badge {
     display: inline-block;
@@ -287,9 +292,9 @@ function updateRouteStatus() {
                     }
                 }
 
-                // Update frame count
+                // Update frame count (skip for direct routes)
                 const framesEl = document.getElementById('frames-' + route.id);
-                if (framesEl) {
+                if (framesEl && route.mode !== 'direct') {
                     framesEl.textContent = route.frames_routed;
                 }
 
