@@ -54,7 +54,7 @@
 
 // Mode 1: 8 Independent Strips
 // Each strip addressable separately with strip ID 0-7
-#define MODE_STRIPS         1
+// #define MODE_STRIPS         1
 
 // Mode 2: Single Matrix (8 rows)
 // All strips combined into one matrix, width=PIXELS_PER_STRIP, height=8
@@ -63,7 +63,7 @@
 // Mode 3: Folded Matrix (16 rows)
 // Each strip folded in half with serpentine addressing
 // Width = PIXELS_PER_STRIP/2, Height = 16
-// #define MODE_MATRIX_16      1
+#define MODE_MATRIX_16      1
 
 // ============================================================================
 // DERIVED CONFIGURATION - Do not modify

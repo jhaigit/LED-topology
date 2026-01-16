@@ -12,10 +12,14 @@
 #include "config.h"
 #include "protocol.h"
 
+// OctoWS2811 requires these memory arrays at global scope for DMAMEM
+DMAMEM static uint32_t octoDisplayMemory[PIXELS_PER_STRIP * NUM_STRIPS];
+static uint32_t octoDrawingMemory[PIXELS_PER_STRIP * NUM_STRIPS];
+
 class LedDriverOcto {
 public:
     LedDriverOcto()
-        : leds(PIXELS_PER_STRIP, displayMemory, drawingMemory, LED_COLOR_ORDER)
+        : leds(PIXELS_PER_STRIP, octoDisplayMemory, octoDrawingMemory, LED_COLOR_ORDER)
         , brightness(255)
     {}
 
@@ -201,14 +205,10 @@ public:
     // Get raw pixel data for readback (physical buffer)
     uint32_t getPixelColor(uint16_t physIndex) {
         if (physIndex >= TOTAL_PIXELS) return 0;
-        return drawingMemory[physIndex];
+        return octoDrawingMemory[physIndex];
     }
 
 private:
-    // OctoWS2811 requires these memory arrays
-    DMAMEM uint32_t displayMemory[PIXELS_PER_STRIP * NUM_STRIPS];
-    uint32_t drawingMemory[PIXELS_PER_STRIP * NUM_STRIPS];
-
     OctoWS2811 leds;
     uint8_t brightness;
 
