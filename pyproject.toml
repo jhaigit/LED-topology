@@ -47,6 +47,14 @@ controller = [
 serial = [
     "pyserial>=3.5",
 ]
+media = [
+    "opencv-python-headless>=4.8.0",
+    "Pillow>=10.0.0",
+    "mss>=9.0.0",
+]
+media-lite = [
+    "Pillow>=10.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -56,7 +64,7 @@ dev = [
     "mypy>=1.0.0",
 ]
 all = [
-    "ltp[gui,controller,serial,dev]",
+    "ltp[gui,controller,serial,media,dev]",
 ]
 
 [project.scripts]
@@ -64,6 +72,7 @@ ltp-source = "ltp_source.__main__:main"
 ltp-sink = "ltp_sink.__main__:main"
 ltp-serial-sink = "ltp_serial_sink.__main__:main"
 ltp-artnet-sink = "ltp_artnet.__main__:main"
+ltp-media-source = "ltp_media_source.__main__:main"
 ltp-controller = "ltp_controller.__main__:main"
 
 [project.urls]
