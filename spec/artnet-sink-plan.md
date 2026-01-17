@@ -1,6 +1,55 @@
-# Art-Net Sink Implementation Plan
+# Art-Net Integration Plan
 
-This document outlines the plan to implement an Art-Net sink that receives Art-Net data over Ethernet and integrates with the LTP ecosystem.
+This document outlines the plan to integrate Art-Net protocol with the LTP ecosystem, supporting both **receiving** Art-Net data and **sending** to Art-Net devices.
+
+## Use Cases
+
+### 1. Art-Net Receiver (Input to LTP)
+Receive Art-Net from external controllers and feed into LTP:
+```
+External Controller (QLC+, Resolume, MadMapper)
+    │ Art-Net UDP
+    ▼
+┌─────────────────┐      LTP       ┌─────────────┐
+│ Art-Net Receiver│ ──────────────▶│  LTP Sink   │──▶ LEDs
+│ (LTP Source)    │                │  (Serial)   │
+└─────────────────┘                └─────────────┘
+```
+
+### 2. Art-Net Sender (Output from LTP)
+Send LTP data to existing Art-Net devices:
+```
+┌─────────────────┐      LTP       ┌─────────────────┐
+│   LTP Source    │ ──────────────▶│ Art-Net Sender  │
+│   (Pattern)     │                │ (LTP Sink)      │
+└─────────────────┘                └────────┬────────┘
+                                            │ Art-Net UDP
+                                            ▼
+                              ┌─────────────────────────┐
+                              │ Art-Net Device (WLED,   │
+                              │ Commercial Controller)  │
+                              └─────────────────────────┘
+```
+
+### 3. Art-Net Proxy/Bridge
+LTP controller routes between Art-Net and other protocols:
+```
+Art-Net In ──▶ ┌────────────────┐ ──▶ Serial Out
+               │ LTP Controller │
+sACN In    ──▶ │   (Router)     │ ──▶ Art-Net Out
+               └────────────────┘
+```
+
+### 4. Direct Source to Art-Net
+LTP source sends directly to Art-Net device (no controller):
+```
+┌─────────────────┐    Art-Net UDP    ┌─────────────────┐
+│   LTP Source    │ ─────────────────▶│   WLED Device   │
+│   (Pattern)     │    (Direct Mode)  │                 │
+└─────────────────┘                   └─────────────────┘
+```
+
+---
 
 ## Art-Net Protocol Overview
 
@@ -27,39 +76,156 @@ Art-Net is a protocol for transmitting DMX512 data over Ethernet:
 
 ---
 
-## Implementation Architecture
+## Protocol Comparison: LTP vs Art-Net vs sACN
 
-### Component: `ltp_artnet_sink`
+### Overview
+
+| Feature | LTP (Current) | Art-Net | sACN (E1.31) |
+|---------|---------------|---------|--------------|
+| **Transport** | TCP control + UDP data | UDP only | UDP multicast/unicast |
+| **Port** | Dynamic (mDNS) | 6454 fixed | 5568 fixed |
+| **Discovery** | mDNS/Zeroconf | ArtPoll broadcast | Universe subscription |
+| **Addressing** | Pixel index (0-N) | Universe:Channel | Universe:Channel |
+| **Max per packet** | ~1024 bytes | 512 channels | 512 channels |
+| **Max pixels/packet** | ~340 RGB | 170 RGB | 170 RGB |
+| **Sequencing** | 32-bit in data packet | 8-bit (1-255) | 8-bit (0-255) |
+| **Error detection** | XOR checksum | None | CRC (optional) |
+| **Compression** | RLE supported | None | None |
+| **Priority/Merging** | Via controller | None (last wins) | Built-in priority (0-200) |
+| **Sync mechanism** | None (single stream) | ArtSync packet | Sync universe |
+| **Color format** | Explicit (RGB/GRB/RGBW) | Implicit (convention) | Implicit (convention) |
+
+### sACN (E1.31) Details
+
+sACN (Streaming ACN) is an ANSI standard (E1.31) for DMX over IP:
+
+| Aspect | Details |
+|--------|---------|
+| **Full Name** | ANSI E1.31 Streaming Architecture for Control Networks |
+| **Transport** | UDP multicast (239.255.x.x) or unicast |
+| **Port** | 5568 |
+| **Universe Range** | 1-63999 |
+| **Multicast Address** | 239.255.{universe_high}.{universe_low} |
+| **Priority** | 0-200 (higher wins, enables merging) |
+| **Sync** | Universe 0 can sync others |
+| **Preview** | Preview flag for visualization without output |
+
+### Feature Coverage Analysis
+
+#### What LTP Has That Art-Net/sACN Lack
+
+| LTP Feature | Art-Net | sACN | Notes |
+|-------------|---------|------|-------|
+| **Bidirectional control channel** | ❌ | ❌ | LTP has TCP control for capabilities, controls |
+| **Device discovery with capabilities** | Partial | ❌ | ArtPoll is basic; sACN has no discovery |
+| **Named controls (brightness, etc.)** | ❌ | ❌ | Art-Net/sACN are data-only protocols |
+| **Input events (buttons, encoders)** | ❌ | ❌ | No upstream from device to controller |
+| **Pixel-level addressing** | ❌ | ❌ | Must manually calculate universe/channel |
+| **Compression (RLE)** | ❌ | ❌ | Always full 512 bytes per universe |
+| **Topology description** | ❌ | ❌ | No concept of matrix/serpentine layout |
+| **Device type metadata** | ❌ | ❌ | Just universes, no semantic info |
+
+#### What Art-Net/sACN Have That LTP Lacks
+
+| Feature | Art-Net | sACN | LTP Status |
+|---------|---------|------|------------|
+| **Industry standard** | ✅ | ✅ | Custom protocol |
+| **Wide device support** | ✅ | ✅ | Limited to LTP devices |
+| **Multi-universe sync** | ✅ ArtSync | ✅ Sync universe | ❌ Not implemented |
+| **Priority merging** | ❌ | ✅ | ❌ Not implemented |
+| **Preview mode** | ❌ | ✅ | ❌ Not implemented |
+| **Universe concept** | ✅ | ✅ | ❌ Pixel-only addressing |
+| **DMX compatibility** | ✅ Direct | ✅ Direct | Requires conversion |
+
+### Recommended LTP Enhancements for Protocol Bridge
+
+To fully support Art-Net/sACN bridging, consider:
+
+1. **Universe Abstraction Layer**
+   ```python
+   class UniverseAddress:
+       universe: int      # 0-32767 for Art-Net, 1-63999 for sACN
+       channel: int       # 1-512
+
+       def to_pixel_index(self, color_format: ColorFormat) -> int:
+           channels_per_pixel = color_format.bytes_per_pixel
+           return (self.universe * 170) + ((self.channel - 1) // channels_per_pixel)
+   ```
+
+2. **Multi-Universe Sync**
+   - Buffer frames until all universes received
+   - Configurable timeout for partial frames
+   - Optional sync packet support
+
+3. **Priority Support** (for sACN compatibility)
+   ```python
+   class StreamPriority:
+       priority: int = 100  # 0-200, higher wins
+       # When multiple sources send to same sink, highest priority wins
+   ```
+
+4. **Preview Mode**
+   - Flag to indicate data is for visualization only
+   - Sink can choose to display or ignore
+
+---
+
+## Implementation Architecture (Revised)
+
+### Bidirectional Module: `ltp_artnet`
+
+```
+src/ltp_artnet/
+├── __init__.py
+├── __main__.py
+├── cli.py                # Command-line interface
+├── protocol.py           # Art-Net packet parsing/building
+├── receiver.py           # Art-Net input (UDP listener)
+├── sender.py             # Art-Net output (UDP sender)
+├── discovery.py          # ArtPoll/ArtPollReply
+├── universe_mapper.py    # Universe <-> pixel mapping
+├── artnet_source.py      # LTP source that receives Art-Net
+└── artnet_sink.py        # LTP sink that sends Art-Net
+```
+
+### Component: Art-Net Sender (LTP Sink → Art-Net Device)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Art-Net Sink                              │
+│                  Art-Net Sender Sink                         │
 │                                                              │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │  ArtNet      │    │   Universe   │    │    Output    │  │
-│  │  Receiver    │───▶│   Router     │───▶│   Renderer   │  │
+│  │  LTP Data    │    │   Universe   │    │   Art-Net    │  │
+│  │  Receiver    │───▶│   Splitter   │───▶│   Sender     │  │
+│  │  (UDP)       │    │              │    │  (UDP 6454)  │  │
+│  └──────────────┘    └──────────────┘    └──────────────┘  │
+│                                                 │           │
+│                                                 ▼           │
+│                                    ┌────────────────────┐  │
+│                                    │ WLED / Commercial  │  │
+│                                    │ Art-Net Device     │  │
+│                                    └────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Component: Art-Net Receiver (Art-Net → LTP Source)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  Art-Net Receiver Source                     │
+│                                                              │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │  ArtNet      │    │   Universe   │    │  LTP Source  │  │
+│  │  Receiver    │───▶│   Aggregator │───▶│   (TCP+UDP)  │  │
 │  │  (UDP 6454)  │    │              │    │              │  │
 │  └──────────────┘    └──────────────┘    └──────────────┘  │
 │         │                                       │           │
 │         ▼                                       ▼           │
 │  ┌──────────────┐                      ┌──────────────┐    │
-│  │  ArtPoll     │                      │  Serial/     │    │
-│  │  Responder   │                      │  Network     │    │
+│  │  ArtPoll     │                      │ LTP Controller│    │
+│  │  Responder   │                      │ or Direct Sink│    │
 │  └──────────────┘                      └──────────────┘    │
 └─────────────────────────────────────────────────────────────┘
-```
-
-### Module Structure
-
-```
-src/ltp_artnet_sink/
-├── __init__.py
-├── __main__.py
-├── cli.py              # Command-line interface
-├── sink.py             # Main ArtNetSink class
-├── artnet_receiver.py  # UDP receiver, packet parsing
-├── universe_router.py  # Map universes to pixel buffers
-└── discovery.py        # ArtPoll/ArtPollReply handling
 ```
 
 ---
@@ -391,9 +557,39 @@ python -m ltp_artnet_sink.monitor --verbose
 
 ---
 
+## Summary: Why Bidirectional?
+
+The Art-Net integration must support **both directions** to maximize utility:
+
+### Receiving Art-Net (Art-Net → LTP)
+- **Use case**: Leverage existing lighting software (QLC+, Resolume, MadMapper)
+- **Benefit**: No need to rewrite pattern generators; use proven tools
+- **Implementation**: Art-Net receiver acting as an LTP source
+
+### Sending Art-Net (LTP → Art-Net Devices)
+- **Use case**: Control WLED, commercial Art-Net controllers, and DMX fixtures
+- **Benefit**: LTP sources can drive any Art-Net device without custom firmware
+- **Implementation**: Art-Net sender acting as an LTP sink
+
+### sACN Comparison Summary
+
+| Aspect | LTP's Position |
+|--------|----------------|
+| **Discovery** | LTP uses mDNS (better semantic info); sACN has none; Art-Net is basic |
+| **Addressing** | LTP uses pixel indices (simpler); sACN/Art-Net use universe:channel |
+| **Merging** | sACN has native priority; LTP would need controller logic |
+| **Multicast** | sACN native; LTP unicast (could add multicast) |
+| **Compression** | LTP has RLE; sACN/Art-Net have none |
+| **Control** | LTP has bidirectional control channel; neither protocol does |
+
+**Conclusion**: LTP fills a different niche than sACN/Art-Net. Those protocols are optimized for lighting industry compatibility but lack the device abstraction, discovery, and control features that LTP provides. The Art-Net integration bridges LTP to the existing ecosystem without abandoning LTP's advantages.
+
+---
+
 ## References
 
 - [Art-Net 4 Specification](https://art-net.org.uk/downloads/art-net.pdf)
+- [sACN (E1.31) Standard](https://tsp.esta.org/tsp/documents/docs/ANSI_E1-31-2018.pdf)
 - [stupidArtnet Library](https://github.com/cpvalente/stupidArtnet)
 - [QLC+ (Open Source Lighting Controller)](https://www.qlcplus.org/)
 - [WLED Art-Net Implementation](https://kno.wled.ge/interfaces/e1.31-dmx/)
