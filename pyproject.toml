@@ -63,6 +63,7 @@ all = [
 ltp-source = "ltp_source.__main__:main"
 ltp-sink = "ltp_sink.__main__:main"
 ltp-serial-sink = "ltp_serial_sink.__main__:main"
+ltp-artnet-sink = "ltp_artnet.__main__:main"
 ltp-controller = "ltp_controller.__main__:main"
 
 [project.urls]
