@@ -10,7 +10,7 @@
 
 #include <OctoWS2811.h>
 #include "config.h"
-#include "protocol.h"
+#include <ltp_protocol.h>
 
 // OctoWS2811 requires these memory arrays at global scope for DMAMEM
 DMAMEM static uint32_t octoDisplayMemory[PIXELS_PER_STRIP * NUM_STRIPS];

@@ -21,7 +21,7 @@
 
 #include <OctoWS2811.h>
 #include "config.h"
-#include "protocol.h"
+#include <ltp_protocol.h>
 #include "led_driver_octo.h"
 
 // ============================================================================

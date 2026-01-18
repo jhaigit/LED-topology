@@ -26,6 +26,9 @@ BUILD_DIR = build
 # arduino-cli executable
 CLI = arduino-cli
 
+# Shared libraries directory
+LIBRARIES = ../libraries
+
 # Teensy board URL
 TEENSY_URL = https://www.pjrc.com/teensy/package_teensy_index.json
 
@@ -53,7 +56,7 @@ setup-teensy:
 
 # Compile the sketch
 build:
-	$(CLI) compile --fqbn $(BOARD) --build-path $(BUILD_DIR) .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) .
 	@echo ""
 	@echo "Build complete."
 
@@ -90,15 +93,15 @@ boards:
 # ============================================================================
 
 build-uno:
-	$(CLI) compile --fqbn arduino:avr:uno --build-path $(BUILD_DIR)/uno .
+	$(CLI) compile --fqbn arduino:avr:uno --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/uno .
 	@echo "Arduino Uno build complete"
 
 build-nano:
-	$(CLI) compile --fqbn arduino:avr:nano --build-path $(BUILD_DIR)/nano .
+	$(CLI) compile --fqbn arduino:avr:nano --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/nano .
 	@echo "Arduino Nano build complete"
 
 build-mega:
-	$(CLI) compile --fqbn arduino:avr:mega --build-path $(BUILD_DIR)/mega .
+	$(CLI) compile --fqbn arduino:avr:mega --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/mega .
 	@echo "Arduino Mega build complete"
 
 # ============================================================================
@@ -106,23 +109,23 @@ build-mega:
 # ============================================================================
 
 build-teensy32:
-	$(CLI) compile --fqbn teensy:avr:teensy31 --build-path $(BUILD_DIR)/teensy32 .
+	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 .
 	@echo "Teensy 3.2 build complete"
 
 build-teensy35:
-	$(CLI) compile --fqbn teensy:avr:teensy35 --build-path $(BUILD_DIR)/teensy35 .
+	$(CLI) compile --fqbn teensy:avr:teensy35 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy35 .
 	@echo "Teensy 3.5 build complete"
 
 build-teensy36:
-	$(CLI) compile --fqbn teensy:avr:teensy36 --build-path $(BUILD_DIR)/teensy36 .
+	$(CLI) compile --fqbn teensy:avr:teensy36 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy36 .
 	@echo "Teensy 3.6 build complete"
 
 build-teensy40:
-	$(CLI) compile --fqbn teensy:avr:teensy40 --build-path $(BUILD_DIR)/teensy40 .
+	$(CLI) compile --fqbn teensy:avr:teensy40 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 .
 	@echo "Teensy 4.0 build complete"
 
 build-teensy41:
-	$(CLI) compile --fqbn teensy:avr:teensy41 --build-path $(BUILD_DIR)/teensy41 .
+	$(CLI) compile --fqbn teensy:avr:teensy41 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy41 .
 	@echo "Teensy 4.1 build complete"
 
 # Build all Teensy variants
@@ -172,17 +175,17 @@ load-verbose:
 
 # Build and create distributable hex files
 dist-teensy32:
-	$(CLI) compile --fqbn teensy:avr:teensy31 --build-path $(BUILD_DIR)/teensy32 .
+	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 .
 	@cp $(BUILD_DIR)/teensy32/$(SKETCH).hex ltp_serial_v2_teensy32.hex
 	@echo "Teensy 3.2 hex: ltp_serial_v2_teensy32.hex"
 
 dist-teensy40:
-	$(CLI) compile --fqbn teensy:avr:teensy40 --build-path $(BUILD_DIR)/teensy40 .
+	$(CLI) compile --fqbn teensy:avr:teensy40 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 .
 	@cp $(BUILD_DIR)/teensy40/$(SKETCH).hex ltp_serial_v2_teensy40.hex
 	@echo "Teensy 4.0 hex: ltp_serial_v2_teensy40.hex"
 
 dist-teensy41:
-	$(CLI) compile --fqbn teensy:avr:teensy41 --build-path $(BUILD_DIR)/teensy41 .
+	$(CLI) compile --fqbn teensy:avr:teensy41 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy41 .
 	@cp $(BUILD_DIR)/teensy41/$(SKETCH).hex ltp_serial_v2_teensy41.hex
 	@echo "Teensy 4.1 hex: ltp_serial_v2_teensy41.hex"
 
@@ -201,12 +204,12 @@ build-all: build-uno build-nano build-mega build-all-teensy
 
 # Compile with verbose output
 build-verbose:
-	$(CLI) compile --fqbn $(BOARD) --build-path $(BUILD_DIR) --verbose .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) --verbose .
 
 # Show memory usage
 size: build
 	@echo "Memory usage:"
-	@$(CLI) compile --fqbn $(BOARD) --build-path $(BUILD_DIR) . 2>&1 | grep -E "(Sketch|Global|Memory)"
+	@$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) . 2>&1 | grep -E "(Sketch|Global|Memory)"
 
 help:
 	@echo "LTP Serial Protocol v2 - Arduino Build System"

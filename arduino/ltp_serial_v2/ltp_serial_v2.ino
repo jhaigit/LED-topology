@@ -14,7 +14,7 @@
  *   - Serial: USB (115200 baud default)
  */
 
-#include "protocol.h"
+#include <ltp_protocol.h>
 #include "led_driver.h"
 #include "led_driver_lpd8806.h"
 

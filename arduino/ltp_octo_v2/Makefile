@@ -40,6 +40,9 @@ HEX_FILE ?= $(BUILD_DIR)/$(SKETCH).hex
 CLI = arduino-cli
 TEENSY_LOADER = teensy_loader_cli
 
+# Shared libraries directory
+LIBRARIES = ../libraries
+
 # Teensy board manager URL
 TEENSY_URL = https://www.pjrc.com/teensy/package_teensy_index.json
 
@@ -64,22 +67,22 @@ setup:
 
 # Compile for Teensy 3.2 (default)
 build:
-	$(CLI) compile --fqbn $(BOARD) --build-path $(BUILD_DIR) .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) .
 	@echo ""
 	@echo "Build complete. Hex file: $(BUILD_DIR)/$(SKETCH).hex"
 
 build-teensy32:
-	$(CLI) compile --fqbn teensy:avr:teensy31 --build-path $(BUILD_DIR)/teensy32 .
+	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 .
 	@cp $(BUILD_DIR)/teensy32/$(SKETCH).hex ltp_octo_v2_teensy32.hex
 	@echo "Teensy 3.2 build complete: ltp_octo_v2_teensy32.hex"
 
 build-teensy35:
-	$(CLI) compile --fqbn teensy:avr:teensy35 --build-path $(BUILD_DIR)/teensy35 .
+	$(CLI) compile --fqbn teensy:avr:teensy35 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy35 .
 	@cp $(BUILD_DIR)/teensy35/$(SKETCH).hex ltp_octo_v2_teensy35.hex
 	@echo "Teensy 3.5 build complete: ltp_octo_v2_teensy35.hex"
 
 build-teensy36:
-	$(CLI) compile --fqbn teensy:avr:teensy36 --build-path $(BUILD_DIR)/teensy36 .
+	$(CLI) compile --fqbn teensy:avr:teensy36 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy36 .
 	@cp $(BUILD_DIR)/teensy36/$(SKETCH).hex ltp_octo_v2_teensy36.hex
 	@echo "Teensy 3.6 build complete: ltp_octo_v2_teensy36.hex"
 
@@ -150,11 +153,11 @@ list-boards:
 # Show memory usage
 size: build
 	@echo "Memory usage:"
-	@$(CLI) compile --fqbn $(BOARD) --build-path $(BUILD_DIR) . 2>&1 | grep -E "(Sketch|Global|Memory)"
+	@$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) . 2>&1 | grep -E "(Sketch|Global|Memory)"
 
 # Compile with verbose output
 build-verbose:
-	$(CLI) compile --fqbn $(BOARD) --build-path $(BUILD_DIR) --verbose .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) --verbose .
 
 # ============================================================================
 # Help

@@ -8,7 +8,7 @@
 #define LTP_LED_DRIVER_H
 
 #include <Arduino.h>
-#include "protocol.h"
+#include <ltp_protocol.h>
 
 class LedDriver {
 public:

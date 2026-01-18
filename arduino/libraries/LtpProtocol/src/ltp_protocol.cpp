@@ -2,7 +2,7 @@
  * LTP Serial Protocol v2 - Protocol Implementation
  */
 
-#include "protocol.h"
+#include "ltp_protocol.h"
 
 LtpProtocol::LtpProtocol(Stream& serial, uint16_t maxPayload)
     : serial(serial)
