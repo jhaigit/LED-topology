@@ -277,7 +277,7 @@ Bit 2: CAPS_EEPROM - Has persistent configuration storage
 Bit 3: CAPS_USB_HIGHSPEED - Native USB (ignore baud rate)
 Bit 4: CAPS_MULTI_STRIP - Supports multiple LED strip outputs
 Bit 5: CAPS_INPUTS - Has input devices (buttons, encoders, etc.)
-Bit 6: Reserved
+Bit 6: CAPS_SUBMATRIX - Supports PIXEL_SUBMATRIX commands (0x36, 0x37)
 Bit 7: Reserved
 ```
 
@@ -697,6 +697,110 @@ Delta update - only changed pixels since last frame on a strip.
 | 3 | n | Changes: 2-byte index + 3/4-byte color |
 
 **Usage:** Host tracks changes and sends only modified pixels. More efficient than full frames for subtle animations.
+
+### 0x36 PIXEL_SUBMATRIX
+
+Send a rectangular region of pixel data to a matrix-mapped strip. This command allows efficient partial updates of LED matrices without sending multiple row-based PIXEL_FRAME commands.
+
+**Payload:**
+| Offset | Size | Description |
+|--------|------|-------------|
+| 0 | 1 | Strip ID (0-15) |
+| 1 | 2 | Matrix width (total width in pixels, little-endian) |
+| 3 | 2 | X offset (left edge of submatrix, little-endian) |
+| 5 | 2 | Y offset (top edge of submatrix, little-endian) |
+| 7 | 2 | Submatrix width (little-endian) |
+| 9 | 2 | Submatrix height (little-endian) |
+| 11 | 1 | Layout flags (see below) |
+| 12 | n | Pixel data (row-major order within submatrix) |
+
+**Layout Flags:**
+```
+Bit 0: SERPENTINE - Rows alternate direction (0=all rows same direction)
+Bit 1: VERTICAL_FIRST - Column-major pixel order (0=row-major)
+Bit 2: ORIGIN_BOTTOM - Y=0 at bottom (0=Y=0 at top)
+Bit 3-7: Reserved (must be 0)
+```
+
+**Pixel Data Size:** `submatrix_width × submatrix_height × bytes_per_pixel`
+
+**Index Calculation (MCU):**
+
+For each pixel at submatrix position (col, row):
+```c
+uint16_t y = y_offset + row;
+uint16_t x = x_offset + col;
+uint16_t pixel_index;
+
+if (flags & SERPENTINE) {
+    // Odd rows are reversed
+    if (y & 1) {
+        pixel_index = (y + 1) * matrix_width - 1 - x;
+    } else {
+        pixel_index = y * matrix_width + x;
+    }
+} else {
+    // Linear layout
+    pixel_index = y * matrix_width + x;
+}
+```
+
+**Example:** Update a 10×5 region at position (20, 15) on a 64-wide serpentine matrix (strip 0):
+```
+AA 00 009E 36 00 40 00 14 00 0F 00 0A 00 05 00 01 [150 bytes RGB] [XOR]
+               ^^ strip ID 0
+                  ^^ ^^ matrix_width = 64
+                        ^^ ^^ x_offset = 20
+                              ^^ ^^ y_offset = 15
+                                    ^^ ^^ sub_width = 10
+                                          ^^ ^^ sub_height = 5
+                                                ^^ flags = SERPENTINE
+```
+Payload length: 12 (header) + 150 (10×5×3 RGB) = 162 bytes (0x00A2)
+
+**Benefits:**
+- Single packet for rectangular region updates (vs N packets for N rows)
+- Reduced protocol overhead for partial screen updates
+- Simplified host code for sprite/text rendering
+- MCU handles matrix layout mapping
+
+**Use Cases:**
+- Video playback with dirty rectangles
+- Text rendering updates
+- Sprite animation
+- UI element updates (buttons, progress bars)
+- Split-screen content regions
+
+### 0x37 PIXEL_SUBMATRIX_RLE
+
+RLE-compressed submatrix data. Same header format as PIXEL_SUBMATRIX, but pixel data is RLE-encoded.
+
+**Payload:**
+| Offset | Size | Description |
+|--------|------|-------------|
+| 0 | 1 | Strip ID (0-15) |
+| 1 | 2 | Matrix width (little-endian) |
+| 3 | 2 | X offset (little-endian) |
+| 5 | 2 | Y offset (little-endian) |
+| 7 | 2 | Submatrix width (little-endian) |
+| 9 | 2 | Submatrix height (little-endian) |
+| 11 | 1 | Layout flags |
+| 12 | n | RLE-encoded pixel data |
+
+**RLE Encoding:**
+```
+Each run: [count] [R] [G] [B] (or [R] [G] [B] [W] for RGBW)
+- count = 1-255 pixels of the same color
+- Pixels are encoded in row-major order within the submatrix
+- Total decoded pixels must equal submatrix_width × submatrix_height
+```
+
+**Example:** 10×5 submatrix with 25 red pixels followed by 25 blue pixels:
+```
+AA 04 0014 37 00 40 00 14 00 0F 00 0A 00 05 00 01 19 FF 00 00 19 00 00 FF [XOR]
+                                                   ^^ ^^ ^^ ^^ 25 red
+                                                               ^^ ^^ ^^ ^^ 25 blue
+```
 
 ---
 
@@ -1149,6 +1253,19 @@ AA 05 0002 03 33 01 [XOR]
 ```
 (NAK for command 0x33, error code 0x01)
 
+### Submatrix Update (8×4 region at position 10,5 on 32-wide matrix)
+```
+AA 00 0060 36 00 20 00 0A 00 05 00 08 00 04 00 01 [96 bytes RGB] [XOR]
+               ^^ strip ID 0
+                  ^^ ^^ matrix_width = 32
+                        ^^ ^^ x_offset = 10
+                              ^^ ^^ y_offset = 5
+                                    ^^ ^^ sub_width = 8
+                                          ^^ ^^ sub_height = 4
+                                                ^^ flags = SERPENTINE
+```
+(Update 8×4=32 pixels, payload = 12 header + 96 pixel bytes = 108 bytes)
+
 ### INPUT_EVENT (Button Pressed)
 ```
 AA 00 0005 53 00 01 34 12 01 [XOR]
@@ -1221,3 +1338,4 @@ See the following files for reference implementations:
 | 2.0-draft3 | 2025-01 | Corrected buffer model (LEDs have latches, MCU needs single buffer), exclusive end indices, removed deprecated SYNC |
 | 2.0-draft4 | 2026-01 | Added strip addressing (strip ID in all pixel commands), control advertisement system, SET_CONTROL command, renumbered configuration commands |
 | 2.0-draft5 | 2026-01 | Added input advertisement and event system (buttons, encoders, analog, touch), INPUT_EVENT command for unsolicited input reports |
+| 2.0-draft6 | 2026-01 | Added PIXEL_SUBMATRIX (0x36) and PIXEL_SUBMATRIX_RLE (0x37) commands for efficient rectangular region updates on LED matrices, CAPS_SUBMATRIX capability flag |

@@ -54,6 +54,8 @@
 #define CMD_PIXEL_FRAME     0x33
 #define CMD_PIXEL_FRAME_RLE 0x34
 #define CMD_PIXEL_DELTA     0x35
+#define CMD_PIXEL_SUBMATRIX 0x36
+#define CMD_PIXEL_SUBMATRIX_RLE 0x37
 
 // Configuration Commands (0x40-0x4F)
 #define CMD_SET_CONTROL     0x40
@@ -122,6 +124,12 @@
 #define CAPS_USB_HIGHSPEED  0x08
 #define CAPS_MULTI_STRIP    0x10
 #define CAPS_INPUTS         0x20
+#define CAPS_SUBMATRIX      0x40
+
+// Submatrix layout flags
+#define SUBMATRIX_SERPENTINE     0x01
+#define SUBMATRIX_VERTICAL_FIRST 0x02
+#define SUBMATRIX_ORIGIN_BOTTOM  0x04
 
 // Control types
 #define CTRL_BOOL           0x01

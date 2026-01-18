@@ -53,6 +53,8 @@ CMD_PIXEL_SET_INDEXED = 0x32
 CMD_PIXEL_FRAME = 0x33
 CMD_PIXEL_FRAME_RLE = 0x34
 CMD_PIXEL_DELTA = 0x35
+CMD_PIXEL_SUBMATRIX = 0x36
+CMD_PIXEL_SUBMATRIX_RLE = 0x37
 
 # Configuration Commands (0x40-0x4F)
 CMD_SET_CONTROL = 0x40
@@ -123,6 +125,12 @@ CAPS_EEPROM = 0x04
 CAPS_USB_HIGHSPEED = 0x08
 CAPS_MULTI_STRIP = 0x10
 CAPS_INPUTS = 0x20
+CAPS_SUBMATRIX = 0x40
+
+# Submatrix layout flags
+SUBMATRIX_SERPENTINE = 0x01
+SUBMATRIX_VERTICAL_FIRST = 0x02
+SUBMATRIX_ORIGIN_BOTTOM = 0x04
 
 # Control types
 CTRL_BOOL = 0x01
@@ -181,6 +189,8 @@ COMMAND_NAMES = {
     CMD_PIXEL_FRAME: "PIXEL_FRAME",
     CMD_PIXEL_FRAME_RLE: "PIXEL_FRAME_RLE",
     CMD_PIXEL_DELTA: "PIXEL_DELTA",
+    CMD_PIXEL_SUBMATRIX: "PIXEL_SUBMATRIX",
+    CMD_PIXEL_SUBMATRIX_RLE: "PIXEL_SUBMATRIX_RLE",
     CMD_SET_CONTROL: "SET_CONTROL",
     CMD_SET_STRIP: "SET_STRIP",
     CMD_SAVE_CONFIG: "SAVE_CONFIG",
@@ -433,3 +443,81 @@ class LtpProtocol:
         """Build a SET_CONTROL packet for BOOL value."""
         payload = bytes([control_id, 1 if value else 0])
         return LtpProtocol.build_packet(CMD_SET_CONTROL, payload)
+
+    @staticmethod
+    def build_pixel_submatrix(
+        strip_id: int,
+        matrix_width: int,
+        x_offset: int,
+        y_offset: int,
+        sub_width: int,
+        sub_height: int,
+        pixel_data: bytes,
+        flags: int = 0,
+    ) -> bytes:
+        """
+        Build a PIXEL_SUBMATRIX packet for rectangular region updates.
+
+        Args:
+            strip_id: Target strip ID (0-15)
+            matrix_width: Total width of the matrix in pixels
+            x_offset: X position of submatrix top-left corner
+            y_offset: Y position of submatrix top-left corner
+            sub_width: Width of the submatrix region
+            sub_height: Height of the submatrix region
+            pixel_data: Raw pixel data (row-major order, 3 or 4 bytes per pixel)
+            flags: Layout flags (SUBMATRIX_SERPENTINE, SUBMATRIX_VERTICAL_FIRST, etc.)
+
+        Returns:
+            Complete packet bytes ready to send
+        """
+        payload = struct.pack(
+            "<BHHHHHB",
+            strip_id,
+            matrix_width,
+            x_offset,
+            y_offset,
+            sub_width,
+            sub_height,
+            flags,
+        ) + pixel_data
+        return LtpProtocol.build_packet(CMD_PIXEL_SUBMATRIX, payload)
+
+    @staticmethod
+    def build_pixel_submatrix_rle(
+        strip_id: int,
+        matrix_width: int,
+        x_offset: int,
+        y_offset: int,
+        sub_width: int,
+        sub_height: int,
+        rle_data: bytes,
+        flags: int = 0,
+    ) -> bytes:
+        """
+        Build a PIXEL_SUBMATRIX_RLE packet for compressed rectangular region updates.
+
+        Args:
+            strip_id: Target strip ID (0-15)
+            matrix_width: Total width of the matrix in pixels
+            x_offset: X position of submatrix top-left corner
+            y_offset: Y position of submatrix top-left corner
+            sub_width: Width of the submatrix region
+            sub_height: Height of the submatrix region
+            rle_data: RLE-encoded pixel data ([count][R][G][B]... format)
+            flags: Layout flags (SUBMATRIX_SERPENTINE, SUBMATRIX_VERTICAL_FIRST, etc.)
+
+        Returns:
+            Complete packet bytes ready to send
+        """
+        payload = struct.pack(
+            "<BHHHHHB",
+            strip_id,
+            matrix_width,
+            x_offset,
+            y_offset,
+            sub_width,
+            sub_height,
+            flags,
+        ) + rle_data
+        return LtpProtocol.build_packet(CMD_PIXEL_SUBMATRIX_RLE, payload, flags=FLAG_COMPRESSED)

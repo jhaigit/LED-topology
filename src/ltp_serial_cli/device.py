@@ -36,10 +36,14 @@ from .protocol import (
     CTRL_ID_AUTO_SHOW,
     CTRL_ID_FRAME_ACK,
     CAPS_EXTENDED,
+    CAPS_SUBMATRIX,
     LED_TYPE_NAMES,
     COLOR_FORMAT_NAMES,
     COMMAND_NAMES,
     STRIP_ALL,
+    SUBMATRIX_SERPENTINE,
+    SUBMATRIX_VERTICAL_FIRST,
+    SUBMATRIX_ORIGIN_BOTTOM,
 )
 from .exceptions import (
     LtpConnectionError,
@@ -137,6 +141,10 @@ class DeviceInfo:
     @property
     def is_usb_highspeed(self) -> bool:
         return bool(self.capabilities1 & CAPS_EXTENDED) and bool(self.capabilities2 & 0x08)
+
+    @property
+    def has_submatrix(self) -> bool:
+        return bool(self.capabilities1 & CAPS_EXTENDED) and bool(self.capabilities2 & CAPS_SUBMATRIX)
 
 
 @dataclass
@@ -366,6 +374,59 @@ class LtpDevice:
     def clear(self, strip_id: int = STRIP_ALL):
         """Clear all pixels (set to black)."""
         self.fill(0, 0, 0, strip_id)
+
+    def set_submatrix(
+        self,
+        matrix_width: int,
+        x_offset: int,
+        y_offset: int,
+        sub_width: int,
+        sub_height: int,
+        pixel_data: bytes,
+        serpentine: bool = False,
+        strip_id: int = 0,
+    ):
+        """
+        Set a rectangular region of pixels on a matrix.
+
+        This is more efficient than sending multiple row updates when
+        only a portion of the matrix needs to be updated.
+
+        Args:
+            matrix_width: Total width of the matrix in pixels
+            x_offset: X position of the top-left corner of the region
+            y_offset: Y position of the top-left corner of the region
+            sub_width: Width of the region to update
+            sub_height: Height of the region to update
+            pixel_data: RGB data for the region (row-major order, 3 bytes per pixel)
+            serpentine: True if the matrix uses serpentine (zigzag) layout
+            strip_id: Strip ID (default: 0)
+
+        Example:
+            # Update a 10x5 region at position (20, 15) on a 64-pixel wide matrix
+            device.set_submatrix(
+                matrix_width=64,
+                x_offset=20,
+                y_offset=15,
+                sub_width=10,
+                sub_height=5,
+                pixel_data=region_data,  # 10*5*3 = 150 bytes
+                serpentine=True,
+            )
+        """
+        flags = SUBMATRIX_SERPENTINE if serpentine else 0
+        self._send(
+            LtpProtocol.build_pixel_submatrix(
+                strip_id=strip_id,
+                matrix_width=matrix_width,
+                x_offset=x_offset,
+                y_offset=y_offset,
+                sub_width=sub_width,
+                sub_height=sub_height,
+                pixel_data=pixel_data,
+                flags=flags,
+            )
+        )
 
     def show(self, wait_for_ack: bool = False) -> Optional[int]:
         """
