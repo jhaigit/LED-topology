@@ -29,7 +29,8 @@ CLI = arduino-cli
 # Teensy board URL
 TEENSY_URL = https://www.pjrc.com/teensy/package_teensy_index.json
 
-.PHONY: all build upload clean setup setup-teensy monitor cores list-boards help
+.PHONY: all build upload clean setup setup-teensy monitor cores list-boards help \
+	load load-hex load-reboot load-verbose dist-teensy32 dist-teensy40 dist-teensy41 dist-all
 
 # Default target
 all: build
@@ -128,6 +129,69 @@ build-teensy41:
 build-all-teensy: build-teensy32 build-teensy40 build-teensy41
 
 # ============================================================================
+# Load targets (via teensy_loader_cli - direct hex loading for Teensy)
+# ============================================================================
+
+# Teensy loader CLI (install via: sudo apt install teensy-loader-cli)
+TEENSY_LOADER = teensy_loader_cli
+
+# Teensy model for teensy_loader_cli (--mcu option)
+# Options: TEENSY2, TEENSY2PP, TEENSYLC, TEENSY30, TEENSY31, TEENSY32,
+#          TEENSY35, TEENSY36, TEENSY40, TEENSY41, TEENSYMM
+TEENSY_MCU ?= TEENSY32
+
+# Pre-built hex file (for distribution)
+HEX_FILE ?= ltp_serial_v2_teensy32.hex
+
+# Load pre-built hex file using teensy_loader_cli
+# Press the button on Teensy to enter programming mode
+load:
+	@echo "Loading $(HEX_FILE) to Teensy..."
+	@echo "Press the button on Teensy to enter programming mode."
+	$(TEENSY_LOADER) --mcu=$(TEENSY_MCU) -w $(HEX_FILE)
+
+# Load custom hex file
+load-hex:
+	@if [ -z "$(HEX)" ]; then \
+		echo "Usage: make load-hex HEX=filename.hex"; \
+		exit 1; \
+	fi
+	@echo "Loading $(HEX) to Teensy..."
+	@echo "Press the button on Teensy to enter programming mode."
+	$(TEENSY_LOADER) --mcu=$(TEENSY_MCU) -w $(HEX)
+
+# Load and reboot (no wait)
+load-reboot:
+	@echo "Loading $(HEX_FILE) and rebooting..."
+	$(TEENSY_LOADER) --mcu=$(TEENSY_MCU) -w -r $(HEX_FILE)
+
+# Load with verbose output
+load-verbose:
+	@echo "Loading $(HEX_FILE) to Teensy (verbose)..."
+	$(TEENSY_LOADER) --mcu=$(TEENSY_MCU) -w -v $(HEX_FILE)
+
+# Build and create distributable hex files
+dist-teensy32:
+	$(CLI) compile --fqbn teensy:avr:teensy31 --build-path $(BUILD_DIR)/teensy32 .
+	@cp $(BUILD_DIR)/teensy32/$(SKETCH).hex ltp_serial_v2_teensy32.hex
+	@echo "Teensy 3.2 hex: ltp_serial_v2_teensy32.hex"
+
+dist-teensy40:
+	$(CLI) compile --fqbn teensy:avr:teensy40 --build-path $(BUILD_DIR)/teensy40 .
+	@cp $(BUILD_DIR)/teensy40/$(SKETCH).hex ltp_serial_v2_teensy40.hex
+	@echo "Teensy 4.0 hex: ltp_serial_v2_teensy40.hex"
+
+dist-teensy41:
+	$(CLI) compile --fqbn teensy:avr:teensy41 --build-path $(BUILD_DIR)/teensy41 .
+	@cp $(BUILD_DIR)/teensy41/$(SKETCH).hex ltp_serial_v2_teensy41.hex
+	@echo "Teensy 4.1 hex: ltp_serial_v2_teensy41.hex"
+
+# Build all distributable hex files
+dist-all: dist-teensy32 dist-teensy40 dist-teensy41
+	@echo ""
+	@echo "All distributable hex files created."
+
+# ============================================================================
 # Build all targets
 # ============================================================================
 
@@ -172,6 +236,18 @@ help:
 	@echo "  make build-all-teensy - Build all Teensy variants"
 	@echo "  make build-all        - Build all targets"
 	@echo ""
+	@echo "Load via teensy_loader_cli (direct hex loading):"
+	@echo "  make load           - Load pre-built $(HEX_FILE)"
+	@echo "  make load-hex HEX=file.hex - Load custom hex file"
+	@echo "  make load-reboot    - Load and auto-reboot"
+	@echo "  make load-verbose   - Load with verbose output"
+	@echo ""
+	@echo "Distribution (create hex files):"
+	@echo "  make dist-teensy32  - Build Teensy 3.2 hex"
+	@echo "  make dist-teensy40  - Build Teensy 4.0 hex"
+	@echo "  make dist-teensy41  - Build Teensy 4.1 hex"
+	@echo "  make dist-all       - Build all distributable hex files"
+	@echo ""
 	@echo "Utilities:"
 	@echo "  make monitor        - Open serial monitor"
 	@echo "  make list-boards    - Show connected boards"
@@ -181,7 +257,10 @@ help:
 	@echo "  BOARD=$(BOARD)"
 	@echo "  PORT=$(PORT)"
 	@echo "  BAUD=$(BAUD)"
+	@echo "  TEENSY_MCU=$(TEENSY_MCU)"
+	@echo "  HEX_FILE=$(HEX_FILE)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make upload PORT=/dev/ttyACM0 BOARD=teensy:avr:teensy40"
 	@echo "  make build-teensy40"
+	@echo "  make load TEENSY_MCU=TEENSY40 HEX_FILE=ltp_serial_v2_teensy40.hex"
