@@ -50,3 +50,4 @@ htmlcov/
 *.local.yaml
 .env
 .venv-*
+fps-4-video.mp4
