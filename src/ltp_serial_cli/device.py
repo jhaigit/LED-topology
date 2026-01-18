@@ -504,7 +504,10 @@ class LtpDevice:
             raise LtpConnectionError("Not connected")
         if self.debug:
             self._debug_tx(packet)
-        self._serial.write(packet)
+        try:
+            self._serial.write(packet)
+        except (OSError, serial.SerialException) as e:
+            raise LtpConnectionError(f"write failed: {e}") from e
 
     def _debug_tx(self, packet: bytes):
         """Log outgoing packet."""
@@ -553,7 +556,7 @@ class LtpDevice:
                     packets = self._protocol.feed(data)
                     for packet in packets:
                         self._handle_packet(packet)
-            except serial.SerialException:
+            except (OSError, serial.SerialException):
                 break
 
     def _handle_packet(self, packet: LtpPacket):
