@@ -465,7 +465,7 @@ class MediaSource:
             sender = self._data_senders.get(stream_id)
             if sender:
                 try:
-                    await sender.send(output, self.config.color_format)
+                    sender.send(output, self.config.color_format)
                 except Exception as e:
                     logger.error(f"Failed to send to stream {stream_id}: {e}")
 
