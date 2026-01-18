@@ -238,8 +238,9 @@ class MediaSource:
     async def _handle_subscribe(self, message: Message) -> Message:
         """Handle subscription request."""
         data = message.data
-        callback_host = data.get("callback_host")
-        callback_port = data.get("callback_port")
+        callback = data.get("callback", {})
+        callback_host = callback.get("host")
+        callback_port = callback.get("port")
 
         if not callback_host or not callback_port:
             return subscribe_response(
