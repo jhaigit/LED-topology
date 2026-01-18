@@ -77,7 +77,11 @@ void sendHello() {
     caps1 |= CAPS_MULTI_STRIP;
 #endif
     payload[8] = caps1;
+#if MATRIX_MODE
+    payload[9] = CAPS_PIXEL_READBACK | CAPS_SUBMATRIX;
+#else
     payload[9] = CAPS_PIXEL_READBACK;
+#endif
     payload[10] = NUM_CONTROLS;
     payload[11] = 0; // Input count
 
@@ -112,7 +116,11 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             response[respLen++] = leds.getPixelsPerStrip() >> 8;
             response[respLen++] = leds.getColorFormat();
             response[respLen++] = CAPS_BRIGHTNESS | CAPS_EXTENDED;
+#if MATRIX_MODE
+            response[respLen++] = CAPS_PIXEL_READBACK | CAPS_SUBMATRIX;
+#else
             response[respLen++] = CAPS_PIXEL_READBACK;
+#endif
             response[respLen++] = NUM_CONTROLS;
             // Device name
             {
@@ -366,6 +374,95 @@ void handlePixelFrame(const uint8_t* payload, uint16_t length) {
     }
 }
 
+#if MATRIX_MODE
+void handlePixelSubmatrix(const uint8_t* payload, uint16_t length) {
+    // Payload format:
+    // [0] strip_id
+    // [1-2] matrix_width (LE)
+    // [3-4] x_offset (LE)
+    // [5-6] y_offset (LE)
+    // [7-8] sub_width (LE)
+    // [9-10] sub_height (LE)
+    // [11] flags
+    // [12+] pixel data
+
+    if (length < 12) {
+        protocol.sendNak(CMD_PIXEL_SUBMATRIX, ERR_INVALID_LENGTH);
+        return;
+    }
+
+    uint8_t stripId = payload[0];
+    if (stripId != 0) {
+        protocol.sendNak(CMD_PIXEL_SUBMATRIX, ERR_INVALID_PARAM);
+        return;
+    }
+
+    uint16_t matrixWidth = payload[1] | ((uint16_t)payload[2] << 8);
+    uint16_t xOffset = payload[3] | ((uint16_t)payload[4] << 8);
+    uint16_t yOffset = payload[5] | ((uint16_t)payload[6] << 8);
+    uint16_t subWidth = payload[7] | ((uint16_t)payload[8] << 8);
+    uint16_t subHeight = payload[9] | ((uint16_t)payload[10] << 8);
+    uint8_t flags = payload[11];
+
+    uint16_t dataOffset = 12;
+    uint8_t bpp = leds.getBytesPerPixel();
+    uint32_t expectedBytes = (uint32_t)subWidth * subHeight * bpp;
+
+    if (length < dataOffset + expectedBytes) {
+        protocol.sendNak(CMD_PIXEL_SUBMATRIX, ERR_INVALID_LENGTH);
+        return;
+    }
+
+    // Validate bounds
+    if (matrixWidth == 0 || subWidth == 0 || subHeight == 0) {
+        protocol.sendNak(CMD_PIXEL_SUBMATRIX, ERR_INVALID_PARAM);
+        return;
+    }
+
+    bool serpentine = flags & SUBMATRIX_SERPENTINE;
+    const uint8_t* pixelData = payload + dataOffset;
+
+    // Process each pixel in the submatrix
+    for (uint16_t row = 0; row < subHeight; row++) {
+        uint16_t y = yOffset + row;
+
+        for (uint16_t col = 0; col < subWidth; col++) {
+            uint16_t x = xOffset + col;
+            uint16_t logicalIndex;
+
+            if (serpentine && (y & 1)) {
+                // Odd row - reversed
+                logicalIndex = (y + 1) * matrixWidth - 1 - x;
+            } else {
+                // Even row or linear - normal
+                logicalIndex = y * matrixWidth + x;
+            }
+
+            // Check bounds
+            if (logicalIndex >= leds.getLogicalPixelCount()) {
+                protocol.sendNak(CMD_PIXEL_SUBMATRIX, ERR_PIXEL_OVERFLOW);
+                return;
+            }
+
+            // Get pixel data from input (row-major order in submatrix)
+            uint32_t srcOffset = ((uint32_t)row * subWidth + col) * bpp;
+            leds.setPixel(logicalIndex,
+                          pixelData[srcOffset],
+                          pixelData[srcOffset + 1],
+                          pixelData[srcOffset + 2]);
+        }
+    }
+
+    stats.framesReceived++;
+    stats.bytesReceived += expectedBytes;
+
+    if (config.autoShow) {
+        leds.show();
+        stats.framesDisplayed++;
+    }
+}
+#endif
+
 void handleSetControl(const uint8_t* payload, uint16_t length) {
     if (length < 2) {
         protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_LENGTH);
@@ -568,6 +665,12 @@ void processPacket(const LtpPacket& pkt) {
         case CMD_PIXEL_FRAME:
             handlePixelFrame(pkt.payload, pkt.length);
             break;
+
+#if MATRIX_MODE
+        case CMD_PIXEL_SUBMATRIX:
+            handlePixelSubmatrix(pkt.payload, pkt.length);
+            break;
+#endif
 
         case CMD_SET_CONTROL:
             handleSetControl(pkt.payload, pkt.length);
