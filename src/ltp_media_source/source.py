@@ -245,7 +245,8 @@ class MediaSource:
             return subscribe_response(
                 message.seq,
                 status="error",
-                error="callback_host and callback_port required",
+                actual={"error": "callback_host and callback_port required"},
+                stream_id="",
             )
 
         # Create stream
@@ -265,10 +266,12 @@ class MediaSource:
         return subscribe_response(
             message.seq,
             status="ok",
+            actual={
+                "dimensions": [self._width] if self._height == 1 else [self._width, self._height],
+                "color_format": self.config.color_format.name.lower(),
+                "rate": self.config.rate,
+            },
             stream_id=stream_id,
-            dimensions=[self._width] if self._height == 1 else [self._width, self._height],
-            color_format=self.config.color_format.name.lower(),
-            rate=self.config.rate,
         )
 
     async def _handle_stream_control(self, message: Message) -> Message:
