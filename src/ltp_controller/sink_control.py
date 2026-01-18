@@ -414,8 +414,6 @@ class SinkController:
 
                 # Send the frame
                 stream.sender.send(
-                    stream_id=stream.stream_id,
-                    frame_num=0,
                     pixels=pixels,
                     color_format=ColorFormat.RGB,
                 )
