@@ -112,6 +112,7 @@ class SerialSink:
         self._pixel_count = self.config.pixels
         self._dimensions = self.config.dimensions.copy() if self.config.dimensions else []
         self._topology = None
+        self._device_type = self.config.device_type
 
         # State
         self._running = False
@@ -211,9 +212,14 @@ class SerialSink:
         else:
             self._pixel_count = self.config.pixels
 
-        # Update dimensions
+        # Update dimensions from device if not specified in config
         if not self._dimensions:
-            self._dimensions = [self._pixel_count]
+            if device_info.is_matrix:
+                self._dimensions = device_info.dimensions
+                self._device_type = DeviceType.MATRIX
+                logger.info(f"Auto-detected matrix dimensions: {self._dimensions[0]}x{self._dimensions[1]}")
+            else:
+                self._dimensions = [self._pixel_count]
 
         # Create topology
         if len(self._dimensions) == 1:
@@ -223,6 +229,7 @@ class SerialSink:
             self._topology = create_matrix_topology(
                 self._dimensions[0], self._dimensions[1]
             )
+            self._device_type = DeviceType.MATRIX
 
         # Initialize pixel buffer
         self._pixel_buffer = np.zeros(
@@ -264,7 +271,7 @@ class SerialSink:
             "id": str(self.config.device_id),
             "name": self.config.name,
             "description": self.config.description,
-            "type": self.config.device_type.value,
+            "type": self._device_type.value,
             "pixels": self._pixel_count,
             "dimensions": self._dimensions or [self._pixel_count],
             "topology": topology_dict,
@@ -634,7 +641,7 @@ class SerialSink:
             device_id=self.config.device_id,
             display_name=self.config.name,
             description=self.config.description,
-            device_type=self.config.device_type,
+            device_type=self._device_type,
             pixels=self._pixel_count,
             dimensions=self._dimensions,
             color_format=self.config.color_format,

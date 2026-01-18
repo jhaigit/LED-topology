@@ -122,7 +122,7 @@
             </div>
             <div class="form-group">
                 <label for="vs-type">Type</label>
-                <select id="vs-type" name="type" required>
+                <select id="vs-type" name="type" required onchange="onTypeChange(this.value)">
                     <option value="">Select type...</option>
                     <optgroup label="Patterns">
                         <option value="rainbow">Rainbow</option>
@@ -135,6 +135,15 @@
                         <option value="breathe">Breathe</option>
                         <option value="strobe">Strobe</option>
                     </optgroup>
+                    <optgroup label="Matrix Test Patterns">
+                        <option value="grid">Grid - Shows matrix structure</option>
+                        <option value="corners">Corner Markers - Marks 4 corners (R,G,B,W)</option>
+                        <option value="sweep">Row/Column Sweep - Animated sweep</option>
+                        <option value="checkerboard">Checkerboard Pattern</option>
+                        <option value="pixel_index">Pixel Index - Grayscale gradient</option>
+                        <option value="coordinates">Coordinate Display - X/Y encoding</option>
+                        <option value="test_card">Test Card - Comprehensive test</option>
+                    </optgroup>
                     <optgroup label="Visualizers">
                         <option value="bar_graph">Bar Graph</option>
                         <option value="multi_bar">Multi-Bar</option>
@@ -146,9 +155,17 @@
                     </optgroup>
                 </select>
             </div>
-            <div class="form-group">
+            <div class="form-group" id="dimensions-1d">
                 <label for="vs-pixels">Pixel Count</label>
-                <input type="number" id="vs-pixels" name="pixels" value="60" min="1" max="1000">
+                <input type="number" id="vs-pixels" name="pixels" value="60" min="1" max="10000">
+            </div>
+            <div class="form-group" id="dimensions-2d" style="display: none;">
+                <label>Matrix Dimensions (Width x Height)</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="number" id="vs-width" name="width" value="60" min="1" max="1000" style="width: 80px;">
+                    <span>x</span>
+                    <input type="number" id="vs-height" name="height" value="16" min="1" max="1000" style="width: 80px;">
+                </div>
             </div>
             <div class="form-group">
                 <label for="vs-fps">Frame Rate (Hz)</label>
@@ -165,6 +182,8 @@
 
 {% block scripts %}
 <script>
+const matrixPatterns = ['grid', 'corners', 'sweep', 'checkerboard', 'pixel_index', 'coordinates', 'test_card'];
+
 function showCreateModal() {
     document.getElementById('createModal').style.display = 'flex';
 }
@@ -173,13 +192,31 @@ function hideCreateModal() {
     document.getElementById('createModal').style.display = 'none';
 }
 
+function onTypeChange(type) {
+    const is2D = matrixPatterns.includes(type);
+    document.getElementById('dimensions-1d').style.display = is2D ? 'none' : 'block';
+    document.getElementById('dimensions-2d').style.display = is2D ? 'block' : 'none';
+}
+
 function createSource(event) {
     event.preventDefault();
     const form = event.target;
+    const type = form.type.value;
+    const is2D = matrixPatterns.includes(type);
+
+    let dimensions;
+    if (is2D) {
+        const width = parseInt(document.getElementById('vs-width').value);
+        const height = parseInt(document.getElementById('vs-height').value);
+        dimensions = [width, height];
+    } else {
+        dimensions = [parseInt(form.pixels.value)];
+    }
+
     const data = {
         name: form.name.value,
-        type: form.type.value,
-        output_dimensions: [parseInt(form.pixels.value)],
+        type: type,
+        output_dimensions: dimensions,
         frame_rate: parseFloat(form.fps.value),
         enabled: true
     };

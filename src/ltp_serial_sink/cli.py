@@ -238,6 +238,8 @@ def test_connection(config: SerialSinkConfig) -> bool:
         print(f"  Device: {device_info.device_name or 'Unknown'}")
         print(f"  Firmware: v{device_info.firmware_version}")
         print(f"  Pixels: {device_info.total_pixels}")
+        if device_info.is_matrix:
+            print(f"  Matrix: {device_info.matrix_width}x{device_info.matrix_height}")
         print(f"  Strips: {device_info.strip_count}")
         print()
 

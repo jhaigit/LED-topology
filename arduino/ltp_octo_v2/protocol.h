@@ -12,7 +12,7 @@
 
 // Protocol constants
 #define LTP_START_BYTE      0xAA
-#define LTP_MAX_PAYLOAD     1024
+#define LTP_MAX_PAYLOAD     4096
 #define LTP_PROTOCOL_MAJOR  2
 #define LTP_PROTOCOL_MINOR  0
 

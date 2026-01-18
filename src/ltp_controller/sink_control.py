@@ -42,6 +42,7 @@ class SinkController:
     def __init__(self, controller: Controller):
         self.controller = controller
         self._streams: dict[str, SinkStream] = {}
+        self._paint_buffers: dict[str, np.ndarray] = {}
         self._lock = asyncio.Lock()
 
     async def _get_or_create_stream(self, sink: DeviceState) -> SinkStream:
@@ -83,8 +84,9 @@ class SinkController:
         start_req = stream_control(0, stream_id, StreamAction.START)
         await client.request(start_req)
 
-        # Get pixel count from sink
+        # Get pixel count and dimensions from sink
         pixel_count = self._get_pixel_count(sink)
+        dimensions = self._get_dimensions(sink)
 
         stream = SinkStream(
             sink_id=sink_id,
@@ -96,7 +98,8 @@ class SinkController:
         )
         self._streams[sink_id] = stream
 
-        logger.info(f"Created stream to sink {sink.name} ({pixel_count} pixels)")
+        dim_str = "x".join(str(d) for d in dimensions)
+        logger.info(f"Created stream to sink {sink.name} ({dim_str}, {pixel_count} pixels)")
         return stream
 
     async def _cleanup_stream(self, sink_id: str) -> None:
@@ -141,6 +144,20 @@ class SinkController:
 
         # Default
         return 60
+
+    def _get_dimensions(self, sink: DeviceState) -> list[int]:
+        """Get dimensions from sink device."""
+        props = sink.device.properties
+
+        if "dim" in props:
+            return [int(d) for d in props["dim"].split("x")]
+
+        # Check capabilities
+        if sink.capabilities and "dimensions" in sink.capabilities:
+            return sink.capabilities["dimensions"]
+
+        # Fall back to pixel count as 1D
+        return [self._get_pixel_count(sink)]
 
     async def fill_solid(
         self, sink_id: str, color: tuple[int, int, int]
@@ -322,6 +339,92 @@ class SinkController:
             Status dict with success/error info
         """
         return await self.fill_sections(sink_id, [{"start": index, "end": index + 1, "color": color}])
+
+    async def paint_pixels(
+        self, sink_id: str, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Paint pixels directly on a sink.
+
+        Supports multiple paint modes:
+        - {"pixels": {"0": [255,0,0], "5": [0,255,0]}}  # Sparse pixel map
+        - {"x": 5, "y": 2, "color": [255,0,0]}  # Single pixel by coordinate
+        - {"index": 10, "color": [255,0,0]}  # Single pixel by index
+        - {"range": [0, 10], "color": [255,0,0]}  # Fill a range
+
+        Args:
+            sink_id: Sink device ID
+            data: Paint data with mode-specific fields
+
+        Returns:
+            Status dict with success/error info
+        """
+        sink = self.controller.get_sink(sink_id)
+        if not sink:
+            return {"status": "error", "message": "Sink not found"}
+
+        if not sink.online:
+            return {"status": "error", "message": "Sink is offline"}
+
+        try:
+            async with self._lock:
+                stream = await self._get_or_create_stream(sink)
+                pixel_count = stream.pixel_count
+                dimensions = self._get_dimensions(sink)
+                width = dimensions[0]
+
+                # Get current buffer or create black one
+                if sink_id not in self._paint_buffers:
+                    self._paint_buffers[sink_id] = np.zeros((pixel_count, 3), dtype=np.uint8)
+                pixels = self._paint_buffers[sink_id]
+
+                # Handle different paint modes
+                if "pixels" in data:
+                    # Sparse pixel map: {"pixels": {"0": [r,g,b], "5": [r,g,b]}}
+                    for idx_str, color in data["pixels"].items():
+                        idx = int(idx_str)
+                        if 0 <= idx < pixel_count:
+                            pixels[idx] = color[:3]
+
+                elif "x" in data and "y" in data and "color" in data:
+                    # Coordinate mode: {"x": 5, "y": 2, "color": [r,g,b]}
+                    x, y = int(data["x"]), int(data["y"])
+                    idx = y * width + x
+                    if 0 <= idx < pixel_count:
+                        pixels[idx] = data["color"][:3]
+
+                elif "index" in data and "color" in data:
+                    # Index mode: {"index": 10, "color": [r,g,b]}
+                    idx = int(data["index"])
+                    if 0 <= idx < pixel_count:
+                        pixels[idx] = data["color"][:3]
+
+                elif "range" in data and "color" in data:
+                    # Range mode: {"range": [0, 10], "color": [r,g,b]}
+                    start, end = int(data["range"][0]), int(data["range"][1])
+                    start = max(0, start)
+                    end = min(pixel_count, end)
+                    pixels[start:end] = data["color"][:3]
+
+                elif "clear" in data and data["clear"]:
+                    # Clear buffer
+                    pixels[:] = 0
+
+                else:
+                    return {"status": "error", "message": "Unknown paint mode"}
+
+                # Send the frame
+                stream.sender.send(
+                    stream_id=stream.stream_id,
+                    frame_num=0,
+                    pixels=pixels,
+                    color_format=ColorFormat.RGB,
+                )
+
+                return {"status": "ok", "pixels_set": pixel_count}
+
+        except Exception as e:
+            logger.error(f"Error painting pixels: {e}")
+            return {"status": "error", "message": str(e)}
 
     async def cleanup_all(self) -> None:
         """Clean up all active streams."""

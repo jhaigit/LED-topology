@@ -386,5 +386,7 @@ SERVICE_TYPE_CONTROLLER = "_ltp-controller._tcp.local."
 # Protocol constants
 PROTOCOL_VERSION = "0.1"
 PACKET_MAGIC = 0x4C54
-MAX_PACKET_SIZE = 1400
+# Max UDP packet size - 8KB works on most local networks
+# For larger displays, frame chunking should be implemented
+MAX_PACKET_SIZE = 8192
 DEFAULT_REFRESH_HZ = 30

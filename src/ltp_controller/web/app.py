@@ -95,6 +95,14 @@ def create_app(
             virtual_sources=virtual_source_manager.sources if virtual_source_manager else [],
         )
 
+    @app.route("/paint/<sink_id>")
+    def paint_page(sink_id: str) -> str:
+        """Paint interface for a sink."""
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return "Sink not found", 404
+        return render_template("paint.html", sink=sink)
+
     # ==================== API: Sources ====================
 
     @app.route("/api/sources")
@@ -249,6 +257,53 @@ def create_app(
             return jsonify(result), 400
 
         return jsonify(result)
+
+    # ==================== API: Sink Paint (Direct Pixel Manipulation) ====================
+
+    @app.route("/api/sinks/<sink_id>/paint", methods=["POST"])
+    def api_sink_paint(sink_id: str) -> Any:
+        """Paint pixels directly on a sink.
+
+        Body formats:
+        - {"pixels": {0: [255,0,0], 5: [0,255,0]}}  # Sparse pixel map
+        - {"x": 5, "y": 2, "color": [255,0,0]}  # Single pixel by coordinate
+        - {"index": 10, "color": [255,0,0]}  # Single pixel by index
+        - {"range": [0, 10], "color": [255,0,0]}  # Fill a range
+        """
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not initialized"}), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        result = run_async(sink_controller.paint_pixels(sink_id, data))
+
+        if result.get("status") == "error":
+            return jsonify(result), 400
+
+        return jsonify(result)
+
+    @app.route("/api/sinks/<sink_id>/paint/info")
+    def api_sink_paint_info(sink_id: str) -> Any:
+        """Get sink info for painting (dimensions, pixel count)."""
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+
+        props = sink.device.properties
+        pixels = int(props.get("pixels", 60))
+        dims = [int(d) for d in props.get("dim", str(pixels)).split("x")]
+        sink_type = props.get("type", "string")
+
+        return jsonify({
+            "id": sink_id,
+            "name": sink.name,
+            "pixels": pixels,
+            "dimensions": dims,
+            "type": sink_type,
+            "is_matrix": len(dims) > 1,
+        })
 
     # ==================== API: All Sources (Physical + Virtual) ====================
 
@@ -561,12 +616,32 @@ def create_app(
     @app.route("/api/virtual-sources/types")
     def api_virtual_source_types() -> Any:
         """List available virtual source types."""
+        # Categorization mapping
+        matrix_patterns = {"grid", "corners", "sweep", "checkerboard", "pixel_index", "coordinates", "test_card"}
+        visualizers = {"bar_graph", "multi_bar", "vu_meter"}
+        monitors = {"system_monitor", "cpu_cores"}
+
         types = []
         for type_name, type_class in VIRTUAL_SOURCE_TYPES.items():
+            if type_name in matrix_patterns:
+                category = "matrix_pattern"
+            elif type_name in visualizers:
+                category = "visualizer"
+            elif type_name in monitors:
+                category = "monitor"
+            else:
+                category = "pattern"
+
+            # Get description from docstring if available
+            description = ""
+            if type_class.__doc__:
+                description = type_class.__doc__.split("\n")[0].strip()
+
             types.append({
                 "type": type_name,
                 "name": type_name.replace("_", " ").title(),
-                "category": "pattern" if "Pattern" in type_class.__name__ else "visualizer",
+                "category": category,
+                "description": description,
             })
         return jsonify(types)
 

@@ -123,6 +123,13 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
                 }
                 response[respLen++] = 0;
             }
+#if MATRIX_MODE
+            // Add matrix dimensions (width, height as 16-bit values)
+            response[respLen++] = MATRIX_WIDTH & 0xFF;
+            response[respLen++] = MATRIX_WIDTH >> 8;
+            response[respLen++] = MATRIX_HEIGHT & 0xFF;
+            response[respLen++] = MATRIX_HEIGHT >> 8;
+#endif
             break;
 
         case INFO_VERSION:

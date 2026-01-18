@@ -33,7 +33,8 @@ TEENSY_MCU ?= TEENSY32
 # Sketch info
 SKETCH = ltp_octo_v2.ino
 BUILD_DIR = build
-HEX_FILE = ltp_octo_v2_teensy32.hex
+# Default hex file: use build output, override with HEX_FILE=... for pre-built
+HEX_FILE ?= $(BUILD_DIR)/$(SKETCH).hex
 
 # Tools
 CLI = arduino-cli

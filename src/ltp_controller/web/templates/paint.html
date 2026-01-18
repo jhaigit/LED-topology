@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+
+{% block title %}Paint - {{ sink.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Paint: {{ sink.name }}</h1>
+        <p class="subtitle" id="sinkInfo">Loading...</p>
+    </div>
+    <a href="/sinks" class="btn">Back to Sinks</a>
+</div>
+
+<div class="paint-container">
+    <div class="paint-toolbar">
+        <div class="tool-group">
+            <label>Color:</label>
+            <input type="color" id="paintColor" value="#ff0000">
+        </div>
+        <div class="tool-group">
+            <label>Tool:</label>
+            <select id="paintTool">
+                <option value="pixel">Single Pixel</option>
+                <option value="line">Line</option>
+                <option value="fill">Fill All</option>
+            </select>
+        </div>
+        <div class="tool-group">
+            <button class="btn btn-sm" onclick="clearCanvas()">Clear</button>
+            <button class="btn btn-sm btn-primary" onclick="sendToSink()">Send</button>
+        </div>
+    </div>
+
+    <div class="paint-canvas-container">
+        <canvas id="paintCanvas"></canvas>
+    </div>
+
+    <div class="paint-status">
+        <span id="cursorPos">-</span>
+        <span id="lastAction">Ready</span>
+    </div>
+</div>
+
+<style>
+.paint-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    max-width: 100%;
+}
+
+.paint-toolbar {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+    padding: 0.75rem;
+    background: var(--secondary-bg, #1f2937);
+    border-radius: 8px;
+    flex-wrap: wrap;
+}
+
+.tool-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tool-group label {
+    font-weight: 500;
+    color: var(--text-muted, #9ca3af);
+}
+
+.paint-canvas-container {
+    background: #000;
+    border-radius: 8px;
+    padding: 1rem;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+}
+
+#paintCanvas {
+    border: 1px solid var(--border-color, #374151);
+    cursor: crosshair;
+    image-rendering: pixelated;
+}
+
+.paint-status {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-muted, #9ca3af);
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const sinkId = '{{ sink.id }}';
+let width = 60;
+let height = 1;
+let pixelSize = 10;
+let pixels = [];
+let canvas, ctx;
+let isDrawing = false;
+let lastX = -1, lastY = -1;
+
+// Initialize
+async function init() {
+    // Get sink info
+    const response = await fetch(`/api/sinks/${sinkId}/paint/info`);
+    const info = await response.json();
+
+    width = info.dimensions[0];
+    height = info.dimensions.length > 1 ? info.dimensions[1] : 1;
+
+    document.getElementById('sinkInfo').textContent =
+        `${width}x${height} (${info.pixels} pixels) - ${info.type}`;
+
+    // Calculate pixel size for display
+    const maxWidth = window.innerWidth - 100;
+    const maxHeight = window.innerHeight - 300;
+    pixelSize = Math.max(4, Math.min(
+        Math.floor(maxWidth / width),
+        Math.floor(maxHeight / height),
+        20
+    ));
+
+    // Initialize pixel buffer
+    pixels = new Array(width * height).fill(null).map(() => [0, 0, 0]);
+
+    // Setup canvas
+    canvas = document.getElementById('paintCanvas');
+    canvas.width = width * pixelSize;
+    canvas.height = height * pixelSize;
+    ctx = canvas.getContext('2d');
+
+    // Event listeners
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup', onMouseUp);
+    canvas.addEventListener('mouseleave', onMouseUp);
+
+    drawCanvas();
+}
+
+function getPixelCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - rect.left) / pixelSize);
+    const y = Math.floor((e.clientY - rect.top) / pixelSize);
+    return { x: Math.max(0, Math.min(width - 1, x)), y: Math.max(0, Math.min(height - 1, y)) };
+}
+
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? [
+        parseInt(result[1], 16),
+        parseInt(result[2], 16),
+        parseInt(result[3], 16)
+    ] : [255, 255, 255];
+}
+
+function setPixel(x, y, color) {
+    if (x >= 0 && x < width && y >= 0 && y < height) {
+        const idx = y * width + x;
+        pixels[idx] = color;
+    }
+}
+
+function drawLine(x0, y0, x1, y1, color) {
+    // Bresenham's line algorithm
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+
+    while (true) {
+        setPixel(x0, y0, color);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx) { err += dx; y0 += sy; }
+    }
+}
+
+function onMouseDown(e) {
+    isDrawing = true;
+    const { x, y } = getPixelCoords(e);
+    const color = hexToRgb(document.getElementById('paintColor').value);
+    const tool = document.getElementById('paintTool').value;
+
+    if (tool === 'fill') {
+        pixels = pixels.map(() => [...color]);
+        drawCanvas();
+        sendToSink();
+        return;
+    }
+
+    setPixel(x, y, color);
+    lastX = x;
+    lastY = y;
+    drawCanvas();
+
+    document.getElementById('lastAction').textContent = `Set (${x}, ${y})`;
+}
+
+function onMouseMove(e) {
+    const { x, y } = getPixelCoords(e);
+    document.getElementById('cursorPos').textContent = `(${x}, ${y})`;
+
+    if (!isDrawing) return;
+
+    const color = hexToRgb(document.getElementById('paintColor').value);
+    const tool = document.getElementById('paintTool').value;
+
+    if (tool === 'line' && lastX >= 0) {
+        drawLine(lastX, lastY, x, y, color);
+    } else {
+        setPixel(x, y, color);
+    }
+
+    lastX = x;
+    lastY = y;
+    drawCanvas();
+}
+
+function onMouseUp(e) {
+    if (isDrawing) {
+        isDrawing = false;
+        sendToSink();
+    }
+    lastX = -1;
+    lastY = -1;
+}
+
+function drawCanvas() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            const [r, g, b] = pixels[idx];
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+            ctx.fillRect(x * pixelSize, y * pixelSize, pixelSize - 1, pixelSize - 1);
+        }
+    }
+
+    // Draw grid for small canvases
+    if (pixelSize >= 8) {
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1;
+        for (let x = 0; x <= width; x++) {
+            ctx.beginPath();
+            ctx.moveTo(x * pixelSize, 0);
+            ctx.lineTo(x * pixelSize, canvas.height);
+            ctx.stroke();
+        }
+        for (let y = 0; y <= height; y++) {
+            ctx.beginPath();
+            ctx.moveTo(0, y * pixelSize);
+            ctx.lineTo(canvas.width, y * pixelSize);
+            ctx.stroke();
+        }
+    }
+}
+
+function clearCanvas() {
+    pixels = pixels.map(() => [0, 0, 0]);
+    drawCanvas();
+    sendToSink();
+    document.getElementById('lastAction').textContent = 'Cleared';
+}
+
+async function sendToSink() {
+    // Convert to sparse pixel map for efficiency
+    const pixelMap = {};
+    for (let i = 0; i < pixels.length; i++) {
+        pixelMap[i] = pixels[i];
+    }
+
+    try {
+        const response = await fetch(`/api/sinks/${sinkId}/paint`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pixels: pixelMap })
+        });
+        const data = await response.json();
+        if (data.status !== 'ok') {
+            console.error('Paint error:', data);
+        }
+    } catch (err) {
+        console.error('Failed to send:', err);
+    }
+}
+
+// Initialize on load
+init();
+</script>
+{% endblock %}

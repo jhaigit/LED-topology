@@ -90,7 +90,21 @@ class DeviceInfo:
     control_count: int = 0
     input_count: int = 0
     device_name: str = ""
+    matrix_width: int = 0
+    matrix_height: int = 0
     strips: list[StripInfo] = field(default_factory=list)
+
+    @property
+    def is_matrix(self) -> bool:
+        """Check if device reports as a matrix."""
+        return self.matrix_width > 0 and self.matrix_height > 0
+
+    @property
+    def dimensions(self) -> list[int]:
+        """Get dimensions as [width, height] or [total_pixels]."""
+        if self.is_matrix:
+            return [self.matrix_width, self.matrix_height]
+        return [self.total_pixels]
 
     @property
     def protocol_version(self) -> str:
@@ -629,7 +643,38 @@ class LtpDevice:
 
     def _parse_info_response(self, packet: LtpPacket) -> DeviceInfo:
         """Parse INFO_RESPONSE (ALL type) into DeviceInfo."""
-        return self._parse_hello(packet)  # Same format
+        p = packet.payload
+        if len(p) < 11:
+            raise LtpProtocolError("INFO_RESPONSE payload too short")
+
+        info = DeviceInfo(
+            protocol_major=p[0],
+            protocol_minor=p[1],
+            firmware_major=(p[2] >> 4) & 0x0F,
+            firmware_minor=p[2] & 0x0F,
+            strip_count=p[4],
+            total_pixels=struct.unpack("<H", p[5:7])[0],
+            color_format=p[7],
+            capabilities1=p[8],
+            capabilities2=p[9],
+            control_count=p[10],
+        )
+
+        # Parse device name (null-terminated string starting at offset 11)
+        offset = 11
+        name_end = offset
+        while name_end < len(p) and p[name_end] != 0:
+            name_end += 1
+        if name_end > offset:
+            info.device_name = bytes(p[offset:name_end]).decode("utf-8", errors="replace")
+        offset = name_end + 1  # Skip null terminator
+
+        # Parse matrix dimensions if present (4 bytes: width_lo, width_hi, height_lo, height_hi)
+        if offset + 4 <= len(p):
+            info.matrix_width = struct.unpack("<H", p[offset:offset + 2])[0]
+            info.matrix_height = struct.unpack("<H", p[offset + 2:offset + 4])[0]
+
+        return info
 
     def _parse_strips_response(self, packet: LtpPacket) -> list[StripInfo]:
         """Parse strips from INFO_RESPONSE."""

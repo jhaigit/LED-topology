@@ -69,6 +69,7 @@
             <button class="btn btn-sm" onclick="refreshDevice('sink', '{{ sink.id }}')">Refresh</button>
             {% if sink.online %}
             <button class="btn btn-sm btn-primary" onclick="showFillModal('{{ sink.id }}', '{{ sink.name }}', {{ sink.device.properties.pixels or sink.device.properties.dim|replace('x','*')|int if sink.device.properties.dim else 60 }})">Fill</button>
+            <a href="/paint/{{ sink.id }}" class="btn btn-sm">Paint</a>
             <button class="btn btn-sm" onclick="clearSink('{{ sink.id }}')">Clear</button>
             {% endif %}
         </div>
