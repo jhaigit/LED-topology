@@ -12,6 +12,15 @@ from ltp_controller.virtual_sources.patterns import (
     BreathePattern,
     StrobePattern,
 )
+from ltp_controller.virtual_sources.matrix_patterns import (
+    GridPattern,
+    CornerMarkers,
+    RowColumnSweep,
+    Checkerboard,
+    PixelIndex,
+    CoordinateDisplay,
+    TestCard,
+)
 from ltp_controller.virtual_sources.visualizers import (
     BarGraph,
     MultiBar,
@@ -35,6 +44,14 @@ __all__ = [
     "GradientPattern",
     "BreathePattern",
     "StrobePattern",
+    # Matrix Test Patterns
+    "GridPattern",
+    "CornerMarkers",
+    "RowColumnSweep",
+    "Checkerboard",
+    "PixelIndex",
+    "CoordinateDisplay",
+    "TestCard",
     # Visualizers
     "BarGraph",
     "MultiBar",
@@ -56,6 +73,14 @@ VIRTUAL_SOURCE_TYPES: dict[str, type[VirtualSource]] = {
     "gradient": GradientPattern,
     "breathe": BreathePattern,
     "strobe": StrobePattern,
+    # Matrix Test Patterns (for debugging pixel addressing)
+    "grid": GridPattern,
+    "corners": CornerMarkers,
+    "sweep": RowColumnSweep,
+    "checkerboard": Checkerboard,
+    "pixel_index": PixelIndex,
+    "coordinates": CoordinateDisplay,
+    "test_card": TestCard,
     # Visualizers
     "bar_graph": BarGraph,
     "multi_bar": MultiBar,
