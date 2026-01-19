@@ -82,6 +82,14 @@
                            data-control-id="{{ control.id }}"
                            value="{{ vs.controls.get_value(control.id) }}"
                            onchange="updateControl('{{ vs.id }}', '{{ control.id }}', this.value)">
+                    {% elif control.type == 'string' %}
+                    <input type="text"
+                           class="control-text"
+                           data-source-id="{{ vs.id }}"
+                           data-control-id="{{ control.id }}"
+                           value="{{ vs.controls.get_value(control.id) }}"
+                           onchange="updateControl('{{ vs.id }}', '{{ control.id }}', this.value)"
+                           placeholder="{{ control.description }}">
                     {% else %}
                     <span class="control-value">{{ vs.controls.get_value(control.id) }}</span>
                     {% endif %}
@@ -153,6 +161,11 @@
                         <option value="system_monitor">System Monitor (CPU/Mem/Net)</option>
                         <option value="cpu_cores">CPU Cores</option>
                     </optgroup>
+                    <optgroup label="Text">
+                        <option value="text">Text Display - Static/scrolling text</option>
+                        <option value="counter">Counter - Counting number display</option>
+                        <option value="clock">Clock - Digital time display</option>
+                    </optgroup>
                 </select>
             </div>
             <div class="form-group" id="dimensions-1d">
@@ -182,7 +195,7 @@
 
 {% block scripts %}
 <script>
-const matrixPatterns = ['grid', 'corners', 'sweep', 'checkerboard', 'pixel_index', 'coordinates', 'test_card'];
+const matrixPatterns = ['grid', 'corners', 'sweep', 'checkerboard', 'pixel_index', 'coordinates', 'test_card', 'text', 'counter', 'clock'];
 
 function showCreateModal() {
     document.getElementById('createModal').style.display = 'flex';
@@ -347,6 +360,15 @@ function deleteSource(id) {
 }
 .toggle input:checked + .toggle-slider:before {
     transform: translateX(20px);
+}
+.control-text {
+    width: 120px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.85em;
+    border: 1px solid var(--border, #333);
+    border-radius: 4px;
+    background: var(--secondary-bg, #1f2937);
+    color: var(--text-primary, #f3f4f6);
 }
 </style>
 {% endblock %}

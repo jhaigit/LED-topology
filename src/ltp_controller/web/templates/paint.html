@@ -19,11 +19,21 @@
         </div>
         <div class="tool-group">
             <label>Tool:</label>
-            <select id="paintTool">
+            <select id="paintTool" onchange="onToolChange()">
                 <option value="pixel">Single Pixel</option>
                 <option value="line">Line</option>
                 <option value="fill">Fill All</option>
+                <option value="text">Text</option>
             </select>
+        </div>
+        <div class="tool-group" id="textToolGroup" style="display: none;">
+            <input type="text" id="paintText" placeholder="Enter text..." style="width: 150px;">
+            <select id="paintFont">
+                <option value="5x7">5x7</option>
+                <option value="4x6">4x6</option>
+                <option value="3x5">3x5</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="paintText()">Paint Text</button>
         </div>
         <div class="tool-group">
             <button class="btn btn-sm" onclick="clearCanvas()">Clear</button>
@@ -300,6 +310,63 @@ async function sendToSink() {
         }
     } catch (err) {
         console.error('Failed to send:', err);
+    }
+}
+
+function onToolChange() {
+    const tool = document.getElementById('paintTool').value;
+    document.getElementById('textToolGroup').style.display = tool === 'text' ? 'flex' : 'none';
+}
+
+async function paintText() {
+    const text = document.getElementById('paintText').value;
+    if (!text) {
+        alert('Please enter text to paint');
+        return;
+    }
+
+    const color = document.getElementById('paintColor').value;
+    const font = document.getElementById('paintFont').value;
+
+    try {
+        const response = await fetch(`/api/sinks/${sinkId}/paint/text`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                text: text,
+                color: color,
+                font: font,
+                clear: true
+            })
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            document.getElementById('lastAction').textContent = `Painted: "${text}"`;
+            // Refresh canvas from sink
+            await refreshFromSink();
+        } else {
+            alert('Error painting text: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        console.error('Failed to paint text:', err);
+        alert('Failed to paint text');
+    }
+}
+
+async function refreshFromSink() {
+    // After painting text, we need to read back the actual pixel data
+    // For now, just clear local canvas - user can see result on actual LEDs
+    // A full implementation would read back the buffer
+    try {
+        const response = await fetch(`/api/sinks/${sinkId}/paint/info`);
+        const info = await response.json();
+        if (info.has_buffer) {
+            // If the sink has a buffer, we could potentially read it back
+            // For now, mark canvas as "synced with device"
+            document.getElementById('lastAction').textContent += ' (sent to device)';
+        }
+    } catch (err) {
+        console.error('Failed to refresh:', err);
     }
 }
 
