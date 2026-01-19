@@ -20,6 +20,14 @@ from ltp_media_source.source_group import (
     run_source_group,
     run_source_group_from_yaml,
 )
+from ltp_media_source.multi_channel import (
+    MultiChannelSource,
+    MultiChannelConfig,
+    ChannelConfig,
+    Channel,
+    run_multi_channel_source,
+    run_multi_channel_from_yaml,
+)
 from ltp_media_source.visualizers import (
     # Base classes
     Visualizer,
@@ -76,6 +84,13 @@ __all__ = [
     "SourceDefinition",
     "run_source_group",
     "run_source_group_from_yaml",
+    # Phase 7: Multi-Channel Protocol
+    "MultiChannelSource",
+    "MultiChannelConfig",
+    "ChannelConfig",
+    "Channel",
+    "run_multi_channel_source",
+    "run_multi_channel_from_yaml",
     # Phase 4: Visualizers
     "Visualizer",
     "LinearVisualizer",

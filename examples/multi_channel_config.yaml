@@ -1,0 +1,83 @@
+# Example Multi-Channel Source Configuration
+#
+# This configuration creates a single LTP source with multiple output channels.
+# All channels share the same network identity (single mDNS advertisement,
+# single control port) but provide different outputs (video, audio visualizations).
+#
+# Protocol extension:
+# - Subscribers can specify which channel to receive via "channel" field in SUBSCRIBE
+# - CAPABILITY_RESPONSE includes "channels" array with channel metadata
+# - Backward compatible: subscribers not specifying channel get the default
+#
+# Usage:
+#   ltp-multi-channel-source --config examples/multi_channel_config.yaml
+
+# Source identity (single mDNS advertisement)
+name: Multi-Channel Demo
+description: Video and audio visualizations from a single media file
+control_port: 0  # Auto-select
+
+# Media file
+media_path: /path/to/your/video.mp4
+
+# Playback settings
+loop: true
+speed: 1.0
+
+# Audio processing settings
+audio_sample_rate: 44100
+audio_channels: 2
+audio_buffer_duration: 2.0
+
+# Default channel for backward compatibility
+# Subscribers that don't specify a channel receive this one
+default_channel: video
+
+# Channel definitions
+# Each channel has its own output type, dimensions, and settings
+channels:
+  # Video channel - scaled video frames
+  - id: video
+    name: Video Output
+    description: Scaled video frames for main display
+    channel_type: video
+    dimensions: [64, 32]
+    rate: 30
+    fit_mode: contain
+    gamma: 1.0
+
+  # Linear spectrum analyzer
+  - id: spectrum
+    name: Spectrum Analyzer
+    description: Audio spectrum bars for LED strip
+    channel_type: audio_visualizer
+    dimensions: [60]  # Linear (1D) output
+    rate: 30
+    visualizer_type: spectrum
+    color_mode: rainbow
+    smoothing: 0.3
+    gain: 1.0
+
+  # Matrix spectrogram
+  - id: spectrogram
+    name: Spectrogram
+    description: Scrolling spectrogram for secondary matrix
+    channel_type: audio_visualizer
+    dimensions: [16, 16]  # Matrix (2D) output
+    rate: 30
+    visualizer_type: spectrogram
+    color_mode: fire
+    smoothing: 0.2
+    gain: 1.2
+
+  # VU meter
+  - id: vu
+    name: VU Meter
+    description: Volume level indicator
+    channel_type: audio_visualizer
+    dimensions: [30]
+    rate: 30
+    visualizer_type: vu_meter
+    color_mode: rainbow
+    smoothing: 0.5
+    gain: 1.0
