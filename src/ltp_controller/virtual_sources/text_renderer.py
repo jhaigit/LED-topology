@@ -102,7 +102,8 @@ def render_char_to_pixels(
 
     for row_idx, row_byte in enumerate(bitmap):
         for col_idx in range(info.width):
-            if row_byte & (1 << col_idx):
+            # Read bits MSB first (bit width-1 is leftmost pixel)
+            if row_byte & (1 << (info.width - 1 - col_idx)):
                 pixels[row_idx, col_idx] = True
 
     return pixels

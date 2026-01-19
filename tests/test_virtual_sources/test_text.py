@@ -63,6 +63,14 @@ class TestFontInfo:
         assert FONT_3X5.height == 5
         assert FONT_3X5.spacing == 1
 
+    def test_font_info_8x13(self):
+        """8x13 font has correct dimensions."""
+        from ltp_controller.virtual_sources.fonts import FONT_8X13
+        assert FONT_8X13.name == "8x13"
+        assert FONT_8X13.width == 8
+        assert FONT_8X13.height == 13
+        assert FONT_8X13.spacing == 1
+
 
 class TestGetFont:
     """Test get_font function."""
@@ -94,6 +102,15 @@ class TestGetFont:
         assert "A" in data
         assert len(data["A"]) == 5  # 5 rows
 
+    def test_get_font_8x13(self):
+        """Get 8x13 font returns correct info and data."""
+        info, data = get_font("8x13")
+        assert info.name == "8x13"
+        assert info.width == 8
+        assert info.height == 13
+        assert "A" in data
+        assert len(data["A"]) == 13  # 13 rows
+
     def test_get_font_unknown_raises(self):
         """Unknown font raises ValueError."""
         with pytest.raises(ValueError, match="Unknown font"):
@@ -113,7 +130,8 @@ class TestListFonts:
         assert "5x7" in fonts
         assert "4x6" in fonts
         assert "3x5" in fonts
-        assert len(fonts) == 3
+        assert "8x13" in fonts
+        assert len(fonts) == 4
 
     def test_fonts_registry_matches_list(self):
         """FONTS registry matches list_fonts."""
