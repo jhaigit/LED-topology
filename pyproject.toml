@@ -74,6 +74,7 @@ ltp-sink = "ltp_sink.__main__:main"
 ltp-serial-sink = "ltp_serial_sink.__main__:main"
 ltp-artnet-sink = "ltp_artnet.__main__:main"
 ltp-media-source = "ltp_media_source.__main__:main"
+ltp-media-source-group = "ltp_media_source.cli_group:main"
 ltp-controller = "ltp_controller.__main__:main"
 
 [project.urls]

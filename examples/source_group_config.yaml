@@ -1,0 +1,50 @@
+# Example MediaSourceGroup Configuration
+#
+# This configuration creates multiple synchronized outputs from a single media file:
+# - A video output scaled for an LED matrix
+# - An audio spectrum visualization for an LED strip
+# - An audio spectrogram for a secondary matrix
+#
+# Usage:
+#   ltp-media-source-group --config examples/source_group_config.yaml
+
+media_path: /path/to/your/video.mp4
+
+# Playback settings
+loop: true
+speed: 1.0
+
+# Audio buffer settings
+audio_sample_rate: 44100
+audio_channels: 2
+audio_buffer_duration: 2.0
+
+# Define multiple output sources
+sources:
+  # Video output for main display
+  - name: MyVideo
+    type: video
+    dimensions: [64, 32]
+    rate: 30
+    fit_mode: contain
+    gamma: 1.0
+
+  # Audio spectrum bars for LED strip
+  - name: MyVideo-Spectrum
+    type: audio_visualizer
+    dimensions: [60]  # 60 pixels wide, 1 pixel tall (linear)
+    rate: 30
+    visualizer_type: spectrum
+    color_mode: rainbow
+    smoothing: 0.3
+    gain: 1.0
+
+  # Audio spectrogram for secondary matrix
+  - name: MyVideo-Spectrogram
+    type: audio_visualizer
+    dimensions: [16, 16]  # 16x16 matrix
+    rate: 30
+    visualizer_type: spectrogram
+    color_mode: fire
+    smoothing: 0.2
+    gain: 1.2

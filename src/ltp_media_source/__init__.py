@@ -13,6 +13,13 @@ from ltp_media_source.sources.audio_visualizer import (
     AudioVisualizerSource,
     AudioVisualizerSourceConfig,
 )
+from ltp_media_source.source_group import (
+    MediaSourceGroup,
+    SourceGroupConfig,
+    SourceDefinition,
+    run_source_group,
+    run_source_group_from_yaml,
+)
 from ltp_media_source.visualizers import (
     # Base classes
     Visualizer,
@@ -63,6 +70,12 @@ __all__ = [
     "VideoLogicalSourceConfig",
     "AudioVisualizerSource",
     "AudioVisualizerSourceConfig",
+    # Phase 5: Source Group
+    "MediaSourceGroup",
+    "SourceGroupConfig",
+    "SourceDefinition",
+    "run_source_group",
+    "run_source_group_from_yaml",
     # Phase 4: Visualizers
     "Visualizer",
     "LinearVisualizer",
