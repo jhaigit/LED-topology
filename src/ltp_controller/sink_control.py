@@ -16,6 +16,14 @@ from libltp import (
 from libltp.types import ColorFormat, Encoding, StreamAction
 
 from ltp_controller.controller import Controller, DeviceState
+from ltp_controller.virtual_sources.text_renderer import (
+    TextRenderer,
+    TextAlign,
+    VerticalAlign,
+    ScrollDirection,
+    hex_to_rgb,
+)
+from ltp_controller.virtual_sources.fonts import list_fonts, DEFAULT_FONT
 
 logger = logging.getLogger(__name__)
 
@@ -423,6 +431,169 @@ class SinkController:
         except Exception as e:
             logger.error(f"Error painting pixels: {e}")
             return {"status": "error", "message": str(e)}
+
+    async def paint_text(
+        self, sink_id: str, data: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Paint text on a sink.
+
+        Renders text at a specific position or with alignment options.
+
+        Args:
+            sink_id: Sink device ID
+            data: Text paint data with fields:
+                - text: String to display (required)
+                - x: X position (optional, default: 0)
+                - y: Y position (optional, default: 0)
+                - color: Text color as hex string or RGB list (optional, default: white)
+                - background: Background color (optional, default: transparent/black)
+                - font: Font name (optional, "5x7", "4x6", "3x5")
+                - align: Horizontal alignment ("left", "center", "right")
+                - vertical_align: Vertical alignment ("top", "middle", "bottom")
+                - clear: If true, clear display before rendering
+
+        Returns:
+            Status dict with success/error info
+        """
+        sink = self.controller.get_sink(sink_id)
+        if not sink:
+            return {"status": "error", "message": "Sink not found"}
+
+        if not sink.online:
+            return {"status": "error", "message": "Sink is offline"}
+
+        text = data.get("text", "")
+        if not text:
+            return {"status": "error", "message": "No text specified"}
+
+        try:
+            async with self._lock:
+                stream = await self._get_or_create_stream(sink)
+                pixel_count = stream.pixel_count
+                dimensions = self._get_dimensions(sink)
+
+                # Get dimensions
+                if len(dimensions) >= 2:
+                    width, height = dimensions[0], dimensions[1]
+                else:
+                    width = dimensions[0]
+                    height = 1
+
+                # Parse colors
+                text_color = data.get("color", "#FFFFFF")
+                if isinstance(text_color, str):
+                    text_color = hex_to_rgb(text_color)
+                else:
+                    text_color = tuple(text_color[:3])
+
+                background_color = data.get("background", "#000000")
+                if isinstance(background_color, str):
+                    background_color = hex_to_rgb(background_color)
+                else:
+                    background_color = tuple(background_color[:3])
+
+                # Get font
+                font = data.get("font", DEFAULT_FONT)
+                if font not in list_fonts():
+                    font = DEFAULT_FONT
+
+                # Get alignment
+                align_str = data.get("align", "left")
+                valign_str = data.get("vertical_align", "middle")
+
+                try:
+                    align = TextAlign(align_str)
+                except ValueError:
+                    align = TextAlign.LEFT
+
+                try:
+                    valign = VerticalAlign(valign_str)
+                except ValueError:
+                    valign = VerticalAlign.MIDDLE
+
+                # Create renderer
+                renderer = TextRenderer(
+                    width=width,
+                    height=height,
+                    font_name=font,
+                    text_color=text_color,
+                    background_color=background_color,
+                    align=align,
+                    vertical_align=valign,
+                )
+
+                # Get position offsets
+                x_offset = int(data.get("x", 0))
+                y_offset = int(data.get("y", 0))
+
+                # Render text
+                frame = renderer.render_static(text, x_offset=x_offset, y_offset=y_offset)
+
+                # Convert to linear and store in buffer
+                pixels = renderer.to_linear(frame)
+
+                # Handle clear or overlay modes
+                if data.get("clear", True):
+                    # Replace buffer entirely
+                    self._paint_buffers[sink_id] = pixels.copy()
+                else:
+                    # Overlay: only copy non-background pixels
+                    if sink_id not in self._paint_buffers:
+                        self._paint_buffers[sink_id] = np.zeros((pixel_count, 3), dtype=np.uint8)
+                    buffer = self._paint_buffers[sink_id]
+
+                    # Find text pixels (non-background)
+                    bg_array = np.array(background_color)
+                    text_mask = ~np.all(pixels == bg_array, axis=1)
+                    buffer[text_mask] = pixels[text_mask]
+                    pixels = buffer
+
+                # Send frame
+                stream.sender.send(
+                    pixels=pixels,
+                    color_format=ColorFormat.RGB,
+                )
+
+                logger.info(f"Painted text '{text[:20]}...' on sink {sink.name}")
+                return {
+                    "status": "ok",
+                    "text": text,
+                    "dimensions": [width, height],
+                    "font": font,
+                }
+
+        except Exception as e:
+            logger.error(f"Error painting text: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def get_paint_info(self, sink_id: str) -> dict[str, Any]:
+        """Get paint-related information for a sink.
+
+        Args:
+            sink_id: Sink device ID
+
+        Returns:
+            Dict with dimensions, pixel count, available fonts, etc.
+        """
+        sink = self.controller.get_sink(sink_id)
+        if not sink:
+            return {"status": "error", "message": "Sink not found"}
+
+        dimensions = self._get_dimensions(sink)
+        pixel_count = self._get_pixel_count(sink)
+
+        return {
+            "status": "ok",
+            "sink_id": sink_id,
+            "name": sink.name,
+            "dimensions": dimensions,
+            "width": dimensions[0] if dimensions else 0,
+            "height": dimensions[1] if len(dimensions) > 1 else 1,
+            "pixel_count": pixel_count,
+            "fonts": list_fonts(),
+            "default_font": DEFAULT_FONT,
+            "has_buffer": sink_id in self._paint_buffers,
+        }
 
     async def cleanup_all(self) -> None:
         """Clean up all active streams."""

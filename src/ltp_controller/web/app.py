@@ -284,26 +284,69 @@ def create_app(
 
         return jsonify(result)
 
+    @app.route("/api/sinks/<sink_id>/paint/text", methods=["POST"])
+    def api_sink_paint_text(sink_id: str) -> Any:
+        """Paint text on a sink.
+
+        Request body (JSON):
+        {
+            "text": "Hello",           // Text to display (required)
+            "color": "#FFFFFF",        // Text color (hex or [r,g,b])
+            "background": "#000000",   // Background color
+            "font": "5x7",             // Font: "5x7", "4x6", "3x5"
+            "x": 0,                    // X offset
+            "y": 0,                    // Y offset
+            "align": "center",         // "left", "center", "right"
+            "vertical_align": "middle", // "top", "middle", "bottom"
+            "clear": true              // Clear before drawing
+        }
+        """
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not initialized"}), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        if "text" not in data:
+            return jsonify({"error": "No text specified"}), 400
+
+        result = run_async(sink_controller.paint_text(sink_id, data))
+
+        if result.get("status") == "error":
+            return jsonify(result), 400
+
+        return jsonify(result)
+
     @app.route("/api/sinks/<sink_id>/paint/info")
     def api_sink_paint_info(sink_id: str) -> Any:
-        """Get sink info for painting (dimensions, pixel count)."""
-        sink = controller.get_sink(sink_id)
-        if not sink:
-            return jsonify({"error": "Sink not found"}), 404
+        """Get sink info for painting (dimensions, pixel count, fonts)."""
+        if not sink_controller:
+            # Fall back to basic info from controller
+            sink = controller.get_sink(sink_id)
+            if not sink:
+                return jsonify({"error": "Sink not found"}), 404
 
-        props = sink.device.properties
-        pixels = int(props.get("pixels", 60))
-        dims = [int(d) for d in props.get("dim", str(pixels)).split("x")]
-        sink_type = props.get("type", "string")
+            props = sink.device.properties
+            pixels = int(props.get("pixels", 60))
+            dims = [int(d) for d in props.get("dim", str(pixels)).split("x")]
+            sink_type = props.get("type", "string")
 
-        return jsonify({
-            "id": sink_id,
-            "name": sink.name,
-            "pixels": pixels,
-            "dimensions": dims,
-            "type": sink_type,
-            "is_matrix": len(dims) > 1,
-        })
+            return jsonify({
+                "id": sink_id,
+                "name": sink.name,
+                "pixels": pixels,
+                "dimensions": dims,
+                "type": sink_type,
+                "is_matrix": len(dims) > 1,
+            })
+
+        # Use sink controller for enhanced info
+        result = run_async(sink_controller.get_paint_info(sink_id))
+        if result.get("status") == "error":
+            return jsonify(result), 404
+
+        return jsonify(result)
 
     # ==================== API: All Sources (Physical + Virtual) ====================
 
