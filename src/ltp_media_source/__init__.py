@@ -7,16 +7,36 @@ from ltp_media_source.audio_buffer import AudioRingBuffer
 from ltp_media_source.shared_context import SharedMediaContext
 from ltp_media_source.audio.analyzer import AudioAnalyzer
 from ltp_media_source.audio.beat_detector import BeatDetector, MultibandBeatDetector
+from ltp_media_source.sources.base import LogicalSource, LogicalSourceConfig
+from ltp_media_source.sources.video_source import VideoLogicalSource, VideoLogicalSourceConfig
+from ltp_media_source.sources.audio_visualizer import (
+    AudioVisualizerSource,
+    AudioVisualizerSourceConfig,
+    Visualizer,
+    SimpleSpectrumVisualizer,
+)
 
 __all__ = [
+    # Original MediaSource
     "MediaSource",
     "MediaSourceConfig",
     "MediaInput",
     "FitMode",
     "FrameScaler",
+    # Phase 1: Shared context
     "AudioRingBuffer",
     "SharedMediaContext",
+    # Phase 2: Audio analysis
     "AudioAnalyzer",
     "BeatDetector",
     "MultibandBeatDetector",
+    # Phase 3: Logical sources
+    "LogicalSource",
+    "LogicalSourceConfig",
+    "VideoLogicalSource",
+    "VideoLogicalSourceConfig",
+    "AudioVisualizerSource",
+    "AudioVisualizerSourceConfig",
+    "Visualizer",
+    "SimpleSpectrumVisualizer",
 ]
