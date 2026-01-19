@@ -859,6 +859,7 @@ Devices SHOULD advertise these standard controls when applicable:
 | 3 | Auto Show | BOOL | Auto-display after PIXEL_FRAME |
 | 4 | Frame Ack | BOOL | Send FRAME_ACK after display |
 | 5 | Status Interval | UINT16 | Status report interval (seconds) |
+| 6 | Local Mode | UINT8 | Local display mode (see below) |
 
 Device-specific controls should use IDs 16 and above.
 
@@ -879,9 +880,29 @@ Device-specific controls should use IDs 16 and above.
 
 **Configuration Persistence:**
 - Devices with EEPROM/flash SHOULD implement SAVE_CONFIG, LOAD_CONFIG, RESET_CONFIG
-- Saved settings include: brightness, gamma, idle_timeout, auto_show, frame_ack
+- Saved settings include: brightness, gamma, idle_timeout, auto_show, frame_ack, local_mode
 - LOAD_CONFIG is automatically called on device boot if valid config exists
 - Config storage should include a magic number and version for validation
+
+**LOCAL_MODE Behavior:**
+- Controls local (standalone) display animations on the device
+- Mode values:
+  | Value | Name | Description |
+  |-------|------|-------------|
+  | 0 | Blank | No animation (default) - display shows serial data only |
+  | 1 | Cylon | Scanning red "eye" effect, sweeps back and forth |
+  | 2 | Rainbow | Smooth rainbow color cycle across all pixels |
+  | 3 | Fire | Flickering fire effect animation |
+  | 4 | Sparkle | Random colored sparkles with fade |
+  | 5 | Chase | Color-cycling chase pattern |
+  | 255 | Cycle | Cycles through all modes (1-5) every 10 seconds |
+- When a local mode is active (non-zero), the device runs the animation autonomously
+- Any pixel display command (PIXEL_FRAME, PIXEL_SET_ALL, etc.) terminates local mode:
+  - Local mode is deactivated
+  - Pixel buffer is cleared before applying the new data
+  - This ensures a clean transition from local animation to external control
+- The local_mode setting SHOULD be saved to non-volatile memory via SAVE_CONFIG
+- On boot, if local_mode is non-zero, the device starts in local mode immediately
 
 ### 0x42 SAVE_CONFIG
 

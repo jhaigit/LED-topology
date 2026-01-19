@@ -34,6 +34,14 @@ from ltp_serial_cli.protocol import (
     CTRL_ID_AUTO_SHOW,
     CTRL_ID_FRAME_ACK,
     CTRL_ID_IDLE_TIMEOUT,
+    CTRL_ID_LOCAL_MODE,
+    LOCAL_MODE_BLANK,
+    LOCAL_MODE_CYLON,
+    LOCAL_MODE_RAINBOW,
+    LOCAL_MODE_FIRE,
+    LOCAL_MODE_SPARKLE,
+    LOCAL_MODE_CHASE,
+    LOCAL_MODE_CYCLE,
     CMD_SAVE_CONFIG,
     CMD_LOAD_CONFIG,
     CMD_RESET_CONFIG,
@@ -184,6 +192,15 @@ class V2Renderer:
             max_value=65535,
         )
 
+        # Local mode control
+        self._controls[CTRL_ID_LOCAL_MODE] = DeviceControl(
+            id=CTRL_ID_LOCAL_MODE,
+            name="local_mode",
+            control_type="enum",
+            value=LOCAL_MODE_BLANK,
+            enum_values=["blank", "cylon", "rainbow", "fire", "sparkle", "chase", "cycle"],
+        )
+
         # Auto-show and frame-ack are always available
         self._controls[CTRL_ID_AUTO_SHOW] = DeviceControl(
             id=CTRL_ID_AUTO_SHOW,
@@ -270,6 +287,33 @@ class V2Renderer:
     def get_idle_timeout(self) -> int:
         """Get idle timeout in seconds (0 = disabled)."""
         return self.get_control(CTRL_ID_IDLE_TIMEOUT) or 0
+
+    def set_local_mode(self, mode: int | str) -> bool:
+        """Set local display mode.
+
+        Args:
+            mode: Mode value (0-5, 255) or name ("blank", "cylon", "rainbow",
+                  "fire", "sparkle", "chase", "cycle")
+
+        Returns:
+            True if successful
+        """
+        mode_map = {
+            "blank": LOCAL_MODE_BLANK,
+            "cylon": LOCAL_MODE_CYLON,
+            "rainbow": LOCAL_MODE_RAINBOW,
+            "fire": LOCAL_MODE_FIRE,
+            "sparkle": LOCAL_MODE_SPARKLE,
+            "chase": LOCAL_MODE_CHASE,
+            "cycle": LOCAL_MODE_CYCLE,
+        }
+        if isinstance(mode, str):
+            mode = mode_map.get(mode.lower(), LOCAL_MODE_BLANK)
+        return self.set_control(CTRL_ID_LOCAL_MODE, mode)
+
+    def get_local_mode(self) -> int:
+        """Get current local display mode."""
+        return self.get_control(CTRL_ID_LOCAL_MODE) or LOCAL_MODE_BLANK
 
     def save_config(self) -> bool:
         """Save current configuration to device EEPROM/flash."""

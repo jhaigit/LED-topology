@@ -149,6 +149,7 @@
 #define CTRL_ID_AUTO_SHOW   3
 #define CTRL_ID_FRAME_ACK   4
 #define CTRL_ID_STATUS_INTERVAL 5
+#define CTRL_ID_LOCAL_MODE  6
 
 // Input types
 #define INPUT_BUTTON        0x01

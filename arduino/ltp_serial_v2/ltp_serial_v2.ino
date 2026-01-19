@@ -53,9 +53,19 @@ LtpProtocol protocol(Serial, MAX_PAYLOAD_SIZE);
 
 // EEPROM configuration
 #define CONFIG_MAGIC        0x4C54  // "LT" - magic number for validation
-#define CONFIG_VERSION      1
+#define CONFIG_VERSION      2       // Bumped for localMode addition
 #define EEPROM_CONFIG_ADDR  0
 #define DEFAULT_IDLE_TIMEOUT 600  // 10 minutes default
+
+// Local display modes
+#define LOCAL_MODE_BLANK    0   // No local animation (default)
+#define LOCAL_MODE_CYLON    1   // Scanning red eye
+#define LOCAL_MODE_RAINBOW  2   // Rainbow cycle
+#define LOCAL_MODE_FIRE     3   // Fire effect
+#define LOCAL_MODE_SPARKLE  4   // Random sparkles
+#define LOCAL_MODE_CHASE    5   // Color chase
+#define LOCAL_MODE_CYCLE    255 // Cycle through all modes
+#define LOCAL_MODE_COUNT    6   // Number of actual modes (excluding cycle)
 
 // Device configuration (stored in EEPROM)
 struct Config {
@@ -67,6 +77,7 @@ struct Config {
     bool autoShow;
     bool frameAck;
     uint16_t statusInterval;
+    uint8_t localMode;          // Local display mode (0 = blank/off)
 } config = {
     CONFIG_MAGIC,
     CONFIG_VERSION,
@@ -75,12 +86,21 @@ struct Config {
     DEFAULT_IDLE_TIMEOUT,       // idle timeout
     false,                      // autoShow
     false,                      // frameAck
-    0                           // statusInterval
+    0,                          // statusInterval
+    LOCAL_MODE_BLANK            // localMode (default blank)
 };
 
 // Idle timeout tracking
 uint32_t lastActivityTime = 0;
 bool isIdle = false;
+
+// Local mode state
+bool localModeActive = false;       // True if local mode is running
+uint8_t currentDisplayMode = 0;     // Actual mode being displayed (for cycle)
+uint32_t lastModeUpdate = 0;        // Last animation frame time
+uint32_t modeStartTime = 0;         // When current mode started (for cycle)
+uint16_t modePosition = 0;          // Animation position/state
+uint8_t modeHue = 0;                // Hue for rainbow/chase effects
 
 // Statistics
 struct {
@@ -93,7 +113,7 @@ struct {
 } stats;
 
 // Control definitions
-#define NUM_CONTROLS 6
+#define NUM_CONTROLS 7
 
 // ============================================================================
 // CONFIG PERSISTENCE
@@ -125,6 +145,7 @@ void resetConfig() {
     config.autoShow = false;
     config.frameAck = false;
     config.statusInterval = 0;
+    config.localMode = LOCAL_MODE_BLANK;
     saveConfig();
 }
 
@@ -151,6 +172,246 @@ void checkIdleTimeout() {
         isIdle = true;
         leds.clear();
         leds.show();
+    }
+}
+
+// ============================================================================
+// LOCAL DISPLAY MODES
+// ============================================================================
+
+// HSV to RGB conversion (h: 0-255, s: 0-255, v: 0-255)
+void hsvToRgb(uint8_t h, uint8_t s, uint8_t v, uint8_t& r, uint8_t& g, uint8_t& b) {
+    if (s == 0) {
+        r = g = b = v;
+        return;
+    }
+
+    uint8_t region = h / 43;
+    uint8_t remainder = (h - (region * 43)) * 6;
+
+    uint8_t p = (v * (255 - s)) >> 8;
+    uint8_t q = (v * (255 - ((s * remainder) >> 8))) >> 8;
+    uint8_t t = (v * (255 - ((s * (255 - remainder)) >> 8))) >> 8;
+
+    switch (region) {
+        case 0:  r = v; g = t; b = p; break;
+        case 1:  r = q; g = v; b = p; break;
+        case 2:  r = p; g = v; b = t; break;
+        case 3:  r = p; g = q; b = v; break;
+        case 4:  r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+}
+
+// Exit local mode (called when serial display commands arrive)
+void exitLocalMode() {
+    if (localModeActive) {
+        localModeActive = false;
+        leds.clear();  // Clear any local mode data
+    }
+}
+
+// Start or switch local mode
+void startLocalMode(uint8_t mode) {
+    config.localMode = mode;
+    modePosition = 0;
+    modeHue = 0;
+    lastModeUpdate = millis();
+    modeStartTime = millis();
+
+    if (mode == LOCAL_MODE_BLANK) {
+        localModeActive = false;
+        leds.clear();
+        leds.show();
+    } else {
+        localModeActive = true;
+        if (mode == LOCAL_MODE_CYCLE) {
+            currentDisplayMode = LOCAL_MODE_CYLON;  // Start with first real mode
+        } else {
+            currentDisplayMode = mode;
+        }
+    }
+}
+
+// Cylon (scanning red eye) animation
+void updateCylon() {
+    static bool direction = true;
+    const uint8_t eyeSize = 3;
+    const uint8_t fadeAmount = 64;
+
+    // Fade all pixels
+    for (uint16_t i = 0; i < NUM_PIXELS; i++) {
+        uint8_t* buf = leds.getPixelBuffer();
+        uint16_t idx = i * leds.getBytesPerPixel();
+        buf[idx] = buf[idx] > fadeAmount ? buf[idx] - fadeAmount : 0;
+        buf[idx+1] = buf[idx+1] > fadeAmount ? buf[idx+1] - fadeAmount : 0;
+        buf[idx+2] = buf[idx+2] > fadeAmount ? buf[idx+2] - fadeAmount : 0;
+    }
+
+    // Draw the eye
+    for (uint8_t i = 0; i < eyeSize; i++) {
+        int16_t pos = modePosition + i - eyeSize/2;
+        if (pos >= 0 && pos < NUM_PIXELS) {
+            uint8_t brightness = 255 - abs(i - eyeSize/2) * 60;
+            leds.setPixel(pos, brightness, 0, 0);
+        }
+    }
+
+    // Move position
+    if (direction) {
+        modePosition++;
+        if (modePosition >= NUM_PIXELS - 1) direction = false;
+    } else {
+        modePosition--;
+        if (modePosition == 0) direction = true;
+    }
+
+    leds.show();
+}
+
+// Rainbow cycle animation
+void updateRainbow() {
+    for (uint16_t i = 0; i < NUM_PIXELS; i++) {
+        uint8_t pixelHue = modeHue + (i * 256 / NUM_PIXELS);
+        uint8_t r, g, b;
+        hsvToRgb(pixelHue, 255, 200, r, g, b);
+        leds.setPixel(i, r, g, b);
+    }
+    modeHue++;
+    leds.show();
+}
+
+// Fire effect animation
+void updateFire() {
+    static uint8_t heat[NUM_PIXELS > 256 ? 256 : NUM_PIXELS];
+    const uint8_t cooling = 55;
+    const uint8_t sparking = 120;
+    uint16_t numPixels = NUM_PIXELS > 256 ? 256 : NUM_PIXELS;
+
+    // Cool down every cell
+    for (uint16_t i = 0; i < numPixels; i++) {
+        heat[i] = heat[i] > random(0, ((cooling * 10) / numPixels) + 2) ?
+                  heat[i] - random(0, ((cooling * 10) / numPixels) + 2) : 0;
+    }
+
+    // Heat rises
+    for (uint16_t i = numPixels - 1; i >= 2; i--) {
+        heat[i] = (heat[i - 1] + heat[i - 2] + heat[i - 2]) / 3;
+    }
+
+    // Randomly ignite sparks near bottom
+    if (random(255) < sparking) {
+        uint8_t y = random(7);
+        heat[y] = heat[y] + random(160, 255);
+        if (heat[y] > 255) heat[y] = 255;
+    }
+
+    // Map heat to colors
+    for (uint16_t i = 0; i < numPixels; i++) {
+        uint8_t t192 = (heat[i] * 192) / 255;
+        uint8_t r, g, b;
+
+        if (t192 < 64) {
+            r = t192 * 4;
+            g = 0;
+            b = 0;
+        } else if (t192 < 128) {
+            r = 255;
+            g = (t192 - 64) * 4;
+            b = 0;
+        } else {
+            r = 255;
+            g = 255;
+            b = (t192 - 128) * 4;
+        }
+
+        leds.setPixel(i, r, g, b);
+    }
+    leds.show();
+}
+
+// Sparkle animation
+void updateSparkle() {
+    // Fade all pixels
+    for (uint16_t i = 0; i < NUM_PIXELS; i++) {
+        uint8_t* buf = leds.getPixelBuffer();
+        uint16_t idx = i * leds.getBytesPerPixel();
+        buf[idx] = buf[idx] > 20 ? buf[idx] - 20 : 0;
+        buf[idx+1] = buf[idx+1] > 20 ? buf[idx+1] - 20 : 0;
+        buf[idx+2] = buf[idx+2] > 20 ? buf[idx+2] - 20 : 0;
+    }
+
+    // Add random sparkles
+    for (uint8_t i = 0; i < 3; i++) {
+        uint16_t pos = random(NUM_PIXELS);
+        uint8_t r, g, b;
+        hsvToRgb(random(256), 200, 255, r, g, b);
+        leds.setPixel(pos, r, g, b);
+    }
+
+    leds.show();
+}
+
+// Color chase animation
+void updateChase() {
+    const uint8_t chaseLength = 5;
+
+    leds.clear();
+
+    for (uint8_t i = 0; i < chaseLength; i++) {
+        uint16_t pos = (modePosition + i) % NUM_PIXELS;
+        uint8_t r, g, b;
+        hsvToRgb(modeHue, 255, 255 - i * 40, r, g, b);
+        leds.setPixel(pos, r, g, b);
+    }
+
+    modePosition = (modePosition + 1) % NUM_PIXELS;
+    modeHue += 2;
+
+    leds.show();
+}
+
+// Update local mode animation (called from loop)
+void updateLocalMode() {
+    if (!localModeActive) return;
+
+    uint32_t now = millis();
+    uint32_t interval;
+
+    // Different update rates for different modes
+    switch (currentDisplayMode) {
+        case LOCAL_MODE_CYLON:   interval = 20; break;
+        case LOCAL_MODE_RAINBOW: interval = 20; break;
+        case LOCAL_MODE_FIRE:    interval = 30; break;
+        case LOCAL_MODE_SPARKLE: interval = 30; break;
+        case LOCAL_MODE_CHASE:   interval = 40; break;
+        default: interval = 50; break;
+    }
+
+    if (now - lastModeUpdate < interval) return;
+    lastModeUpdate = now;
+
+    // Handle cycle mode - switch every 10 seconds
+    if (config.localMode == LOCAL_MODE_CYCLE) {
+        if (now - modeStartTime > 10000) {
+            modeStartTime = now;
+            currentDisplayMode++;
+            if (currentDisplayMode >= LOCAL_MODE_COUNT) {
+                currentDisplayMode = LOCAL_MODE_CYLON;
+            }
+            modePosition = 0;
+            leds.clear();
+        }
+    }
+
+    // Run the appropriate animation
+    switch (currentDisplayMode) {
+        case LOCAL_MODE_CYLON:   updateCylon(); break;
+        case LOCAL_MODE_RAINBOW: updateRainbow(); break;
+        case LOCAL_MODE_FIRE:    updateFire(); break;
+        case LOCAL_MODE_SPARKLE: updateSparkle(); break;
+        case LOCAL_MODE_CHASE:   updateChase(); break;
+        default: break;
     }
 }
 
@@ -309,6 +570,8 @@ void handlePixelSetAll(const uint8_t* payload, uint16_t length) {
         return;
     }
 
+    exitLocalMode();  // Exit local mode on display command
+
     uint8_t r = payload[1];
     uint8_t g = payload[2];
     uint8_t b = payload[3];
@@ -344,6 +607,8 @@ void handlePixelSetRange(const uint8_t* payload, uint16_t length) {
         protocol.sendNak(CMD_PIXEL_SET_RANGE, ERR_PIXEL_OVERFLOW);
         return;
     }
+
+    exitLocalMode();  // Exit local mode on display command
 
     leds.fillRange(start, end, r, g, b);
     stats.framesReceived++;
@@ -381,6 +646,8 @@ void handlePixelFrame(const uint8_t* payload, uint16_t length) {
         protocol.sendNak(CMD_PIXEL_FRAME, ERR_PIXEL_OVERFLOW);
         return;
     }
+
+    exitLocalMode();  // Exit local mode on display command
 
     // Copy pixel data
     const uint8_t* pixelData = payload + dataOffset;
@@ -444,6 +711,8 @@ void handlePixelSubmatrix(const uint8_t* payload, uint16_t length) {
         protocol.sendNak(CMD_PIXEL_SUBMATRIX, ERR_INVALID_PARAM);
         return;
     }
+
+    exitLocalMode();  // Exit local mode on display command
 
     bool serpentine = flags & SUBMATRIX_SERPENTINE;
     const uint8_t* pixelData = payload + dataOffset;
@@ -531,6 +800,10 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
             }
             break;
 
+        case CTRL_ID_LOCAL_MODE:
+            startLocalMode(payload[1]);
+            break;
+
         default:
             protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
             return;
@@ -570,6 +843,9 @@ void handleGetControl(const uint8_t* payload, uint16_t length) {
         case CTRL_ID_STATUS_INTERVAL:
             response[respLen++] = config.statusInterval & 0xFF;
             response[respLen++] = config.statusInterval >> 8;
+            break;
+        case CTRL_ID_LOCAL_MODE:
+            response[respLen++] = config.localMode;
             break;
         default:
             protocol.sendNak(CMD_GET_CONTROL, ERR_INVALID_PARAM);
@@ -734,6 +1010,11 @@ void setup() {
     lastActivityTime = millis();
     stats.startTime = lastActivityTime;
 
+    // Start local mode if configured
+    if (config.localMode != LOCAL_MODE_BLANK) {
+        startLocalMode(config.localMode);
+    }
+
     // Send HELLO to announce ourselves
     delay(100); // Small delay for serial to stabilize
     sendHello();
@@ -747,4 +1028,7 @@ void loop() {
 
     // Check idle timeout
     checkIdleTimeout();
+
+    // Update local mode animation
+    updateLocalMode();
 }
