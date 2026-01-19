@@ -51,3 +51,8 @@ htmlcov/
 .env
 .venv-*
 fps-4-video.mp4
+
+# Arduino compiled binaries
+*.hex
+*.elf
+*.bin
