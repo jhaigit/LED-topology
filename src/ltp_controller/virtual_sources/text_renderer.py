@@ -289,7 +289,7 @@ class TextRenderer:
         direction: ScrollDirection = ScrollDirection.LEFT,
         padding: int | None = None,
     ) -> np.ndarray:
-        """Render scrolling text.
+        """Render scrolling text with seamless wrap-around.
 
         Args:
             text: Text to scroll
@@ -316,27 +316,113 @@ class TextRenderer:
             output[:] = self.background_color
             return output
 
-        # Total scroll distance
-        total_width = text_width + padding
+        # Create output buffer with background
+        output = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        output[:] = self.background_color
 
         if direction in (ScrollDirection.LEFT, ScrollDirection.RIGHT):
             # Horizontal scrolling
-            offset = int(scroll_position * total_width) % total_width
+            # Total cycle distance = text width + padding (gap between repeats)
+            total_width = text_width + padding
 
-            if direction == ScrollDirection.RIGHT:
-                offset = -offset
+            # Calculate pixel offset from scroll position
+            pixel_offset = int(scroll_position * total_width) % total_width
 
-            return self.render_static(text, x_offset=-offset)
+            # For LEFT scroll: text moves from right to left
+            # Start position: text begins just off right edge (x = display_width)
+            # As offset increases, text moves left
+            if direction == ScrollDirection.LEFT:
+                # Primary text position
+                text_x = self.width - pixel_offset
+                # Wrapped text position (for seamless loop)
+                wrap_x = text_x + total_width
+            else:  # RIGHT scroll
+                # Text moves from left to right
+                text_x = pixel_offset - text_width
+                wrap_x = text_x - total_width
+
+            # Calculate vertical alignment
+            if self.vertical_align == VerticalAlign.TOP:
+                text_y = 0
+            elif self.vertical_align == VerticalAlign.MIDDLE:
+                text_y = (self.height - text_height) // 2
+            else:  # BOTTOM
+                text_y = self.height - text_height
+
+            # Render text at primary position and wrapped position
+            for x_pos in [text_x, wrap_x]:
+                self._blit_text_pixels(output, text_pixels, x_pos, text_y)
 
         else:
             # Vertical scrolling
             total_height = text_height + padding
-            offset = int(scroll_position * total_height) % total_height
+            pixel_offset = int(scroll_position * total_height) % total_height
 
-            if direction == ScrollDirection.DOWN:
-                offset = -offset
+            if direction == ScrollDirection.UP:
+                text_y = self.height - pixel_offset
+                wrap_y = text_y + total_height
+            else:  # DOWN
+                text_y = pixel_offset - text_height
+                wrap_y = text_y - total_height
 
-            return self.render_static(text, y_offset=-offset)
+            # Calculate horizontal alignment
+            if self.align == TextAlign.LEFT:
+                text_x = 0
+            elif self.align == TextAlign.CENTER:
+                text_x = (self.width - text_width) // 2
+            else:  # RIGHT
+                text_x = self.width - text_width
+
+            # Render text at primary position and wrapped position
+            for y_pos in [text_y, wrap_y]:
+                self._blit_text_pixels(output, text_pixels, text_x, y_pos)
+
+        return output
+
+    def _blit_text_pixels(
+        self,
+        output: np.ndarray,
+        text_pixels: np.ndarray,
+        x: int,
+        y: int,
+    ) -> None:
+        """Blit text pixels onto output buffer with clipping.
+
+        Args:
+            output: Output RGB array (height, width, 3)
+            text_pixels: Boolean text mask (text_height, text_width)
+            x: X position to place text
+            y: Y position to place text
+        """
+        text_height, text_width = text_pixels.shape
+        out_height, out_width = output.shape[:2]
+
+        # Calculate source and destination regions with clipping
+        src_x_start = max(0, -x)
+        src_y_start = max(0, -y)
+        dst_x_start = max(0, x)
+        dst_y_start = max(0, y)
+
+        src_x_end = min(text_width, out_width - x)
+        src_y_end = min(text_height, out_height - y)
+
+        copy_width = src_x_end - src_x_start
+        copy_height = src_y_end - src_y_start
+
+        if copy_width <= 0 or copy_height <= 0:
+            return
+
+        # Extract the region to copy
+        text_region = text_pixels[
+            src_y_start:src_y_start + copy_height,
+            src_x_start:src_x_start + copy_width
+        ]
+
+        # Apply text color where mask is True
+        output[
+            dst_y_start:dst_y_start + copy_height,
+            dst_x_start:dst_x_start + copy_width
+        ][text_region] = self.text_color
 
     def render_multiline(
         self,
