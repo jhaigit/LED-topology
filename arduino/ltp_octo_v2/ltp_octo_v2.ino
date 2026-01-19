@@ -19,6 +19,7 @@
  *   Pin 8:  Strip 4    Pin 5:  Strip 8
  */
 
+#include <EEPROM.h>
 #include <OctoWS2811.h>
 #include "config.h"
 #include <ltp_protocol.h>
@@ -33,15 +34,36 @@ LedDriverOcto leds;
 // Protocol handler
 LtpProtocol protocol(Serial, MAX_PAYLOAD_SIZE);
 
-// Device state
-struct {
-    uint8_t brightness = 255;
-    uint8_t gamma = 22;         // 2.2 * 10
-    uint16_t idleTimeout = 0;   // 0 = disabled
-    bool autoShow = false;
-    bool frameAck = false;
-    uint16_t statusInterval = 0;
-} config;
+// EEPROM configuration
+#define CONFIG_MAGIC        0x4C54  // "LT" - magic number for validation
+#define CONFIG_VERSION      1
+#define EEPROM_CONFIG_ADDR  0
+#define DEFAULT_IDLE_TIMEOUT 600  // 10 minutes default
+
+// Device configuration (stored in EEPROM)
+struct Config {
+    uint16_t magic;             // Magic number for validation
+    uint8_t version;            // Config version
+    uint8_t brightness;
+    uint8_t gamma;              // 2.2 * 10
+    uint16_t idleTimeout;       // 0 = disabled, else seconds
+    bool autoShow;
+    bool frameAck;
+    uint16_t statusInterval;
+} config = {
+    CONFIG_MAGIC,
+    CONFIG_VERSION,
+    255,                        // brightness
+    22,                         // gamma (2.2)
+    DEFAULT_IDLE_TIMEOUT,       // idle timeout
+    false,                      // autoShow
+    false,                      // frameAck
+    0                           // statusInterval
+};
+
+// Idle timeout tracking
+uint32_t lastActivityTime = 0;
+bool isIdle = false;
 
 // Statistics
 struct {
@@ -54,6 +76,65 @@ struct {
 } stats;
 
 #define NUM_CONTROLS 6
+
+// ============================================================================
+// CONFIG PERSISTENCE
+// ============================================================================
+
+void saveConfig() {
+    config.magic = CONFIG_MAGIC;
+    config.version = CONFIG_VERSION;
+    EEPROM.put(EEPROM_CONFIG_ADDR, config);
+}
+
+void loadConfig() {
+    Config stored;
+    EEPROM.get(EEPROM_CONFIG_ADDR, stored);
+
+    // Validate stored config
+    if (stored.magic == CONFIG_MAGIC && stored.version == CONFIG_VERSION) {
+        config = stored;
+    }
+    // Otherwise keep defaults
+}
+
+void resetConfig() {
+    config.magic = CONFIG_MAGIC;
+    config.version = CONFIG_VERSION;
+    config.brightness = 255;
+    config.gamma = 22;
+    config.idleTimeout = DEFAULT_IDLE_TIMEOUT;
+    config.autoShow = false;
+    config.frameAck = false;
+    config.statusInterval = 0;
+    saveConfig();
+}
+
+// ============================================================================
+// IDLE TIMEOUT
+// ============================================================================
+
+void resetActivityTimer() {
+    lastActivityTime = millis();
+    if (isIdle) {
+        isIdle = false;
+        // Restore display by refreshing current pixels
+        leds.show();
+    }
+}
+
+void checkIdleTimeout() {
+    if (config.idleTimeout == 0) return;  // Disabled
+
+    uint32_t now = millis();
+    uint32_t elapsed = (now - lastActivityTime) / 1000;  // Convert to seconds
+
+    if (!isIdle && elapsed >= config.idleTimeout) {
+        isIdle = true;
+        leds.clear();
+        leds.show();
+    }
+}
 
 // ============================================================================
 // PROTOCOL HANDLERS
@@ -78,9 +159,9 @@ void sendHello() {
 #endif
     payload[8] = caps1;
 #if MATRIX_MODE
-    payload[9] = CAPS_PIXEL_READBACK | CAPS_SUBMATRIX;
+    payload[9] = CAPS_PIXEL_READBACK | CAPS_SUBMATRIX | CAPS_EEPROM;
 #else
-    payload[9] = CAPS_PIXEL_READBACK;
+    payload[9] = CAPS_PIXEL_READBACK | CAPS_EEPROM;
 #endif
     payload[10] = NUM_CONTROLS;
     payload[11] = 0; // Input count
@@ -217,6 +298,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
 }
 
 void handleShow(const uint8_t* payload, uint16_t length) {
+    resetActivityTimer();
     leds.show();
     stats.framesDisplayed++;
 
@@ -367,6 +449,7 @@ void handlePixelFrame(const uint8_t* payload, uint16_t length) {
 
     stats.framesReceived++;
     stats.bytesReceived += expectedBytes;
+    resetActivityTimer();
 
     if (config.autoShow) {
         leds.show();
@@ -676,6 +759,23 @@ void processPacket(const LtpPacket& pkt) {
             handleSetControl(pkt.payload, pkt.length);
             break;
 
+        case CMD_SAVE_CONFIG:
+            saveConfig();
+            protocol.sendAck(CMD_SAVE_CONFIG);
+            break;
+
+        case CMD_LOAD_CONFIG:
+            loadConfig();
+            leds.setBrightness(config.brightness);
+            protocol.sendAck(CMD_LOAD_CONFIG);
+            break;
+
+        case CMD_RESET_CONFIG:
+            resetConfig();
+            leds.setBrightness(config.brightness);
+            protocol.sendAck(CMD_RESET_CONFIG);
+            break;
+
         default:
             protocol.sendNak(pkt.cmd, ERR_INVALID_CMD);
             break;
@@ -689,11 +789,17 @@ void processPacket(const LtpPacket& pkt) {
 void setup() {
     Serial.begin(SERIAL_BAUD);
 
+    // Load saved configuration
+    loadConfig();
+
     leds.begin();
+    leds.setBrightness(config.brightness);
     leds.clear();
     leds.show();
 
-    stats.startTime = millis();
+    // Initialize activity timer
+    lastActivityTime = millis();
+    stats.startTime = lastActivityTime;
 
     // Brief startup indicator
     for (int i = 0; i < 3; i++) {
@@ -713,4 +819,7 @@ void loop() {
     if (protocol.processInput()) {
         processPacket(protocol.getPacket());
     }
+
+    // Check idle timeout
+    checkIdleTimeout();
 }

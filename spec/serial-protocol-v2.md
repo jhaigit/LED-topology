@@ -868,6 +868,21 @@ Device-specific controls should use IDs 16 and above.
 - Useful for simple setups with single complete frame transmissions
 - Default is disabled (explicit SHOW required)
 
+**IDLE_TIMEOUT Behavior:**
+- Value is in seconds (0-65535). 0 = disabled (default)
+- Default value: 600 seconds (10 minutes) when persistence is enabled
+- When enabled, the MCU tracks time since last PIXEL_FRAME or SHOW command
+- After timeout expires, the MCU blanks the display (all pixels off)
+- Any new PIXEL_FRAME or SHOW command resets the timer and restores display
+- Timer should be checked in the main loop (1-second resolution is sufficient)
+- The timeout value SHOULD be saved to non-volatile memory via SAVE_CONFIG
+
+**Configuration Persistence:**
+- Devices with EEPROM/flash SHOULD implement SAVE_CONFIG, LOAD_CONFIG, RESET_CONFIG
+- Saved settings include: brightness, gamma, idle_timeout, auto_show, frame_ack
+- LOAD_CONFIG is automatically called on device boot if valid config exists
+- Config storage should include a magic number and version for validation
+
 ### 0x42 SAVE_CONFIG
 
 Save current configuration to EEPROM/flash. No payload.

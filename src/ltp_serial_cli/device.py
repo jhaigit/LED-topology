@@ -44,6 +44,9 @@ from .protocol import (
     SUBMATRIX_SERPENTINE,
     SUBMATRIX_VERTICAL_FIRST,
     SUBMATRIX_ORIGIN_BOTTOM,
+    CMD_SAVE_CONFIG,
+    CMD_LOAD_CONFIG,
+    CMD_RESET_CONFIG,
 )
 from .exceptions import (
     LtpConnectionError,
@@ -488,6 +491,21 @@ class LtpDevice:
         if len(packet.payload) >= 2:
             return packet.payload[1]
         return 0
+
+    def save_config(self):
+        """Save current configuration to EEPROM/flash."""
+        self._send(LtpProtocol.build_packet(CMD_SAVE_CONFIG))
+        self._wait_for_ack(CMD_SAVE_CONFIG)
+
+    def load_config(self):
+        """Load configuration from EEPROM/flash."""
+        self._send(LtpProtocol.build_packet(CMD_LOAD_CONFIG))
+        self._wait_for_ack(CMD_LOAD_CONFIG)
+
+    def reset_config(self):
+        """Reset configuration to factory defaults."""
+        self._send(LtpProtocol.build_packet(CMD_RESET_CONFIG))
+        self._wait_for_ack(CMD_RESET_CONFIG)
 
     # =========================================================================
     # Query Commands

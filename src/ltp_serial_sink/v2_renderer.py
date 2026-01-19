@@ -34,6 +34,9 @@ from ltp_serial_cli.protocol import (
     CTRL_ID_AUTO_SHOW,
     CTRL_ID_FRAME_ACK,
     CTRL_ID_IDLE_TIMEOUT,
+    CMD_SAVE_CONFIG,
+    CMD_LOAD_CONFIG,
+    CMD_RESET_CONFIG,
 )
 
 logger = logging.getLogger(__name__)
@@ -172,6 +175,15 @@ class V2Renderer:
                 max_value=30,  # 3.0 * 10
             )
 
+        # Idle timeout (available on devices with EEPROM)
+        self._controls[CTRL_ID_IDLE_TIMEOUT] = DeviceControl(
+            id=CTRL_ID_IDLE_TIMEOUT,
+            name="idle_timeout",
+            control_type="uint16",
+            min_value=0,
+            max_value=65535,
+        )
+
         # Auto-show and frame-ack are always available
         self._controls[CTRL_ID_AUTO_SHOW] = DeviceControl(
             id=CTRL_ID_AUTO_SHOW,
@@ -250,6 +262,47 @@ class V2Renderer:
         """Set device gamma (1.0-3.0)."""
         # Gamma is stored as value * 10 in protocol
         return self.set_control(CTRL_ID_GAMMA, int(value * 10))
+
+    def set_idle_timeout(self, seconds: int) -> bool:
+        """Set idle timeout in seconds (0 to disable)."""
+        return self.set_control(CTRL_ID_IDLE_TIMEOUT, seconds)
+
+    def get_idle_timeout(self) -> int:
+        """Get idle timeout in seconds (0 = disabled)."""
+        return self.get_control(CTRL_ID_IDLE_TIMEOUT) or 0
+
+    def save_config(self) -> bool:
+        """Save current configuration to device EEPROM/flash."""
+        if not self.is_connected() or not self._device:
+            return False
+        try:
+            self._device.save_config()
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to save config: {e}")
+            return False
+
+    def load_config(self) -> bool:
+        """Load configuration from device EEPROM/flash."""
+        if not self.is_connected() or not self._device:
+            return False
+        try:
+            self._device.load_config()
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}")
+            return False
+
+    def reset_config(self) -> bool:
+        """Reset device configuration to factory defaults."""
+        if not self.is_connected() or not self._device:
+            return False
+        try:
+            self._device.reset_config()
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to reset config: {e}")
+            return False
 
     def render(self, pixels: np.ndarray) -> int:
         """Render pixel data to the device.
