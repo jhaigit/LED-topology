@@ -224,11 +224,50 @@ void startLocalMode(uint8_t mode) {
     }
 }
 
-// Cylon (scanning red eye) animation
+// Cylon (scanning) animation
 void updateCylon() {
     static bool direction = true;
-    const uint8_t eyeSize = 5;  // Larger for OctoWS2811 matrices
     const uint8_t fadeAmount = 64;
+
+#if MATRIX_MODE
+    // Matrix mode: horizontal scanning line
+    const uint8_t lineWidth = 3;
+
+    // Fade all pixels
+    for (uint16_t i = 0; i < getTotalPixels(); i++) {
+        uint32_t color = leds.getPixelColor(leds.mapPixel(i));
+        uint8_t r = ((color >> 16) & 0xFF);
+        uint8_t g = ((color >> 8) & 0xFF);
+        uint8_t b = (color & 0xFF);
+        r = r > fadeAmount ? r - fadeAmount : 0;
+        g = g > fadeAmount ? g - fadeAmount : 0;
+        b = b > fadeAmount ? b - fadeAmount : 0;
+        leds.setPixel(i, r, g, b);
+    }
+
+    // Draw vertical line at current x position
+    for (uint8_t w = 0; w < lineWidth; w++) {
+        int16_t x = modePosition + w - lineWidth/2;
+        if (x >= 0 && x < MATRIX_WIDTH) {
+            for (uint16_t y = 0; y < MATRIX_HEIGHT; y++) {
+                uint16_t idx = y * MATRIX_WIDTH + x;
+                uint8_t brightness = 255 - abs(w - lineWidth/2) * 60;
+                leds.setPixel(idx, brightness, 0, 0);
+            }
+        }
+    }
+
+    // Move position
+    if (direction) {
+        modePosition++;
+        if (modePosition >= MATRIX_WIDTH - 1) direction = false;
+    } else {
+        modePosition--;
+        if (modePosition == 0) direction = true;
+    }
+#else
+    // String mode: scanning dot
+    const uint8_t eyeSize = 5;
     uint16_t numPixels = getTotalPixels();
 
     // Fade all pixels
@@ -260,12 +299,26 @@ void updateCylon() {
         modePosition--;
         if (modePosition == 0) direction = true;
     }
+#endif
 
     leds.show();
 }
 
 // Rainbow cycle animation
 void updateRainbow() {
+#if MATRIX_MODE
+    // Matrix mode: 2D diagonal rainbow
+    for (uint16_t y = 0; y < MATRIX_HEIGHT; y++) {
+        for (uint16_t x = 0; x < MATRIX_WIDTH; x++) {
+            uint8_t pixelHue = modeHue + (x * 256 / MATRIX_WIDTH) + (y * 64 / MATRIX_HEIGHT);
+            uint8_t r, g, b;
+            hsvToRgb(pixelHue, 255, 200, r, g, b);
+            uint16_t idx = y * MATRIX_WIDTH + x;
+            leds.setPixel(idx, r, g, b);
+        }
+    }
+#else
+    // String mode: linear rainbow
     uint16_t numPixels = getTotalPixels();
     for (uint16_t i = 0; i < numPixels; i++) {
         uint8_t pixelHue = modeHue + (i * 256 / numPixels);
@@ -273,13 +326,63 @@ void updateRainbow() {
         hsvToRgb(pixelHue, 255, 200, r, g, b);
         leds.setPixel(i, r, g, b);
     }
+#endif
     modeHue++;
     leds.show();
 }
 
 // Fire effect animation
 void updateFire() {
-    static uint8_t heat[512];  // Max 512 pixels for fire
+#if MATRIX_MODE
+    // Matrix mode: 2D fire rising from bottom
+    static uint8_t heat[60 * 16];  // Max supported matrix size
+    const uint8_t cooling = 40;
+    const uint8_t sparking = 150;
+
+    // Process each column independently
+    for (uint16_t x = 0; x < MATRIX_WIDTH; x++) {
+        // Cool down every cell in this column
+        for (uint16_t y = 0; y < MATRIX_HEIGHT; y++) {
+            uint16_t idx = y * MATRIX_WIDTH + x;
+            uint8_t cooldown = random(0, ((cooling * 10) / MATRIX_HEIGHT) + 2);
+            heat[idx] = heat[idx] > cooldown ? heat[idx] - cooldown : 0;
+        }
+
+        // Heat rises (from bottom to top, so y decreases)
+        for (int16_t y = 0; y < MATRIX_HEIGHT - 1; y++) {
+            uint16_t idx = y * MATRIX_WIDTH + x;
+            uint16_t belowIdx = (y + 1) * MATRIX_WIDTH + x;
+            uint16_t below2Idx = min(y + 2, MATRIX_HEIGHT - 1) * MATRIX_WIDTH + x;
+            heat[idx] = (heat[belowIdx] + heat[belowIdx] + heat[below2Idx]) / 3;
+        }
+
+        // Randomly ignite sparks at the bottom
+        if (random(255) < sparking) {
+            uint16_t bottomIdx = (MATRIX_HEIGHT - 1) * MATRIX_WIDTH + x;
+            heat[bottomIdx] = min(255, heat[bottomIdx] + random(160, 255));
+        }
+    }
+
+    // Map heat to colors
+    for (uint16_t y = 0; y < MATRIX_HEIGHT; y++) {
+        for (uint16_t x = 0; x < MATRIX_WIDTH; x++) {
+            uint16_t idx = y * MATRIX_WIDTH + x;
+            uint8_t t192 = (heat[idx] * 192) / 255;
+            uint8_t r, g, b;
+
+            if (t192 < 64) {
+                r = t192 * 4; g = 0; b = 0;
+            } else if (t192 < 128) {
+                r = 255; g = (t192 - 64) * 4; b = 0;
+            } else {
+                r = 255; g = 255; b = (t192 - 128) * 4;
+            }
+            leds.setPixel(idx, r, g, b);
+        }
+    }
+#else
+    // String mode: linear fire
+    static uint8_t heat[512];
     const uint8_t cooling = 55;
     const uint8_t sparking = 120;
     uint16_t numPixels = min((uint16_t)512, getTotalPixels());
@@ -308,27 +411,22 @@ void updateFire() {
         uint8_t r, g, b;
 
         if (t192 < 64) {
-            r = t192 * 4;
-            g = 0;
-            b = 0;
+            r = t192 * 4; g = 0; b = 0;
         } else if (t192 < 128) {
-            r = 255;
-            g = (t192 - 64) * 4;
-            b = 0;
+            r = 255; g = (t192 - 64) * 4; b = 0;
         } else {
-            r = 255;
-            g = 255;
-            b = (t192 - 128) * 4;
+            r = 255; g = 255; b = (t192 - 128) * 4;
         }
-
         leds.setPixel(i, r, g, b);
     }
+#endif
     leds.show();
 }
 
 // Sparkle animation
 void updateSparkle() {
     uint16_t numPixels = getTotalPixels();
+    const uint8_t fadeAmount = 20;
 
     // Fade all pixels
     for (uint16_t i = 0; i < numPixels; i++) {
@@ -336,13 +434,25 @@ void updateSparkle() {
         uint8_t r = ((color >> 16) & 0xFF);
         uint8_t g = ((color >> 8) & 0xFF);
         uint8_t b = (color & 0xFF);
-        r = r > 20 ? r - 20 : 0;
-        g = g > 20 ? g - 20 : 0;
-        b = b > 20 ? b - 20 : 0;
+        r = r > fadeAmount ? r - fadeAmount : 0;
+        g = g > fadeAmount ? g - fadeAmount : 0;
+        b = b > fadeAmount ? b - fadeAmount : 0;
         leds.setPixel(i, r, g, b);
     }
 
-    // Add random sparkles (more for larger displays)
+#if MATRIX_MODE
+    // Matrix mode: spread sparkles evenly across the matrix
+    uint8_t sparkleCount = (MATRIX_WIDTH * MATRIX_HEIGHT) / 80 + 2;
+    for (uint8_t i = 0; i < sparkleCount; i++) {
+        uint16_t x = random(MATRIX_WIDTH);
+        uint16_t y = random(MATRIX_HEIGHT);
+        uint16_t pos = y * MATRIX_WIDTH + x;
+        uint8_t r, g, b;
+        hsvToRgb(random(256), 180, 255, r, g, b);
+        leds.setPixel(pos, r, g, b);
+    }
+#else
+    // String mode: random sparkles along length
     uint8_t sparkleCount = numPixels > 200 ? 8 : 3;
     for (uint8_t i = 0; i < sparkleCount; i++) {
         uint16_t pos = random(numPixels);
@@ -350,16 +460,54 @@ void updateSparkle() {
         hsvToRgb(random(256), 200, 255, r, g, b);
         leds.setPixel(pos, r, g, b);
     }
+#endif
 
     leds.show();
 }
 
 // Color chase animation
 void updateChase() {
-    const uint8_t chaseLength = 8;  // Larger for OctoWS2811
-    uint16_t numPixels = getTotalPixels();
-
     leds.clear();
+
+#if MATRIX_MODE
+    // Matrix mode: chase around the border of the matrix
+    const uint8_t chaseLength = 12;
+    uint16_t perimeterLength = 2 * (MATRIX_WIDTH + MATRIX_HEIGHT - 2);
+
+    for (uint8_t i = 0; i < chaseLength; i++) {
+        uint16_t pos = (modePosition + i) % perimeterLength;
+        uint8_t r, g, b;
+        hsvToRgb(modeHue, 255, 255 - i * 18, r, g, b);
+
+        // Map perimeter position to x,y coordinates
+        uint16_t x, y;
+        if (pos < MATRIX_WIDTH) {
+            // Top edge (left to right)
+            x = pos;
+            y = 0;
+        } else if (pos < MATRIX_WIDTH + MATRIX_HEIGHT - 1) {
+            // Right edge (top to bottom)
+            x = MATRIX_WIDTH - 1;
+            y = pos - MATRIX_WIDTH + 1;
+        } else if (pos < 2 * MATRIX_WIDTH + MATRIX_HEIGHT - 2) {
+            // Bottom edge (right to left)
+            x = MATRIX_WIDTH - 1 - (pos - MATRIX_WIDTH - MATRIX_HEIGHT + 2);
+            y = MATRIX_HEIGHT - 1;
+        } else {
+            // Left edge (bottom to top)
+            x = 0;
+            y = MATRIX_HEIGHT - 1 - (pos - 2 * MATRIX_WIDTH - MATRIX_HEIGHT + 3);
+        }
+
+        uint16_t idx = y * MATRIX_WIDTH + x;
+        leds.setPixel(idx, r, g, b);
+    }
+
+    modePosition = (modePosition + 1) % perimeterLength;
+#else
+    // String mode: linear chase
+    const uint8_t chaseLength = 8;
+    uint16_t numPixels = getTotalPixels();
 
     for (uint8_t i = 0; i < chaseLength; i++) {
         uint16_t pos = (modePosition + i) % numPixels;
@@ -369,8 +517,9 @@ void updateChase() {
     }
 
     modePosition = (modePosition + 1) % numPixels;
-    modeHue += 2;
+#endif
 
+    modeHue += 2;
     leds.show();
 }
 
