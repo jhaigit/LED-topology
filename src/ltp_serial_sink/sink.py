@@ -19,6 +19,8 @@ from libltp import (
     ControlRegistry,
     DataPacket,
     DeviceType,
+    EnumControl,
+    EnumOption,
     Message,
     MessageType,
     NumberControl,
@@ -33,7 +35,6 @@ from libltp.types import StreamAction
 from libltp.transport import ControlServer, DataReceiver, StreamManager
 
 from ltp_serial_sink.v2_renderer import V2Renderer, V2RendererConfig
-from ltp_serial_cli.protocol import CTRL_ID_BRIGHTNESS, CTRL_ID_GAMMA
 
 logger = logging.getLogger(__name__)
 
@@ -152,48 +153,72 @@ class SerialSink:
         """Set up controls based on connected device capabilities."""
         if self._renderer is None:
             return
-        device_info = self._renderer.device_info
-        if not device_info:
-            return
 
-        # Add brightness control if device supports it
-        if device_info.has_brightness:
+        # Dynamically create controls from the device's advertised controls
+        for ctrl_id, device_ctrl in self._renderer.controls.items():
             # Get current value from device
-            current_brightness = self._renderer.get_control(CTRL_ID_BRIGHTNESS)
-            if current_brightness is None:
-                current_brightness = 255
+            current_value = self._renderer.get_control(ctrl_id)
 
-            self._controls.register(
-                NumberControl(
-                    id="hw_brightness",
-                    name="Hardware Brightness",
-                    description="LED controller brightness (hardware)",
-                    value=float(current_brightness),
-                    min=0.0,
-                    max=255.0,
-                    step=1.0,
-                    group="hardware",
+            # Create appropriate control type based on device control type
+            if device_ctrl.control_type == "bool":
+                self._controls.register(
+                    BooleanControl(
+                        id=f"hw_{device_ctrl.name}",
+                        name=f"Hardware {device_ctrl.name.replace('_', ' ').title()}",
+                        description=f"Device control: {device_ctrl.name}",
+                        value=bool(current_value) if current_value is not None else False,
+                        group="hardware",
+                    )
                 )
-            )
+            elif device_ctrl.control_type in ("uint8", "uint16"):
+                # Special handling for gamma (stored as value * 10)
+                if device_ctrl.name == "gamma":
+                    value = float(current_value) / 10.0 if current_value else 2.2
+                    min_val = float(device_ctrl.min_value) / 10.0 if device_ctrl.min_value else 1.0
+                    max_val = float(device_ctrl.max_value) / 10.0 if device_ctrl.max_value else 3.0
+                    step = 0.1
+                else:
+                    value = float(current_value) if current_value is not None else 0.0
+                    min_val = float(device_ctrl.min_value) if device_ctrl.min_value is not None else 0.0
+                    max_val = float(device_ctrl.max_value) if device_ctrl.max_value is not None else 255.0
+                    step = 1.0
 
-        # Add gamma control if device supports it
-        if device_info.has_gamma:
-            current_gamma = self._renderer.get_control(CTRL_ID_GAMMA)
-            if current_gamma is None:
-                current_gamma = 22  # 2.2 * 10
-
-            self._controls.register(
-                NumberControl(
-                    id="hw_gamma",
-                    name="Hardware Gamma",
-                    description="LED controller gamma correction (hardware)",
-                    value=float(current_gamma) / 10.0,
-                    min=1.0,
-                    max=3.0,
-                    step=0.1,
-                    group="hardware",
+                self._controls.register(
+                    NumberControl(
+                        id=f"hw_{device_ctrl.name}",
+                        name=f"Hardware {device_ctrl.name.replace('_', ' ').title()}",
+                        description=f"Device control: {device_ctrl.name}",
+                        value=value,
+                        min=min_val,
+                        max=max_val,
+                        step=step,
+                        group="hardware",
+                    )
                 )
-            )
+            elif device_ctrl.control_type == "enum":
+                # Create enum options from the device control's enum_values
+                options = [
+                    EnumOption(value=v, label=v.replace('_', ' ').title())
+                    for v in device_ctrl.enum_values
+                ]
+                # Map numeric value to enum string
+                if current_value is not None and current_value < len(device_ctrl.enum_values):
+                    str_value = device_ctrl.enum_values[current_value]
+                elif current_value == 255 and "cycle" in device_ctrl.enum_values:
+                    str_value = "cycle"
+                else:
+                    str_value = device_ctrl.enum_values[0] if device_ctrl.enum_values else ""
+
+                self._controls.register(
+                    EnumControl(
+                        id=f"hw_{device_ctrl.name}",
+                        name=f"Hardware {device_ctrl.name.replace('_', ' ').title()}",
+                        description=f"Device control: {device_ctrl.name}",
+                        value=str_value,
+                        options=options,
+                        group="hardware",
+                    )
+                )
 
         logger.info(f"Device controls registered: {[c.id for c in self._controls._controls.values()]}")
 
@@ -352,34 +377,65 @@ class SerialSink:
         errors = {}
 
         for control_id, value in values.items():
-            # Handle hardware controls specially - forward to device
-            if control_id == "hw_brightness":
+            # Handle hardware controls - forward to device
+            if control_id.startswith("hw_"):
                 if self._renderer is None:
                     errors[control_id] = "No serial device connected"
-                else:
-                    try:
-                        int_value = int(value)
-                        if self._renderer.set_brightness(int_value):
-                            self._controls.set_value(control_id, float(int_value))
-                            applied[control_id] = float(int_value)
-                        else:
-                            errors[control_id] = "Failed to set on device"
-                    except Exception as e:
-                        errors[control_id] = str(e)
+                    continue
 
-            elif control_id == "hw_gamma":
-                if self._renderer is None:
-                    errors[control_id] = "No serial device connected"
-                else:
-                    try:
-                        float_value = float(value)
-                        if self._renderer.set_gamma(float_value):
-                            self._controls.set_value(control_id, float_value)
-                            applied[control_id] = float_value
+                # Extract device control name from control_id (e.g., "hw_brightness" -> "brightness")
+                device_ctrl_name = control_id[3:]  # Remove "hw_" prefix
+
+                # Find the device control by name
+                device_ctrl = None
+                device_ctrl_id = None
+                for ctrl_id, ctrl in self._renderer.controls.items():
+                    if ctrl.name == device_ctrl_name:
+                        device_ctrl = ctrl
+                        device_ctrl_id = ctrl_id
+                        break
+
+                if device_ctrl is None:
+                    errors[control_id] = f"Unknown device control: {device_ctrl_name}"
+                    continue
+
+                try:
+                    # Convert value based on control type
+                    if device_ctrl.control_type == "bool":
+                        device_value = 1 if value else 0
+                        result = self._renderer.set_control(device_ctrl_id, device_value)
+                        applied_value = bool(device_value)
+                    elif device_ctrl.name == "gamma":
+                        # Gamma is stored as value * 10
+                        device_value = int(float(value) * 10)
+                        result = self._renderer.set_control(device_ctrl_id, device_value)
+                        applied_value = float(value)
+                    elif device_ctrl.control_type == "enum":
+                        # Map string value to numeric index
+                        if value in device_ctrl.enum_values:
+                            idx = device_ctrl.enum_values.index(value)
+                            # Special case for "cycle" mode which is 255
+                            if value == "cycle":
+                                device_value = 255
+                            else:
+                                device_value = idx
                         else:
-                            errors[control_id] = "Failed to set on device"
-                    except Exception as e:
-                        errors[control_id] = str(e)
+                            device_value = 0
+                        result = self._renderer.set_control(device_ctrl_id, device_value)
+                        applied_value = value
+                    else:
+                        # Numeric control
+                        device_value = int(float(value))
+                        result = self._renderer.set_control(device_ctrl_id, device_value)
+                        applied_value = float(device_value)
+
+                    if result:
+                        self._controls.set_value(control_id, applied_value)
+                        applied[control_id] = applied_value
+                    else:
+                        errors[control_id] = "Failed to set on device"
+                except Exception as e:
+                    errors[control_id] = str(e)
 
             else:
                 # Local control

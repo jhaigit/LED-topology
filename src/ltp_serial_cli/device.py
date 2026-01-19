@@ -47,6 +47,7 @@ from .protocol import (
     CMD_SAVE_CONFIG,
     CMD_LOAD_CONFIG,
     CMD_RESET_CONFIG,
+    CMD_SET_CONTROL,
 )
 from .exceptions import (
     LtpConnectionError,
@@ -461,23 +462,28 @@ class LtpDevice:
     def set_brightness(self, brightness: int):
         """Set global brightness (0-255)."""
         self._send(LtpProtocol.build_set_control_uint8(CTRL_ID_BRIGHTNESS, brightness))
+        self._wait_for_ack(CMD_SET_CONTROL)
 
     def set_gamma(self, gamma: float):
         """Set gamma correction (1.0-3.0, stored as value * 10)."""
         value = int(gamma * 10)
         self._send(LtpProtocol.build_set_control_uint8(CTRL_ID_GAMMA, value))
+        self._wait_for_ack(CMD_SET_CONTROL)
 
     def set_auto_show(self, enabled: bool):
         """Enable/disable auto-show after PIXEL_FRAME."""
         self._send(LtpProtocol.build_set_control_bool(CTRL_ID_AUTO_SHOW, enabled))
+        self._wait_for_ack(CMD_SET_CONTROL)
 
     def set_frame_ack(self, enabled: bool):
         """Enable/disable frame acknowledgment."""
         self._send(LtpProtocol.build_set_control_bool(CTRL_ID_FRAME_ACK, enabled))
+        self._wait_for_ack(CMD_SET_CONTROL)
 
     def set_control(self, control_id: int, value: int):
         """Set a control value (generic UINT8)."""
         self._send(LtpProtocol.build_set_control_uint8(control_id, value))
+        self._wait_for_ack(CMD_SET_CONTROL)
 
     def get_control(self, control_id: int) -> int:
         """
@@ -690,6 +696,37 @@ class LtpDevice:
             self._response_event.wait(timeout=0.1)
 
         raise LtpTimeoutError(f"Timeout waiting for response 0x{expected_cmd:02X}")
+
+    def _wait_for_ack(
+        self, expected_cmd: int, timeout: Optional[float] = None
+    ) -> None:
+        """Wait for an ACK response for a specific command."""
+        timeout = timeout or self.timeout
+        deadline = time.time() + timeout
+
+        while time.time() < deadline:
+            with self._response_lock:
+                for i, packet in enumerate(self._response_queue):
+                    # Check for NAK
+                    if packet.cmd == CMD_NAK:
+                        self._response_queue.pop(i)
+                        error_code = packet.payload[1] if len(packet.payload) > 1 else 0
+                        cmd = packet.payload[0] if len(packet.payload) > 0 else 0
+                        raise LtpDeviceError(error_code, cmd)
+
+                    # Check for ACK with matching command
+                    if packet.cmd == CMD_ACK:
+                        acked_cmd = packet.payload[0] if len(packet.payload) > 0 else 0
+                        if acked_cmd == expected_cmd:
+                            self._response_queue.pop(i)
+                            return
+
+                self._response_event.clear()
+
+            # Wait for new packets
+            self._response_event.wait(timeout=0.1)
+
+        raise LtpTimeoutError(f"Timeout waiting for ACK of 0x{expected_cmd:02X}")
 
     def _parse_hello(self, packet: LtpPacket) -> DeviceInfo:
         """Parse HELLO packet into DeviceInfo."""
