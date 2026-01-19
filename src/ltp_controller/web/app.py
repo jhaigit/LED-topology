@@ -318,6 +318,51 @@ def create_app(
 
         return jsonify(result)
 
+    @app.route("/api/sinks/<sink_id>/paint/buffer")
+    def api_sink_paint_buffer(sink_id: str) -> Any:
+        """Get the current paint buffer for a sink as JSON.
+
+        Returns pixel data that can be used to sync client state.
+
+        Response:
+        {
+            "pixels": [[r,g,b], [r,g,b], ...],  // Linear array of RGB values
+            "dimensions": [width, height],
+            "pixel_count": N
+        }
+        """
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not initialized"}), 503
+
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+
+        # Get dimensions
+        dimensions = sink_controller._get_dimensions(sink)
+        if len(dimensions) >= 2:
+            width, height = dimensions[0], dimensions[1]
+        else:
+            width = dimensions[0]
+            height = 1
+
+        pixel_count = width * height
+
+        # Get paint buffer if exists
+        buffer = sink_controller._paint_buffers.get(sink_id)
+        if buffer is not None:
+            # Convert numpy array to list of lists
+            pixels = buffer.tolist()
+        else:
+            # Return empty/black buffer
+            pixels = [[0, 0, 0] for _ in range(pixel_count)]
+
+        return jsonify({
+            "pixels": pixels,
+            "dimensions": [width, height],
+            "pixel_count": pixel_count,
+        })
+
     @app.route("/api/sinks/<sink_id>/paint/info")
     def api_sink_paint_info(sink_id: str) -> Any:
         """Get sink info for painting (dimensions, pixel count, fonts)."""
@@ -630,6 +675,65 @@ def create_app(
                 f'<rect x="{x}" y="2" width="{led_width}" height="{led_height}" '
                 f'rx="2" fill="{color}" stroke="#555" stroke-width="1"/>'
             )
+
+        svg_parts.append("</svg>")
+        svg_content = "".join(svg_parts)
+
+        return Response(svg_content, mimetype="image/svg+xml")
+
+    @app.route("/api/sinks/<sink_id>/preview")
+    def api_sink_preview(sink_id: str) -> Any:
+        """Get LED preview for a sink's paint buffer as SVG."""
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+
+        # Get dimensions
+        dimensions = sink_controller._get_dimensions(sink)
+        if len(dimensions) >= 2:
+            width, height = dimensions[0], dimensions[1]
+        else:
+            width = dimensions[0]
+            height = 1
+
+        # Get paint buffer if exists
+        pixels = sink_controller._paint_buffers.get(sink_id)
+        if pixels is None:
+            # Return empty preview
+            pixels = []
+
+        return _generate_led_svg_2d(pixels, width, height)
+
+    def _generate_led_svg_2d(pixels: list, width: int, height: int) -> Any:
+        """Generate an SVG visualization of LED pixels in 2D grid."""
+        from flask import Response
+
+        led_size = 10
+        spacing = 1
+        total_width = width * (led_size + spacing)
+        total_height = height * (led_size + spacing)
+
+        svg_parts = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {total_width} {total_height}" '
+            f'width="{min(total_width, 800)}" height="{min(total_height, 400)}" '
+            f'style="background: #111;">'
+        ]
+
+        for y in range(height):
+            for x in range(width):
+                idx = y * width + x
+                if idx < len(pixels) and len(pixels[idx]) >= 3:
+                    r, g, b = int(pixels[idx][0]), int(pixels[idx][1]), int(pixels[idx][2])
+                    color = f"rgb({r},{g},{b})"
+                else:
+                    color = "#222"
+
+                px = x * (led_size + spacing)
+                py = y * (led_size + spacing)
+                svg_parts.append(
+                    f'<rect x="{px}" y="{py}" width="{led_size}" height="{led_size}" '
+                    f'fill="{color}"/>'
+                )
 
         svg_parts.append("</svg>")
         svg_content = "".join(svg_parts)

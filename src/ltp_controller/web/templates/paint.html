@@ -38,6 +38,7 @@
         </div>
         <div class="tool-group">
             <button class="btn btn-sm" onclick="clearCanvas()">Clear</button>
+            <button class="btn btn-sm" onclick="syncFromDevice()">Sync</button>
             <button class="btn btn-sm btn-primary" onclick="sendToSink()">Send</button>
         </div>
     </div>
@@ -49,6 +50,13 @@
     <div class="paint-status">
         <span id="cursorPos">-</span>
         <span id="lastAction">Ready</span>
+    </div>
+
+    <div class="paint-preview">
+        <h3>Device Preview</h3>
+        <div class="preview-container">
+            <img id="sinkPreview" src="/api/sinks/{{ sink.id }}/preview" alt="Sink Preview">
+        </div>
     </div>
 </div>
 
@@ -102,6 +110,34 @@
     padding: 0.5rem;
     font-size: 0.875rem;
     color: var(--text-muted, #9ca3af);
+}
+
+.paint-preview {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--secondary-bg, #1f2937);
+    border-radius: 8px;
+}
+
+.paint-preview h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 1rem;
+    color: var(--text-muted, #9ca3af);
+}
+
+.preview-container {
+    background: #000;
+    border-radius: 4px;
+    padding: 0.5rem;
+    display: flex;
+    justify-content: center;
+    overflow: auto;
+}
+
+.preview-container img {
+    max-width: 100%;
+    height: auto;
+    image-rendering: pixelated;
 }
 
 .page-header {
@@ -160,6 +196,8 @@ async function init() {
     canvas.addEventListener('mouseup', onMouseUp);
     canvas.addEventListener('mouseleave', onMouseUp);
 
+    // Load current state from device
+    await fetchBuffer();
     drawCanvas();
 }
 
@@ -290,6 +328,7 @@ function clearCanvas() {
     drawCanvas();
     sendToSink();
     document.getElementById('lastAction').textContent = 'Cleared';
+    setTimeout(refreshPreview, 100);
 }
 
 async function sendToSink() {
@@ -308,6 +347,9 @@ async function sendToSink() {
         const data = await response.json();
         if (data.status !== 'ok') {
             console.error('Paint error:', data);
+        } else {
+            // Refresh preview after successful paint
+            setTimeout(refreshPreview, 100);
         }
     } catch (err) {
         console.error('Failed to send:', err);
@@ -337,7 +379,7 @@ async function paintText() {
                 text: text,
                 color: color,
                 font: font,
-                clear: true
+                clear: false  // Overlay on existing content
             })
         });
         const data = await response.json();
@@ -354,21 +396,45 @@ async function paintText() {
     }
 }
 
-async function refreshFromSink() {
-    // After painting text, we need to read back the actual pixel data
-    // For now, just clear local canvas - user can see result on actual LEDs
-    // A full implementation would read back the buffer
+function refreshPreview() {
+    // Refresh the sink preview image
+    const preview = document.getElementById('sinkPreview');
+    if (preview) {
+        const src = preview.src.split('?')[0];
+        preview.src = src + '?t=' + Date.now();
+    }
+}
+
+async function fetchBuffer() {
+    // Fetch the current paint buffer from the server and sync local state
     try {
-        const response = await fetch(`/api/sinks/${sinkId}/paint/info`);
-        const info = await response.json();
-        if (info.has_buffer) {
-            // If the sink has a buffer, we could potentially read it back
-            // For now, mark canvas as "synced with device"
-            document.getElementById('lastAction').textContent += ' (sent to device)';
+        const response = await fetch(`/api/sinks/${sinkId}/paint/buffer`);
+        const data = await response.json();
+        if (data.pixels) {
+            // Update local pixels array from server
+            for (let i = 0; i < data.pixels.length && i < pixels.length; i++) {
+                pixels[i] = data.pixels[i];
+            }
+            drawCanvas();
         }
     } catch (err) {
-        console.error('Failed to refresh:', err);
+        console.error('Failed to fetch buffer:', err);
     }
+}
+
+async function refreshFromSink() {
+    // Sync local state from server and refresh preview
+    await fetchBuffer();
+    refreshPreview();
+    document.getElementById('lastAction').textContent += ' (synced from device)';
+}
+
+async function syncFromDevice() {
+    // Manually sync local canvas from device state
+    document.getElementById('lastAction').textContent = 'Syncing...';
+    await fetchBuffer();
+    refreshPreview();
+    document.getElementById('lastAction').textContent = 'Synced from device';
 }
 
 // Initialize on load
