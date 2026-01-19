@@ -28,6 +28,23 @@ from ltp_media_source.multi_channel import (
     run_multi_channel_source,
     run_multi_channel_from_yaml,
 )
+# Optional audio playback (requires sounddevice)
+try:
+    from ltp_media_source.audio_playback import (
+        AudioPlayback,
+        AudioPlaybackContext,
+        create_playback_for_context,
+        list_output_devices,
+        get_default_output_device,
+        HAS_SOUNDDEVICE,
+    )
+except ImportError:
+    AudioPlayback = None  # type: ignore
+    AudioPlaybackContext = None  # type: ignore
+    create_playback_for_context = None  # type: ignore
+    list_output_devices = None  # type: ignore
+    get_default_output_device = None  # type: ignore
+    HAS_SOUNDDEVICE = False
 from ltp_media_source.visualizers import (
     # Base classes
     Visualizer,
@@ -91,6 +108,13 @@ __all__ = [
     "Channel",
     "run_multi_channel_source",
     "run_multi_channel_from_yaml",
+    # Audio playback (optional)
+    "AudioPlayback",
+    "AudioPlaybackContext",
+    "create_playback_for_context",
+    "list_output_devices",
+    "get_default_output_device",
+    "HAS_SOUNDDEVICE",
     # Phase 4: Visualizers
     "Visualizer",
     "LinearVisualizer",

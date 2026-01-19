@@ -52,6 +52,7 @@ media = [
     "Pillow>=10.0.0",
     "mss>=9.0.0",
     "av>=10.0.0",  # PyAV for audio extraction from video
+    "sounddevice>=0.4.6",  # For microphone input and audio playback
 ]
 media-lite = [
     "Pillow>=10.0.0",

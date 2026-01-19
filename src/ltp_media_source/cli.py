@@ -11,6 +11,23 @@ from libltp import ColorFormat
 from ltp_media_source.source import MediaSource, MediaSourceConfig
 from ltp_media_source.inputs.base import FitMode
 
+# Optional audio support
+try:
+    from ltp_media_source.inputs import HAS_AUDIO_INPUTS
+    if HAS_AUDIO_INPUTS:
+        from ltp_media_source.inputs import list_audio_devices
+    from ltp_media_source.audio_playback import (
+        AudioPlayback,
+        list_output_devices,
+        HAS_SOUNDDEVICE,
+    )
+except ImportError:
+    HAS_AUDIO_INPUTS = False
+    HAS_SOUNDDEVICE = False
+    list_audio_devices = None
+    list_output_devices = None
+    AudioPlayback = None
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
@@ -28,6 +45,9 @@ Examples:
   # Video file with cover fit
   ltp-media-source --video movie.mp4 --dimensions 64x64 --fit cover
 
+  # Video with audio playback through speakers
+  ltp-media-source --video music.mp4 --dimensions 32x32 --audio-output
+
   # Webcam feed
   ltp-media-source --camera 0 --dimensions 16x16
 
@@ -36,6 +56,15 @@ Examples:
 
   # Screen region capture
   ltp-media-source --screen --region 0,0,1920,1080 --dimensions 60x16
+
+  # Audio file visualization (spectrum, beats, etc.)
+  ltp-media-source --audio-file music.mp3 --dimensions 60x16 --audio-output
+
+  # Microphone visualization
+  ltp-media-source --microphone --dimensions 32x8
+
+  # List available audio devices
+  ltp-media-source --list-audio-devices
 """,
     )
 
@@ -72,6 +101,23 @@ Examples:
         "--stream",
         metavar="URL",
         help="Network stream (RTSP, HTTP)",
+    )
+    input_group.add_argument(
+        "--audio-file",
+        metavar="PATH",
+        help="Audio file for visualization (MP3, WAV, FLAC, OGG)",
+    )
+    input_group.add_argument(
+        "--microphone",
+        nargs="?",
+        const="default",
+        metavar="DEVICE",
+        help="Microphone input for visualization (default: system default)",
+    )
+    input_group.add_argument(
+        "--list-audio-devices",
+        action="store_true",
+        help="List available audio input/output devices and exit",
     )
 
     # Output dimensions
@@ -151,6 +197,24 @@ Examples:
         help="Camera resolution as WxH (e.g., 640x480)",
     )
 
+    # Audio options
+    parser.add_argument(
+        "--audio-output",
+        action="store_true",
+        help="Play audio through speakers (for video/audio file sources)",
+    )
+    parser.add_argument(
+        "--audio-device",
+        metavar="DEVICE",
+        help="Audio device (index or name) for input or output",
+    )
+    parser.add_argument(
+        "--volume",
+        type=float,
+        default=1.0,
+        help="Audio output volume 0-1 (default: 1.0)",
+    )
+
     # Network options
     parser.add_argument(
         "--name",
@@ -208,9 +272,43 @@ def parse_resolution(res_str: str | None) -> tuple[int, int] | None:
     return (int(parts[0]), int(parts[1]))
 
 
+def list_devices() -> int:
+    """List available audio devices."""
+    print("\n=== Audio Input Devices ===")
+    if HAS_AUDIO_INPUTS and list_audio_devices:
+        devices = list_audio_devices()
+        if devices:
+            for dev in devices:
+                print(f"  [{dev['index']}] {dev['name']}")
+                print(f"      Channels: {dev['channels']}, Sample Rate: {int(dev['sample_rate'])}Hz")
+        else:
+            print("  No input devices found")
+    else:
+        print("  Audio input not available (sounddevice not installed)")
+
+    print("\n=== Audio Output Devices ===")
+    if HAS_SOUNDDEVICE and list_output_devices:
+        devices = list_output_devices()
+        if devices:
+            for dev in devices:
+                print(f"  [{dev['index']}] {dev['name']}")
+                print(f"      Channels: {dev['channels']}, Sample Rate: {int(dev['sample_rate'])}Hz")
+        else:
+            print("  No output devices found")
+    else:
+        print("  Audio output not available (sounddevice not installed)")
+
+    print()
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     args = parse_args()
+
+    # Handle --list-audio-devices
+    if args.list_audio_devices:
+        return list_devices()
 
     # Setup logging
     log_level = logging.DEBUG if args.debug else (logging.INFO if args.verbose else logging.WARNING)
@@ -261,10 +359,35 @@ def main() -> int:
         region = parse_region(args.region)
         if region:
             input_params["region"] = region
+    elif args.audio_file:
+        if not HAS_AUDIO_INPUTS:
+            print("Error: Audio input requires sounddevice. Install with: pip install 'ltp[media]'")
+            return 1
+        input_type = "audio_file"
+        input_path = args.audio_file
+        input_params["speed"] = args.speed
+        input_params["start_time"] = args.start
+        if args.end:
+            input_params["end_time"] = args.end
+    elif args.microphone is not None:
+        if not HAS_AUDIO_INPUTS:
+            print("Error: Microphone input requires sounddevice. Install with: pip install 'ltp[media]'")
+            return 1
+        input_type = "microphone"
+        if args.microphone != "default":
+            try:
+                input_params["device"] = int(args.microphone)
+            except ValueError:
+                input_params["device"] = args.microphone
+        elif args.audio_device:
+            try:
+                input_params["device"] = int(args.audio_device)
+            except ValueError:
+                input_params["device"] = args.audio_device
 
     # Handle loop flag (only for types that support it)
     loop_enabled = args.loop and not args.no_loop
-    if input_type in ("gif", "video"):
+    if input_type in ("gif", "video", "audio_file"):
         input_params["loop"] = loop_enabled
 
     # Create config

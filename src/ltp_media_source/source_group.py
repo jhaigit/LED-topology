@@ -15,9 +15,27 @@ from typing import Any, Sequence
 import yaml
 from pydantic import BaseModel, Field
 
-from ltp_media_source.inputs.base import FitMode
+from ltp_media_source.inputs.base import FitMode, MediaInput
 from ltp_media_source.inputs.video import VideoInput
 from ltp_media_source.shared_context import SharedMediaContext
+
+# Optional audio inputs
+try:
+    from ltp_media_source.inputs.audio import AudioFileInput
+    from ltp_media_source.inputs.microphone import MicrophoneInput
+    HAS_AUDIO_INPUTS = True
+except ImportError:
+    HAS_AUDIO_INPUTS = False
+    AudioFileInput = None  # type: ignore
+    MicrophoneInput = None  # type: ignore
+
+# Optional audio playback
+try:
+    from ltp_media_source.audio_playback import AudioPlayback
+    HAS_AUDIO_PLAYBACK = True
+except ImportError:
+    HAS_AUDIO_PLAYBACK = False
+    AudioPlayback = None  # type: ignore
 from ltp_media_source.sources.base import LogicalSource, LogicalSourceConfig
 from ltp_media_source.sources.video_source import VideoLogicalSource, VideoLogicalSourceConfig
 from ltp_media_source.sources.audio_visualizer import (
@@ -55,12 +73,17 @@ class SourceDefinition(BaseModel):
 class SourceGroupConfig(BaseModel):
     """Configuration for a media source group."""
 
-    media_path: str
+    media_path: str | None = None  # Path for video or audio file
+    input_type: str = "video"  # "video", "audio_file", or "microphone"
+    input_device: str | int | None = None  # Device for microphone input
     loop: bool = True
     speed: float = 1.0
     audio_sample_rate: int = 44100
     audio_channels: int = 2
     audio_buffer_duration: float = 2.0
+    audio_output: bool = False  # Play audio through speakers
+    audio_output_device: str | int | None = None  # Speaker output device
+    volume: float = 1.0  # Audio output volume
     sources: list[SourceDefinition] = Field(default_factory=list)
 
     model_config = {"extra": "allow"}
@@ -217,22 +240,85 @@ class MediaSourceGroup:
         """True if the source group is running."""
         return self._running
 
+    def _create_input(self) -> MediaInput:
+        """Create the media input based on configuration."""
+        input_type = self._config.input_type
+
+        if input_type == "video":
+            if not self._config.media_path:
+                raise ValueError("media_path required for video input")
+            return VideoInput(
+                path=self._config.media_path,
+                loop=self._config.loop,
+                speed=self._config.speed,
+                extract_audio=True,  # Enable audio extraction
+            )
+
+        elif input_type == "audio_file":
+            if not HAS_AUDIO_INPUTS or AudioFileInput is None:
+                raise RuntimeError(
+                    "Audio file input requires sounddevice. "
+                    "Install with: pip install 'ltp[media]'"
+                )
+            if not self._config.media_path:
+                raise ValueError("media_path required for audio file input")
+            return AudioFileInput(
+                path=self._config.media_path,
+                loop=self._config.loop,
+                speed=self._config.speed,
+                sample_rate=self._config.audio_sample_rate,
+            )
+
+        elif input_type == "microphone":
+            if not HAS_AUDIO_INPUTS or MicrophoneInput is None:
+                raise RuntimeError(
+                    "Microphone input requires sounddevice. "
+                    "Install with: pip install 'ltp[media]'"
+                )
+            return MicrophoneInput(
+                device=self._config.input_device,
+                sample_rate=self._config.audio_sample_rate,
+                channels=self._config.audio_channels,
+            )
+
+        else:
+            raise ValueError(f"Unknown input type: {input_type}")
+
+    def _create_audio_playback(self) -> AudioPlayback | None:
+        """Create audio playback if configured."""
+        if not self._config.audio_output:
+            return None
+
+        if not HAS_AUDIO_PLAYBACK or AudioPlayback is None:
+            logger.warning(
+                "Audio playback not available (sounddevice not installed). "
+                "Install with: pip install 'ltp[media]'"
+            )
+            return None
+
+        playback = AudioPlayback(
+            sample_rate=self._config.audio_sample_rate,
+            channels=self._config.audio_channels,
+            device=self._config.audio_output_device,
+        )
+        playback.volume = self._config.volume
+        return playback
+
     def _create_context(self) -> SharedMediaContext:
         """Create the shared media context."""
-        # Create the video input
-        video_input = VideoInput(
-            path=self._config.media_path,
-            loop=self._config.loop,
-            speed=self._config.speed,
-            extract_audio=True,  # Enable audio extraction
-        )
+        # Create the media input
+        media_input = self._create_input()
+
+        # Create optional audio playback
+        audio_playback = self._create_audio_playback()
 
         # Create shared context
         return SharedMediaContext(
-            media_input=video_input,
+            media_input=media_input,
             audio_sample_rate=self._config.audio_sample_rate,
             audio_channels=self._config.audio_channels,
             audio_buffer_duration=self._config.audio_buffer_duration,
+            audio_playback=audio_playback,
         )
 
     def _create_sources(self) -> list[LogicalSource]:

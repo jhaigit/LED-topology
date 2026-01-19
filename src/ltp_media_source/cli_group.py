@@ -44,6 +44,15 @@ Examples:
       --audio-viz "Spectrum:spectrum_matrix:16x16" \\
       --audio-viz "VU:vu:60"
 
+  # Audio file only (no video)
+  ltp-media-source-group --audio music.mp3 \\
+      --audio-viz "Spectrum:spectrum:60" \\
+      --audio-output
+
+  # Microphone input
+  ltp-media-source-group --microphone \\
+      --audio-viz "LiveVU:vu:60"
+
 Source specification format:
   --video "NAME:WIDTHxHEIGHT[:FIT_MODE]"
     NAME       - Source name for mDNS
@@ -70,12 +79,26 @@ Available visualizers:
         help="YAML configuration file",
     )
 
-    # Input media
-    parser.add_argument(
+    # Input media (mutually exclusive)
+    input_group = parser.add_mutually_exclusive_group()
+    input_group.add_argument(
         "--input",
         "-i",
         metavar="PATH",
-        help="Media file path (video, audio)",
+        help="Video file path (MP4, AVI, MOV, etc.)",
+    )
+    input_group.add_argument(
+        "--audio",
+        "-a",
+        metavar="PATH",
+        help="Audio file path (MP3, WAV, FLAC, OGG)",
+    )
+    input_group.add_argument(
+        "--microphone",
+        nargs="?",
+        const="default",
+        metavar="DEVICE",
+        help="Microphone input (device index, name, or 'default')",
     )
 
     # Source specifications (repeatable)
@@ -126,6 +149,22 @@ Available visualizers:
         type=float,
         default=2.0,
         help="Audio buffer duration in seconds (default: 2.0)",
+    )
+    parser.add_argument(
+        "--audio-output",
+        action="store_true",
+        help="Play audio through speakers",
+    )
+    parser.add_argument(
+        "--audio-device",
+        metavar="DEVICE",
+        help="Audio output device (index or name)",
+    )
+    parser.add_argument(
+        "--volume",
+        type=float,
+        default=1.0,
+        help="Audio output volume 0-1 (default: 1.0)",
     )
 
     # Global rate
@@ -244,7 +283,7 @@ def main() -> int:
             print(f"Error loading configuration: {e}", file=sys.stderr)
             return 1
 
-    elif args.input:
+    elif args.input or args.audio or args.microphone is not None:
         # Build config from command-line arguments
         sources = []
 
@@ -272,19 +311,52 @@ def main() -> int:
 
         loop_enabled = args.loop and not args.no_loop
 
+        # Determine input type and path
+        if args.input:
+            input_type = "video"
+            media_path = args.input
+            input_device = None
+        elif args.audio:
+            input_type = "audio_file"
+            media_path = args.audio
+            input_device = None
+        else:  # args.microphone
+            input_type = "microphone"
+            media_path = None
+            # Parse microphone device
+            input_device = None
+            if args.microphone != "default":
+                try:
+                    input_device = int(args.microphone)
+                except ValueError:
+                    input_device = args.microphone
+
+        # Parse audio output device
+        audio_output_device = None
+        if args.audio_device:
+            try:
+                audio_output_device = int(args.audio_device)
+            except ValueError:
+                audio_output_device = args.audio_device
+
         config = SourceGroupConfig(
-            media_path=args.input,
+            media_path=media_path,
+            input_type=input_type,
+            input_device=input_device,
             loop=loop_enabled,
             speed=args.speed,
             audio_sample_rate=args.sample_rate,
             audio_buffer_duration=args.audio_buffer,
+            audio_output=args.audio_output,
+            audio_output_device=audio_output_device,
+            volume=args.volume,
             sources=sources,
         )
 
         group = MediaSourceGroup(config)
 
     else:
-        print("Error: Either --config or --input is required", file=sys.stderr)
+        print("Error: One of --config, --input, --audio, or --microphone is required", file=sys.stderr)
         return 1
 
     # Setup event loop

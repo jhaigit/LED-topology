@@ -7,6 +7,29 @@ from ltp_media_source.inputs.video import VideoInput
 from ltp_media_source.inputs.camera import CameraInput
 from ltp_media_source.inputs.screen import ScreenInput
 
+# Optional audio inputs (require sounddevice and/or PyAV)
+try:
+    from ltp_media_source.inputs.audio import AudioFileInput, AudioOnlyContext, HAS_PYAV
+    from ltp_media_source.inputs.microphone import (
+        MicrophoneInput,
+        SystemAudioInput,
+        list_audio_devices,
+        get_default_input_device,
+        HAS_SOUNDDEVICE as _HAS_SOUNDDEVICE,
+    )
+    # HAS_AUDIO_INPUTS is True only if at least one audio library is available
+    HAS_AUDIO_INPUTS = HAS_PYAV or _HAS_SOUNDDEVICE
+except ImportError:
+    HAS_AUDIO_INPUTS = False
+    HAS_PYAV = False
+    _HAS_SOUNDDEVICE = False
+    AudioFileInput = None  # type: ignore
+    AudioOnlyContext = None  # type: ignore
+    MicrophoneInput = None  # type: ignore
+    SystemAudioInput = None  # type: ignore
+    list_audio_devices = None  # type: ignore
+    get_default_input_device = None  # type: ignore
+
 # Registry of input types
 INPUT_TYPES = {
     "image": ImageInput,
@@ -15,6 +38,12 @@ INPUT_TYPES = {
     "camera": CameraInput,
     "screen": ScreenInput,
 }
+
+# Add audio inputs if available
+if HAS_AUDIO_INPUTS:
+    INPUT_TYPES["audio_file"] = AudioFileInput
+    INPUT_TYPES["microphone"] = MicrophoneInput
+    INPUT_TYPES["system_audio"] = SystemAudioInput
 
 
 def create_input(input_type: str, **kwargs) -> MediaInput:
@@ -34,4 +63,12 @@ __all__ = [
     "ScreenInput",
     "INPUT_TYPES",
     "create_input",
+    # Audio inputs (optional)
+    "HAS_AUDIO_INPUTS",
+    "AudioFileInput",
+    "AudioOnlyContext",
+    "MicrophoneInput",
+    "SystemAudioInput",
+    "list_audio_devices",
+    "get_default_input_device",
 ]

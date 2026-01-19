@@ -4,14 +4,19 @@ Provides synchronized access to a single media decoder for multiple
 logical sources (video, audio visualizers, etc.).
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 import numpy as np
 
 from ltp_media_source.audio_buffer import AudioRingBuffer
 from ltp_media_source.inputs.base import MediaInput
+
+if TYPE_CHECKING:
+    from ltp_media_source.audio_playback import AudioPlayback
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +53,16 @@ class SharedMediaContext:
         audio_sample_rate: int = 44100,
         audio_channels: int = 2,
         audio_buffer_duration: float = 2.0,
+        audio_playback: AudioPlayback | None = None,
     ):
         """Initialize shared media context.
 
         Args:
-            media_input: The media input to wrap (VideoInput, etc.)
+            media_input: The media input to wrap (VideoInput, AudioFileInput, etc.)
             audio_sample_rate: Sample rate for audio buffer
             audio_channels: Number of audio channels (1=mono, 2=stereo)
             audio_buffer_duration: Seconds of audio to buffer
+            audio_playback: Optional AudioPlayback for speaker output
         """
         self._input = media_input
         self._audio_sample_rate = audio_sample_rate
@@ -67,6 +74,9 @@ class SharedMediaContext:
             sample_rate=audio_sample_rate,
             channels=audio_channels,
         )
+
+        # Audio playback (optional)
+        self._audio_playback: AudioPlayback | None = audio_playback
 
         # Current video frame (updated by read loop)
         self._current_frame: np.ndarray | None = None
@@ -89,6 +99,10 @@ class SharedMediaContext:
 
         # State change observers (for control coordination)
         self._state_observers: list[StateChangeCallback] = []
+
+        # Set up shared context on input if it supports it
+        if hasattr(media_input, "set_shared_context"):
+            media_input.set_shared_context(self)
 
     @property
     def media_path(self) -> str | None:
@@ -177,6 +191,24 @@ class SharedMediaContext:
         """
         return hasattr(self._input, "has_audio") and self._input.has_audio
 
+    @property
+    def is_audio_only(self) -> bool:
+        """True if this is an audio-only source (no video).
+
+        Audio-only sources have native_dimensions of (0, 0).
+        """
+        return self.native_dimensions == (0, 0)
+
+    @property
+    def audio_playback(self) -> AudioPlayback | None:
+        """Audio playback for speaker output."""
+        return self._audio_playback
+
+    @audio_playback.setter
+    def audio_playback(self, value: AudioPlayback | None) -> None:
+        """Set audio playback for speaker output."""
+        self._audio_playback = value
+
     # =========================================================================
     # State Change Observers (for control coordination)
     # =========================================================================
@@ -241,6 +273,13 @@ class SharedMediaContext:
             self._paused = False
             self._position = self._input.position
 
+            # Start audio playback if configured
+            if self._audio_playback is not None:
+                try:
+                    self._audio_playback.start()
+                except Exception as e:
+                    logger.warning(f"Failed to start audio playback: {e}")
+
             logger.info(f"SharedMediaContext started: {self.media_path}")
 
     async def stop(self) -> None:
@@ -258,6 +297,13 @@ class SharedMediaContext:
             self._audio_buffer.clear()
             self._current_frame = None
 
+            # Stop audio playback if configured
+            if self._audio_playback is not None:
+                try:
+                    self._audio_playback.stop()
+                except Exception as e:
+                    logger.debug(f"Error stopping audio playback: {e}")
+
             logger.info(f"SharedMediaContext stopped: {self.media_path}")
 
     async def play(self) -> None:
@@ -266,6 +312,11 @@ class SharedMediaContext:
             self._playing = True
             self._paused = False
             self._state_changed.set()
+
+            # Resume audio playback
+            if self._audio_playback is not None:
+                self._audio_playback.resume()
+
         # Notify observers outside lock to avoid deadlock
         self._notify_state_change(paused=False, playing=True)
 
@@ -274,6 +325,11 @@ class SharedMediaContext:
         async with self._lock:
             self._paused = True
             self._state_changed.set()
+
+            # Pause audio playback
+            if self._audio_playback is not None:
+                self._audio_playback.pause()
+
         # Notify observers outside lock
         self._notify_state_change(paused=True, playing=False)
 
@@ -283,6 +339,14 @@ class SharedMediaContext:
             self._paused = not self._paused
             paused = self._paused
             self._state_changed.set()
+
+            # Toggle audio playback pause
+            if self._audio_playback is not None:
+                if paused:
+                    self._audio_playback.pause()
+                else:
+                    self._audio_playback.resume()
+
         # Notify observers outside lock
         self._notify_state_change(paused=paused, playing=not paused)
 
@@ -360,16 +424,21 @@ class SharedMediaContext:
             return False
 
     def write_audio_samples(self, samples: np.ndarray) -> None:
-        """Write audio samples to the shared buffer.
+        """Write audio samples to the shared buffer and optional playback.
 
-        This is called by the media input (VideoInput) when it extracts
-        audio samples during playback.
+        This is called by the media input (VideoInput, AudioFileInput, etc.)
+        when it extracts audio samples during playback.
 
         Args:
             samples: Audio samples, shape (num_samples, channels) or (num_samples,)
                     Values should be float32 in range [-1.0, 1.0].
         """
+        # Write to buffer for visualization
         self._audio_buffer.write(samples)
+
+        # Write to speaker playback if enabled
+        if self._audio_playback is not None and self._audio_playback.is_running:
+            self._audio_playback.write(samples)
 
     async def get_audio_samples(self, num_samples: int) -> np.ndarray:
         """Get recent audio samples for analysis.
@@ -426,6 +495,12 @@ class SharedMediaContext:
         elif control_id == "speed":
             self.speed = float(value)
             return True
+        elif control_id == "volume":
+            if self._audio_playback is not None:
+                self._audio_playback.volume = float(value)
+                self._notify_state_change(volume=float(value))
+                return True
+            return False
 
         return False
 
@@ -435,7 +510,7 @@ class SharedMediaContext:
         Returns:
             Dictionary with current state values.
         """
-        return {
+        state = {
             "position": self._position,
             "duration": self.duration,
             "playing": self.playing,
@@ -444,4 +519,11 @@ class SharedMediaContext:
             "speed": self._speed,
             "frame_number": self._frame_number,
             "has_audio": self.has_audio,
+            "is_audio_only": self.is_audio_only,
         }
+
+        # Include volume if audio playback is available
+        if self._audio_playback is not None:
+            state["volume"] = self._audio_playback.volume
+
+        return state
