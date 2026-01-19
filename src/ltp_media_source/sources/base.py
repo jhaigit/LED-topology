@@ -452,12 +452,45 @@ class LogicalSource(ABC):
             self._last_stats_time = now
             last_frame_count = self._frame_count
 
+    def _on_context_state_change(self, state: dict[str, Any]) -> None:
+        """Handle state change notification from SharedMediaContext.
+
+        This method is called when another source changes shared playback
+        state (play/pause/seek/loop/speed). We update our local control
+        values to stay in sync.
+
+        Args:
+            state: Dictionary with changed state values
+        """
+        logger.debug(f"[{self.config.name}] Context state changed: {state}")
+
+        # Sync local controls with context state
+        for key, value in state.items():
+            try:
+                if key == "paused":
+                    self._controls.set_value("paused", value)
+                elif key == "loop":
+                    self._controls.set_value("loop", value)
+                elif key == "speed":
+                    self._controls.set_value("speed", value)
+                # position and playing are not stored as controls
+            except Exception as e:
+                logger.debug(f"[{self.config.name}] Could not sync control {key}: {e}")
+
     async def start(self) -> None:
         """Start the logical source."""
         if self._running:
             return
 
         logger.info(f"Starting logical source: {self.config.name}")
+
+        # Register for context state changes (control coordination)
+        self._context.add_state_observer(self._on_context_state_change)
+
+        # Sync initial state from context
+        self._controls.set_value("paused", self._context.paused)
+        self._controls.set_value("loop", self._context.loop)
+        self._controls.set_value("speed", self._context.speed)
 
         # Start control server
         self._control_server = ControlServer(
@@ -500,6 +533,9 @@ class LogicalSource(ABC):
 
         logger.info(f"[{self.config.name}] Stopping")
         self._running = False
+
+        # Unregister from context state changes
+        self._context.remove_state_observer(self._on_context_state_change)
 
         # Cancel tasks
         if self._render_task:

@@ -6,7 +6,7 @@ logical sources (video, audio visualizers, etc.).
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Callable, Protocol
 
 import numpy as np
 
@@ -14,6 +14,18 @@ from ltp_media_source.audio_buffer import AudioRingBuffer
 from ltp_media_source.inputs.base import MediaInput
 
 logger = logging.getLogger(__name__)
+
+
+class StateChangeCallback(Protocol):
+    """Protocol for state change callback functions."""
+
+    def __call__(self, state: dict[str, Any]) -> None:
+        """Called when shared state changes.
+
+        Args:
+            state: Dictionary with changed state values
+        """
+        ...
 
 
 class SharedMediaContext:
@@ -75,6 +87,9 @@ class SharedMediaContext:
         # Running state
         self._running: bool = False
 
+        # State change observers (for control coordination)
+        self._state_observers: list[StateChangeCallback] = []
+
     @property
     def media_path(self) -> str | None:
         """Path to the media file."""
@@ -125,6 +140,7 @@ class SharedMediaContext:
         """Set loop mode."""
         self._loop = value
         self._input.loop = value
+        self._notify_state_change(loop=value)
 
     @property
     def speed(self) -> float:
@@ -136,6 +152,7 @@ class SharedMediaContext:
         """Set playback speed."""
         self._speed = max(0.1, min(4.0, value))
         self._input.speed = self._speed
+        self._notify_state_change(speed=self._speed)
 
     @property
     def frame_rate(self) -> float:
@@ -159,6 +176,55 @@ class SharedMediaContext:
         This is determined by checking if the input supports audio extraction.
         """
         return hasattr(self._input, "has_audio") and self._input.has_audio
+
+    # =========================================================================
+    # State Change Observers (for control coordination)
+    # =========================================================================
+
+    def add_state_observer(self, callback: StateChangeCallback) -> None:
+        """Register a callback to be notified of state changes.
+
+        When shared playback state changes (play/pause/seek/loop/speed),
+        all registered observers are notified with the changed values.
+        This enables control coordination across multiple logical sources.
+
+        Args:
+            callback: Function to call with state change dictionary
+        """
+        if callback not in self._state_observers:
+            self._state_observers.append(callback)
+            logger.debug(f"Added state observer: {callback}")
+
+    def remove_state_observer(self, callback: StateChangeCallback) -> None:
+        """Unregister a state change callback.
+
+        Args:
+            callback: Previously registered callback to remove
+        """
+        if callback in self._state_observers:
+            self._state_observers.remove(callback)
+            logger.debug(f"Removed state observer: {callback}")
+
+    def _notify_state_change(self, **changes: Any) -> None:
+        """Notify all observers of state changes.
+
+        Args:
+            **changes: Key-value pairs of changed state
+        """
+        if not changes or not self._state_observers:
+            return
+
+        logger.debug(f"Notifying {len(self._state_observers)} observers of: {changes}")
+
+        for callback in self._state_observers:
+            try:
+                callback(changes)
+            except Exception as e:
+                logger.error(f"State observer callback failed: {e}")
+
+    # =========================================================================
+    # Lifecycle Methods
+    # =========================================================================
 
     async def start(self) -> None:
         """Start the media context.
@@ -200,18 +266,25 @@ class SharedMediaContext:
             self._playing = True
             self._paused = False
             self._state_changed.set()
+        # Notify observers outside lock to avoid deadlock
+        self._notify_state_change(paused=False, playing=True)
 
     async def pause(self) -> None:
         """Pause playback."""
         async with self._lock:
             self._paused = True
             self._state_changed.set()
+        # Notify observers outside lock
+        self._notify_state_change(paused=True, playing=False)
 
     async def toggle_pause(self) -> None:
         """Toggle pause state."""
         async with self._lock:
             self._paused = not self._paused
+            paused = self._paused
             self._state_changed.set()
+        # Notify observers outside lock
+        self._notify_state_change(paused=paused, playing=not paused)
 
     async def seek(self, position: float) -> bool:
         """Seek to a specific position.
@@ -228,6 +301,8 @@ class SharedMediaContext:
                 # Clear audio buffer on seek (old samples are invalid)
                 self._audio_buffer.clear()
                 self._state_changed.set()
+                # Notify observers outside lock
+                self._notify_state_change(position=position)
                 return True
             return False
 
