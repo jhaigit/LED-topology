@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -13,180 +12,18 @@ from libltp import EnumControl, EnumOption, NumberControl
 from ltp_media_source.audio.analyzer import AudioAnalyzer
 from ltp_media_source.audio.beat_detector import BeatDetector
 from ltp_media_source.sources.base import LogicalSource, LogicalSourceConfig
+from ltp_media_source.visualizers import (
+    Visualizer,
+    create_visualizer,
+    get_visualizer_names,
+    VISUALIZERS,
+    ColorMode,
+)
 
 if TYPE_CHECKING:
     from ltp_media_source.shared_context import SharedMediaContext
 
 logger = logging.getLogger(__name__)
-
-
-class Visualizer(ABC):
-    """Base class for audio visualizations.
-
-    Subclasses implement render() to produce visual output from audio analysis.
-    """
-
-    def __init__(self, width: int, height: int = 1):
-        """Initialize visualizer.
-
-        Args:
-            width: Output width in pixels
-            height: Output height in pixels (1 for linear strips)
-        """
-        self.width = width
-        self.height = height
-
-    @property
-    def dimensions(self) -> tuple[int, int]:
-        """Output dimensions (width, height)."""
-        return (self.width, self.height)
-
-    @property
-    def is_linear(self) -> bool:
-        """True if this is a 1D linear visualization."""
-        return self.height == 1
-
-    @abstractmethod
-    def render(
-        self,
-        analyzer: AudioAnalyzer,
-        beat_detector: BeatDetector | None = None,
-    ) -> np.ndarray:
-        """Render visualization frame from current audio analysis.
-
-        Args:
-            analyzer: AudioAnalyzer with current analysis results
-            beat_detector: Optional BeatDetector for beat-reactive effects
-
-        Returns:
-            Frame as RGB uint8 array (height, width, 3)
-        """
-        pass
-
-
-class SimpleSpectrumVisualizer(Visualizer):
-    """Simple spectrum visualizer for default/fallback use.
-
-    Shows frequency bands as colored bars. Works for both linear (1D)
-    and matrix (2D) displays.
-    """
-
-    def __init__(
-        self,
-        width: int,
-        height: int = 1,
-        color_mode: str = "rainbow",
-        smoothing: float = 0.3,
-    ):
-        """Initialize spectrum visualizer.
-
-        Args:
-            width: Output width (number of bands for linear, or matrix width)
-            height: Output height (1 for linear, or matrix height)
-            color_mode: Color mode (rainbow, gradient, solid)
-            smoothing: Temporal smoothing for band values
-        """
-        super().__init__(width, height)
-        self.color_mode = color_mode
-        self.smoothing = smoothing
-
-        # State for smoothing
-        self._smoothed_bands: np.ndarray | None = None
-
-        # Pre-compute colors for rainbow mode
-        self._colors = self._generate_colors(width)
-
-    def _generate_colors(self, num_colors: int) -> np.ndarray:
-        """Generate rainbow colors for spectrum bands."""
-        colors = np.zeros((num_colors, 3), dtype=np.uint8)
-
-        for i in range(num_colors):
-            # HSV to RGB, hue varies from 0 (red) to 240 (blue)
-            hue = (i / num_colors) * 240
-            colors[i] = self._hsv_to_rgb(hue, 1.0, 1.0)
-
-        return colors
-
-    def _hsv_to_rgb(self, h: float, s: float, v: float) -> np.ndarray:
-        """Convert HSV to RGB."""
-        h = h / 60.0
-        i = int(h) % 6
-        f = h - int(h)
-        p = v * (1 - s)
-        q = v * (1 - f * s)
-        t = v * (1 - (1 - f) * s)
-
-        if i == 0:
-            r, g, b = v, t, p
-        elif i == 1:
-            r, g, b = q, v, p
-        elif i == 2:
-            r, g, b = p, v, t
-        elif i == 3:
-            r, g, b = p, q, v
-        elif i == 4:
-            r, g, b = t, p, v
-        else:
-            r, g, b = v, p, q
-
-        return np.array([int(r * 255), int(g * 255), int(b * 255)], dtype=np.uint8)
-
-    def render(
-        self,
-        analyzer: AudioAnalyzer,
-        beat_detector: BeatDetector | None = None,
-    ) -> np.ndarray:
-        """Render spectrum visualization."""
-        # Get spectrum bands
-        bands = analyzer.get_spectrum_bands(self.width, log_scale=True)
-
-        # Apply smoothing
-        if self._smoothed_bands is None:
-            self._smoothed_bands = bands.copy()
-        else:
-            self._smoothed_bands = (
-                self._smoothed_bands * self.smoothing
-                + bands * (1 - self.smoothing)
-            )
-
-        # Normalize bands (0-1 range with some headroom)
-        max_val = max(np.max(self._smoothed_bands), 0.001)
-        normalized = np.clip(self._smoothed_bands / max_val, 0, 1)
-
-        if self.is_linear:
-            # Linear (1D) output: each pixel is one band
-            frame = np.zeros((1, self.width, 3), dtype=np.uint8)
-
-            for i in range(self.width):
-                intensity = normalized[i]
-                color = self._colors[i]
-                frame[0, i] = (color * intensity).astype(np.uint8)
-
-            # Apply beat flash if detector available
-            if beat_detector and beat_detector.intensity > 0:
-                flash = int(beat_detector.intensity * 50)
-                frame = np.clip(frame.astype(np.int16) + flash, 0, 255).astype(np.uint8)
-
-            return frame
-
-        else:
-            # Matrix (2D) output: bars grow from bottom
-            frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-
-            for x in range(self.width):
-                bar_height = int(normalized[x] * self.height)
-                color = self._colors[x]
-
-                for y in range(bar_height):
-                    # Draw from bottom up
-                    frame[self.height - 1 - y, x] = color
-
-            # Apply beat flash
-            if beat_detector and beat_detector.intensity > 0:
-                flash = int(beat_detector.intensity * 50)
-                frame = np.clip(frame.astype(np.int16) + flash, 0, 255).astype(np.uint8)
-
-            return frame
 
 
 class AudioVisualizerSourceConfig(LogicalSourceConfig):
@@ -202,7 +39,7 @@ class AudioVisualizerSourceConfig(LogicalSourceConfig):
     beat_decay: float = 0.95
 
     # Visualizer settings
-    visualizer_type: str = "spectrum"  # For future use
+    visualizer_type: str = "spectrum"
     color_mode: str = "rainbow"
 
     # Source type
@@ -228,7 +65,7 @@ class AudioVisualizerSource(LogicalSource):
         Args:
             context: SharedMediaContext to get audio samples from
             config: Source configuration
-            visualizer: Visualizer to use (defaults to SimpleSpectrumVisualizer)
+            visualizer: Visualizer to use (created from config if not provided)
         """
         if config is None:
             config = AudioVisualizerSourceConfig()
@@ -236,6 +73,7 @@ class AudioVisualizerSource(LogicalSource):
         super().__init__(context, config)
 
         self._viz_config = config
+        self._visualizer_type = config.visualizer_type
 
         # Audio analyzer
         self._analyzer = AudioAnalyzer(
@@ -251,18 +89,106 @@ class AudioVisualizerSource(LogicalSource):
             decay=config.beat_decay,
         )
 
-        # Visualizer (default if not provided)
+        # Visualizer (create from config if not provided)
         if visualizer is None:
-            visualizer = SimpleSpectrumVisualizer(
-                width=self._width,
-                height=self._height,
-                color_mode=config.color_mode,
-            )
+            visualizer = self._create_visualizer(config.visualizer_type)
         self._visualizer = visualizer
+
+    def _create_visualizer(self, visualizer_type: str) -> Visualizer:
+        """Create a visualizer by type name.
+
+        Args:
+            visualizer_type: Visualizer type name
+
+        Returns:
+            Visualizer instance configured for this source's dimensions
+        """
+        # Parse color mode from config
+        try:
+            color_mode = ColorMode(self._viz_config.color_mode)
+        except ValueError:
+            color_mode = ColorMode.RAINBOW
+
+        # Check if requested visualizer is compatible with dimensions
+        # If not, substitute an appropriate one
+        viz_class = VISUALIZERS.get(visualizer_type.lower())
+        if viz_class is not None:
+            from ltp_media_source.visualizers.base import MatrixVisualizer as MatViz, LinearVisualizer as LinViz
+            is_matrix_viz = issubclass(viz_class, MatViz)
+            needs_matrix = self._height >= 2
+
+            if needs_matrix and not is_matrix_viz:
+                # Need matrix but got linear - substitute matrix equivalent
+                matrix_equivalents = {
+                    "spectrum": "spectrum_matrix",
+                    "spectrum_bars": "spectrum_matrix",
+                    "vu": "vu_bar",
+                    "vu_meter": "vu_bar",
+                    "waveform": "waveform_scope",
+                    "beat": "ripples",
+                    "beat_pulse": "ripples",
+                }
+                visualizer_type = matrix_equivalents.get(visualizer_type.lower(), "spectrum_matrix")
+            elif not needs_matrix and is_matrix_viz:
+                # Need linear but got matrix - substitute linear equivalent
+                linear_equivalents = {
+                    "spectrum_matrix": "spectrum",
+                    "spectrogram": "spectrum",
+                    "ripples": "beat",
+                    "beat_ripples": "beat",
+                    "heatmap": "spectrum",
+                    "frequency_heatmap": "spectrum",
+                    "vu_bar": "vu",
+                    "scope": "waveform",
+                    "waveform_scope": "waveform",
+                    "plasma": "beat",
+                }
+                visualizer_type = linear_equivalents.get(visualizer_type.lower(), "spectrum")
+
+        return create_visualizer(
+            visualizer_type=visualizer_type,
+            width=self._width,
+            height=self._height,
+            color_mode=color_mode,
+            smoothing=self._viz_config.smoothing,
+            gain=self._viz_config.gain,
+        )
 
     def _setup_controls(self) -> None:
         """Set up audio visualizer controls."""
         super()._setup_controls()
+
+        # Visualizer type control
+        visualizer_options = [
+            EnumOption(value=name, label=name.replace("_", " ").title())
+            for name in get_visualizer_names()
+        ]
+        self._controls.register(
+            EnumControl(
+                id="visualizer_type",
+                name="Visualizer",
+                description="Visualization type",
+                options=visualizer_options,
+                value=self._visualizer_type if hasattr(self, "_visualizer_type") else "spectrum",
+                group="visualizer",
+            )
+        )
+
+        # Color mode control
+        color_options = [
+            EnumOption(value=mode.value, label=mode.value.title())
+            for mode in ColorMode
+        ]
+        self._controls.register(
+            EnumControl(
+                id="color_mode",
+                name="Color Mode",
+                description="Color scheme",
+                options=color_options,
+                value=self._viz_config.color_mode if hasattr(self, "_viz_config") else "rainbow",
+                group="visualizer",
+            )
+        )
 
         # Gain control
         self._controls.register(
@@ -328,12 +254,34 @@ class AudioVisualizerSource(LogicalSource):
                             self._controls.set_value(control_id, value)
                     else:
                         errors[control_id] = "Control not handled"
+                elif control_id == "visualizer_type":
+                    # Change visualizer type
+                    try:
+                        new_visualizer = self._create_visualizer(str(value))
+                        self._visualizer = new_visualizer
+                        self._visualizer_type = str(value)
+                        self._controls.set_value(control_id, value)
+                        applied[control_id] = value
+                    except ValueError as e:
+                        errors[control_id] = str(e)
+                elif control_id == "color_mode":
+                    # Change color mode
+                    try:
+                        color_mode = ColorMode(str(value))
+                        self._visualizer.set_color_mode(color_mode)
+                        self._viz_config.color_mode = str(value)
+                        self._controls.set_value(control_id, value)
+                        applied[control_id] = value
+                    except ValueError as e:
+                        errors[control_id] = str(e)
                 elif control_id == "gain":
                     self._analyzer.gain = float(value)
+                    self._visualizer.gain = float(value)
                     self._controls.set_value(control_id, value)
                     applied[control_id] = value
                 elif control_id == "smoothing":
                     self._analyzer.smoothing = float(value)
+                    self._visualizer.smoothing = float(value)
                     self._controls.set_value(control_id, value)
                     applied[control_id] = value
                 elif control_id == "beat_sensitivity":
@@ -382,6 +330,18 @@ class AudioVisualizerSource(LogicalSource):
         """
         self._visualizer = visualizer
 
+    def set_visualizer_type(self, visualizer_type: str) -> None:
+        """Change the visualizer by type name.
+
+        Args:
+            visualizer_type: Visualizer type name (see get_visualizer_names())
+
+        Raises:
+            ValueError: If visualizer_type is unknown
+        """
+        self._visualizer = self._create_visualizer(visualizer_type)
+        self._visualizer_type = visualizer_type
+
     @property
     def analyzer(self) -> AudioAnalyzer:
         """The audio analyzer."""
@@ -396,6 +356,11 @@ class AudioVisualizerSource(LogicalSource):
     def visualizer(self) -> Visualizer:
         """The current visualizer."""
         return self._visualizer
+
+    @property
+    def visualizer_type(self) -> str:
+        """The current visualizer type name."""
+        return self._visualizer_type
 
     def get_analysis_state(self) -> dict:
         """Get current audio analysis state.
@@ -412,4 +377,5 @@ class AudioVisualizerSource(LogicalSource):
             "beat": self._beat_detector.beat,
             "beat_intensity": self._beat_detector.intensity,
             "beat_count": self._beat_detector.beat_count,
+            "visualizer_type": self._visualizer_type,
         }

@@ -12,8 +12,34 @@ from ltp_media_source.sources.video_source import VideoLogicalSource, VideoLogic
 from ltp_media_source.sources.audio_visualizer import (
     AudioVisualizerSource,
     AudioVisualizerSourceConfig,
+)
+from ltp_media_source.visualizers import (
+    # Base classes
     Visualizer,
-    SimpleSpectrumVisualizer,
+    LinearVisualizer,
+    MatrixVisualizer,
+    # Color utilities
+    ColorMode,
+    # Linear visualizers
+    SpectrumBarsLinear,
+    VUMeterLinear,
+    WaveformLinear,
+    BeatPulseLinear,
+    BassFillLinear,
+    ChasingDotsLinear,
+    LevelMeterLinear,
+    # Matrix visualizers
+    SpectrumBarsMatrix,
+    SpectrogramMatrix,
+    BeatRipplesMatrix,
+    FrequencyHeatmapMatrix,
+    VUMeterBarMatrix,
+    WaveformScopeMatrix,
+    PlasmaMatrix,
+    # Factory
+    create_visualizer,
+    get_visualizer_names,
+    VISUALIZERS,
 )
 
 __all__ = [
@@ -37,6 +63,26 @@ __all__ = [
     "VideoLogicalSourceConfig",
     "AudioVisualizerSource",
     "AudioVisualizerSourceConfig",
+    # Phase 4: Visualizers
     "Visualizer",
-    "SimpleSpectrumVisualizer",
+    "LinearVisualizer",
+    "MatrixVisualizer",
+    "ColorMode",
+    "SpectrumBarsLinear",
+    "VUMeterLinear",
+    "WaveformLinear",
+    "BeatPulseLinear",
+    "BassFillLinear",
+    "ChasingDotsLinear",
+    "LevelMeterLinear",
+    "SpectrumBarsMatrix",
+    "SpectrogramMatrix",
+    "BeatRipplesMatrix",
+    "FrequencyHeatmapMatrix",
+    "VUMeterBarMatrix",
+    "WaveformScopeMatrix",
+    "PlasmaMatrix",
+    "create_visualizer",
+    "get_visualizer_names",
+    "VISUALIZERS",
 ]

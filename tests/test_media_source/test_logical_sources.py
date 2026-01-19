@@ -11,8 +11,11 @@ from ltp_media_source.sources.video_source import VideoLogicalSource, VideoLogic
 from ltp_media_source.sources.audio_visualizer import (
     AudioVisualizerSource,
     AudioVisualizerSourceConfig,
+)
+from ltp_media_source.visualizers import (
     Visualizer,
-    SimpleSpectrumVisualizer,
+    SpectrumBarsLinear,
+    SpectrumBarsMatrix,
 )
 from ltp_media_source.audio.analyzer import AudioAnalyzer
 from ltp_media_source.audio.beat_detector import BeatDetector
@@ -92,26 +95,26 @@ class MockSharedMediaContext:
         return False
 
 
-class TestSimpleSpectrumVisualizer:
-    """Tests for SimpleSpectrumVisualizer."""
+class TestSpectrumVisualizers:
+    """Tests for SpectrumBarsLinear and SpectrumBarsMatrix."""
 
     def test_init_linear(self):
         """Test linear visualizer initialization."""
-        viz = SimpleSpectrumVisualizer(width=60, height=1)
+        viz = SpectrumBarsLinear(width=60)
         assert viz.width == 60
         assert viz.height == 1
         assert viz.is_linear is True
 
     def test_init_matrix(self):
         """Test matrix visualizer initialization."""
-        viz = SimpleSpectrumVisualizer(width=16, height=16)
+        viz = SpectrumBarsMatrix(width=16, height=16)
         assert viz.width == 16
         assert viz.height == 16
         assert viz.is_linear is False
 
     def test_render_linear(self):
         """Test rendering linear visualization."""
-        viz = SimpleSpectrumVisualizer(width=32, height=1)
+        viz = SpectrumBarsLinear(width=32, smoothing=0.0)
         analyzer = AudioAnalyzer(smoothing=0.0)
 
         # Analyze some audio
@@ -126,7 +129,7 @@ class TestSimpleSpectrumVisualizer:
 
     def test_render_matrix(self):
         """Test rendering matrix visualization."""
-        viz = SimpleSpectrumVisualizer(width=16, height=8)
+        viz = SpectrumBarsMatrix(width=16, height=8, smoothing=0.0)
         analyzer = AudioAnalyzer(smoothing=0.0)
 
         samples = np.random.randn(2048).astype(np.float32)
@@ -139,7 +142,7 @@ class TestSimpleSpectrumVisualizer:
 
     def test_render_with_beat_detector(self):
         """Test rendering with beat detector."""
-        viz = SimpleSpectrumVisualizer(width=16, height=1)
+        viz = SpectrumBarsLinear(width=16, smoothing=0.0)
         analyzer = AudioAnalyzer(smoothing=0.0)
         beat_detector = BeatDetector()
 
@@ -156,7 +159,7 @@ class TestSimpleSpectrumVisualizer:
 
     def test_smoothing(self):
         """Test temporal smoothing."""
-        viz = SimpleSpectrumVisualizer(width=8, height=1, smoothing=0.5)
+        viz = SpectrumBarsLinear(width=8, smoothing=0.5)
         analyzer = AudioAnalyzer(smoothing=0.0)
 
         # First render with signal
@@ -288,7 +291,7 @@ class TestAudioVisualizerSource:
     def test_custom_visualizer(self):
         """Test using a custom visualizer."""
         context = MockSharedMediaContext()
-        custom_viz = SimpleSpectrumVisualizer(width=32, height=8)
+        custom_viz = SpectrumBarsMatrix(width=32, height=8)
 
         source = AudioVisualizerSource(
             context,
@@ -329,7 +332,7 @@ class TestAudioVisualizerSource:
         context = MockSharedMediaContext()
         source = AudioVisualizerSource(context)
 
-        new_viz = SimpleSpectrumVisualizer(width=32, height=4)
+        new_viz = SpectrumBarsMatrix(width=32, height=4)
         source.set_visualizer(new_viz)
 
         assert source.visualizer is new_viz
