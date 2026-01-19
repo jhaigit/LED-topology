@@ -659,23 +659,20 @@ class MultiChannelSource:
 
         logger.info(f"Created {len(self._channels)} channels")
 
-    def _handle_message(self, message: Message) -> Message | None:
+    async def _handle_message(self, message: Message) -> Message | None:
         """Handle control channel messages."""
         logger.debug(f"Handling message: {message.type}")
 
         if message.type == MessageType.CAPABILITY_REQUEST:
             return self._handle_capability_request(message)
         elif message.type == MessageType.SUBSCRIBE:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(self._handle_subscribe(message))
+            return await self._handle_subscribe(message)
         elif message.type == MessageType.STREAM_CONTROL:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(self._handle_stream_control(message))
+            return await self._handle_stream_control(message)
         elif message.type == MessageType.CONTROL_GET:
             return self._handle_control_get(message)
         elif message.type == MessageType.CONTROL_SET:
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(self._handle_control_set(message))
+            return await self._handle_control_set(message)
 
         return None
 
