@@ -859,7 +859,8 @@ class MultiChannelSource:
 
             try:
                 frame = await self._context.read_frame()
-                if frame is None and not self._context.loop:
+                if frame is None and not self._context.loop and not self._context.is_live:
+                    # End of media, non-looping (but not live sources like microphone)
                     logger.info("End of media reached")
                     break
             except Exception as e:

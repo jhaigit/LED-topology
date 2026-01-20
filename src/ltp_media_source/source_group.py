@@ -402,8 +402,8 @@ class MediaSourceGroup:
             # Read next frame (updates context and audio buffer)
             try:
                 frame = await self._context.read_frame()
-                if frame is None and not self._context.loop:
-                    # End of media, non-looping
+                if frame is None and not self._context.loop and not self._context.is_live:
+                    # End of media, non-looping (but not live sources like microphone)
                     logger.info("End of media reached")
                     break
             except Exception as e:
