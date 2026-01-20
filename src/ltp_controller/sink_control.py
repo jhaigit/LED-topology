@@ -23,7 +23,13 @@ from ltp_controller.virtual_sources.text_renderer import (
     ScrollDirection,
     hex_to_rgb,
 )
-from ltp_controller.virtual_sources.fonts import list_fonts, DEFAULT_FONT
+from ltp_controller.virtual_sources.fonts import (
+    list_fonts,
+    list_all_fonts,
+    DEFAULT_FONT,
+    is_ttf_font,
+    HAS_PIL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -492,10 +498,19 @@ class SinkController:
                 else:
                     background_color = tuple(background_color[:3])
 
-                # Get font
+                # Get font - supports both bitmap fonts and TTF fonts
                 font = data.get("font", DEFAULT_FONT)
+                ttf_size = data.get("ttf_size", 16)
+
+                # Validate font - accept bitmap fonts or TTF fonts
                 if font not in list_fonts():
-                    font = DEFAULT_FONT
+                    # Check if it's a TTF font
+                    if is_ttf_font(font) and HAS_PIL:
+                        # Build TTF font spec with size
+                        if ":" not in font:
+                            font = f"{font}:{ttf_size}"
+                    else:
+                        font = DEFAULT_FONT
 
                 # Get alignment
                 align_str = data.get("align", "left")
@@ -589,9 +604,12 @@ class SinkController:
             "dimensions": dimensions,
             "width": dimensions[0] if dimensions else 0,
             "height": dimensions[1] if len(dimensions) > 1 else 1,
-            "pixel_count": pixel_count,
-            "fonts": list_fonts(),
+            "pixels": pixel_count,  # For backwards compatibility
+            "type": "matrix" if len(dimensions) > 1 else "strip",  # For paint UI
+            "fonts": list_all_fonts(),  # Both bitmap and TTF fonts
+            "bitmap_fonts": list_fonts(),  # Just bitmap fonts
             "default_font": DEFAULT_FONT,
+            "has_ttf": HAS_PIL,
             "has_buffer": sink_id in self._paint_buffers,
         }
 

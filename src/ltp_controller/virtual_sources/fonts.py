@@ -2,9 +2,23 @@
 
 Provides pixel-perfect fonts optimized for low-resolution LED displays.
 Each character is defined as a list of bytes where each bit represents a pixel.
+
+Also supports TrueType font rendering via PIL/Pillow for access to system
+fonts at any size.
 """
 
 from typing import NamedTuple
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Check for PIL availability
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+    logger.debug("PIL not available - TrueType font support disabled")
 
 
 class FontInfo(NamedTuple):
@@ -434,3 +448,458 @@ def get_char_bitmap(char: str, font_name: str = DEFAULT_FONT) -> list[int] | Non
 
     # Return space for unknown characters
     return data.get(" ")
+
+
+# ============================================================================
+# TrueType Font Support (via PIL/Pillow)
+# ============================================================================
+
+# Cache for loaded TTF fonts
+_ttf_cache: dict[tuple[str, int], "ImageFont.FreeTypeFont"] = {}
+
+# Common system font locations
+SYSTEM_FONT_PATHS = [
+    "/usr/share/fonts",
+    "/usr/local/share/fonts",
+    "~/.fonts",
+    "~/.local/share/fonts",
+    "/System/Library/Fonts",  # macOS
+    "/Library/Fonts",  # macOS
+    "C:/Windows/Fonts",  # Windows
+]
+
+# Preferred fonts for LED displays (monospace or clean sans-serif)
+PREFERRED_TTF_FONTS = [
+    "DejaVuSansMono",
+    "DejaVuSans",
+    "LiberationMono",
+    "LiberationSans",
+    "FreeMono",
+    "FreeSans",
+    "NotoSansMono",
+    "NotoSans",
+    "DroidSansMono",
+    "DroidSans",
+    "Ubuntu Mono",
+    "Ubuntu",
+    "Roboto Mono",
+    "Roboto",
+    "monospace",
+    "sans-serif",
+]
+
+
+def list_system_fonts() -> list[str]:
+    """List available system TrueType fonts.
+
+    Returns:
+        List of font names that can be used with render_ttf_text()
+    """
+    if not HAS_PIL:
+        return []
+
+    import os
+    import glob
+
+    fonts = set()
+
+    for base_path in SYSTEM_FONT_PATHS:
+        expanded = os.path.expanduser(base_path)
+        if os.path.exists(expanded):
+            # Find TTF and OTF files
+            for pattern in ["**/*.ttf", "**/*.otf", "**/*.TTF", "**/*.OTF"]:
+                for font_path in glob.glob(os.path.join(expanded, pattern), recursive=True):
+                    # Extract font name from filename
+                    name = os.path.splitext(os.path.basename(font_path))[0]
+                    # Clean up common suffixes
+                    for suffix in ["-Regular", "-Bold", "-Italic", "-BoldItalic", "_Regular"]:
+                        if name.endswith(suffix):
+                            name = name[:-len(suffix)]
+                    fonts.add(name)
+
+    return sorted(fonts)
+
+
+def find_ttf_font(font_name: str) -> str | None:
+    """Find the path to a TrueType font by name.
+
+    Args:
+        font_name: Font name (e.g., "DejaVuSans") or path to .ttf file
+
+    Returns:
+        Full path to font file, or None if not found
+    """
+    if not HAS_PIL:
+        return None
+
+    import os
+    import glob
+
+    # If it's already a path to a file, use it directly
+    if os.path.isfile(font_name):
+        return font_name
+
+    # Search system font directories
+    for base_path in SYSTEM_FONT_PATHS:
+        expanded = os.path.expanduser(base_path)
+        if not os.path.exists(expanded):
+            continue
+
+        # Try exact match and common variations
+        variations = [
+            f"{font_name}.ttf",
+            f"{font_name}.otf",
+            f"{font_name}-Regular.ttf",
+            f"{font_name}-Regular.otf",
+            f"{font_name.replace(' ', '')}.ttf",
+            f"{font_name.replace(' ', '-')}.ttf",
+        ]
+
+        for pattern in ["**/*.ttf", "**/*.otf"]:
+            for font_path in glob.glob(os.path.join(expanded, pattern), recursive=True):
+                basename = os.path.basename(font_path)
+                if basename.lower() in [v.lower() for v in variations]:
+                    return font_path
+                # Also check if font name is in the filename
+                if font_name.lower().replace(" ", "") in basename.lower().replace("-", "").replace("_", ""):
+                    return font_path
+
+    return None
+
+
+def get_ttf_font(font_name: str, size: int) -> "ImageFont.FreeTypeFont | None":
+    """Get a TrueType font object, with caching.
+
+    Args:
+        font_name: Font name or path
+        size: Font size in pixels
+
+    Returns:
+        PIL ImageFont object, or None if not available
+    """
+    if not HAS_PIL:
+        return None
+
+    cache_key = (font_name, size)
+    if cache_key in _ttf_cache:
+        return _ttf_cache[cache_key]
+
+    # Try to find and load the font
+    font_path = find_ttf_font(font_name)
+
+    try:
+        if font_path:
+            font = ImageFont.truetype(font_path, size)
+        else:
+            # Try PIL's built-in font lookup
+            try:
+                font = ImageFont.truetype(font_name, size)
+            except OSError:
+                # Fall back to default font
+                logger.warning(f"Font '{font_name}' not found, using default")
+                font = ImageFont.load_default()
+    except Exception as e:
+        logger.warning(f"Failed to load font '{font_name}': {e}")
+        font = ImageFont.load_default()
+
+    _ttf_cache[cache_key] = font
+    return font
+
+
+def get_default_ttf_font() -> str | None:
+    """Get the name of a good default TrueType font for LED displays.
+
+    Returns:
+        Font name, or None if no suitable font found
+    """
+    if not HAS_PIL:
+        return None
+
+    for font_name in PREFERRED_TTF_FONTS:
+        if find_ttf_font(font_name):
+            return font_name
+
+    # Return first available system font
+    system_fonts = list_system_fonts()
+    return system_fonts[0] if system_fonts else None
+
+
+def render_ttf_text(
+    text: str,
+    font_name: str | None = None,
+    size: int = 16,
+    threshold: int = 128,
+) -> tuple[list[list[bool]], int, int]:
+    """Render text using a TrueType font to a bitmap.
+
+    Args:
+        text: Text to render
+        font_name: Font name or path (None for default)
+        size: Font size in pixels (height)
+        threshold: Grayscale threshold for converting to 1-bit (0-255)
+
+    Returns:
+        Tuple of (bitmap as 2D list of bools, width, height)
+    """
+    if not HAS_PIL:
+        raise RuntimeError("PIL/Pillow required for TrueType fonts. Install with: pip install Pillow")
+
+    if not text:
+        return [[]], 0, size
+
+    # Get font
+    if font_name is None:
+        font_name = get_default_ttf_font()
+    font = get_ttf_font(font_name, size)
+
+    if font is None:
+        raise RuntimeError(f"Could not load font: {font_name}")
+
+    # Measure text
+    bbox = font.getbbox(text)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    # Create image slightly larger to handle descenders/ascenders
+    img_width = text_width + 2
+    img_height = size + 4  # Use requested size as height
+
+    # Create grayscale image
+    img = Image.new("L", (img_width, img_height), 0)
+    draw = ImageDraw.Draw(img)
+
+    # Draw text (white on black), vertically centered
+    y_offset = (img_height - text_height) // 2 - bbox[1]
+    draw.text((1, y_offset), text, font=font, fill=255)
+
+    # Convert to bitmap using threshold
+    pixels = list(img.getdata())
+    bitmap = []
+    for y in range(img_height):
+        row = []
+        for x in range(img_width):
+            pixel = pixels[y * img_width + x]
+            row.append(pixel >= threshold)
+        bitmap.append(row)
+
+    return bitmap, img_width, img_height
+
+
+def render_ttf_text_to_numpy(
+    text: str,
+    font_name: str | None = None,
+    size: int = 16,
+    threshold: int = 128,
+):
+    """Render text using a TrueType font to a numpy boolean array.
+
+    Args:
+        text: Text to render
+        font_name: Font name or path (None for default)
+        size: Font size in pixels (height)
+        threshold: Grayscale threshold for converting to 1-bit (0-255)
+
+    Returns:
+        numpy array of shape (height, width) with boolean values
+    """
+    import numpy as np
+
+    bitmap, width, height = render_ttf_text(text, font_name, size, threshold)
+
+    if width == 0:
+        return np.zeros((height, 0), dtype=bool)
+
+    return np.array(bitmap, dtype=bool)
+
+
+def measure_ttf_text(
+    text: str,
+    font_name: str | None = None,
+    size: int = 16,
+) -> tuple[int, int]:
+    """Measure the pixel dimensions of TrueType rendered text.
+
+    Args:
+        text: Text to measure
+        font_name: Font name or path (None for default)
+        size: Font size in pixels
+
+    Returns:
+        Tuple of (width, height) in pixels
+    """
+    if not HAS_PIL:
+        return (0, size)
+
+    if not text:
+        return (0, size)
+
+    if font_name is None:
+        font_name = get_default_ttf_font()
+
+    font = get_ttf_font(font_name, size)
+    if font is None:
+        return (len(text) * size // 2, size)
+
+    bbox = font.getbbox(text)
+    return (bbox[2] - bbox[0] + 2, size + 4)
+
+
+def is_ttf_font(font_name: str) -> bool:
+    """Check if a font name refers to a TrueType font.
+
+    TrueType fonts are identified by having a size suffix like "DejaVuSans:16"
+    or being a path to a .ttf/.otf file.
+
+    Args:
+        font_name: Font name to check
+
+    Returns:
+        True if it's a TTF font specification
+    """
+    if ":" in font_name:
+        return True
+    if font_name.endswith((".ttf", ".otf", ".TTF", ".OTF")):
+        return True
+    # Check if it's a known TTF font name (not a bitmap font)
+    if font_name not in FONTS:
+        return find_ttf_font(font_name) is not None
+    return False
+
+
+def parse_ttf_font_spec(font_spec: str) -> tuple[str, int]:
+    """Parse a TTF font specification like "DejaVuSans:16".
+
+    Args:
+        font_spec: Font specification string
+
+    Returns:
+        Tuple of (font_name, size)
+    """
+    if ":" in font_spec:
+        parts = font_spec.rsplit(":", 1)
+        try:
+            size = int(parts[1])
+            return parts[0], size
+        except ValueError:
+            pass
+    return font_spec, 16  # Default size
+
+
+def get_recommended_ttf_fonts() -> list[str]:
+    """Get list of recommended TTF fonts that are available on this system.
+
+    Returns:
+        List of font names that are both recommended and installed
+    """
+    if not HAS_PIL:
+        return []
+
+    available = []
+    for font_name in PREFERRED_TTF_FONTS:
+        if find_ttf_font(font_name):
+            available.append(font_name)
+    return available
+
+
+def search_fonts(query: str) -> list[dict]:
+    """Search for fonts by name.
+
+    Args:
+        query: Search string (case-insensitive)
+
+    Returns:
+        List of matching font dicts
+    """
+    query = query.lower()
+    all_fonts = list_all_fonts()
+    return [f for f in all_fonts if query in f["name"].lower()]
+
+
+def list_all_fonts() -> list[dict]:
+    """List all available fonts (bitmap and TrueType).
+
+    Returns:
+        List of dicts with 'name', 'type', 'label', and 'recommended' fields
+    """
+    fonts = []
+
+    # Add bitmap fonts
+    for name, (info, _) in FONTS.items():
+        fonts.append({
+            "name": name,
+            "type": "bitmap",
+            "width": info.width,
+            "height": info.height,
+            "label": f"{name.upper()} ({info.width}x{info.height})",
+            "recommended": True,  # All bitmap fonts are recommended
+            "category": "bitmap",
+        })
+
+    # Add TrueType fonts
+    if HAS_PIL:
+        recommended = set(get_recommended_ttf_fonts())
+        system_fonts = list_system_fonts()
+
+        # Add recommended fonts first
+        for name in recommended:
+            fonts.append({
+                "name": name,
+                "type": "ttf",
+                "label": f"{name} (TTF) ★",
+                "recommended": True,
+                "category": "ttf_recommended",
+            })
+
+        # Add other system fonts (limit to avoid huge lists)
+        other_fonts = [f for f in system_fonts if f not in recommended]
+        for name in other_fonts[:30]:
+            fonts.append({
+                "name": name,
+                "type": "ttf",
+                "label": f"{name} (TTF)",
+                "recommended": False,
+                "category": "ttf_other",
+            })
+
+    return fonts
+
+
+def print_available_fonts() -> None:
+    """Print all available fonts to console (useful for CLI)."""
+    fonts = list_all_fonts()
+
+    print("\n=== Available Fonts ===\n")
+
+    # Bitmap fonts
+    bitmap = [f for f in fonts if f["type"] == "bitmap"]
+    if bitmap:
+        print("BITMAP FONTS (built-in):")
+        for f in bitmap:
+            print(f"  {f['name']:10} - {f['width']}x{f['height']} pixels")
+        print()
+
+    # Recommended TTF fonts
+    recommended = [f for f in fonts if f.get("category") == "ttf_recommended"]
+    if recommended:
+        print("RECOMMENDED TTF FONTS (good for LED displays):")
+        for f in recommended:
+            print(f"  {f['name']}")
+        print()
+
+    # Other TTF fonts
+    other = [f for f in fonts if f.get("category") == "ttf_other"]
+    if other:
+        print(f"OTHER SYSTEM FONTS ({len(other)} shown):")
+        for f in other:
+            print(f"  {f['name']}")
+        print()
+
+    if not HAS_PIL:
+        print("Note: TrueType fonts require PIL/Pillow.")
+        print("Install with: pip install Pillow")
+        print()
+
+    print("Usage:")
+    print("  Bitmap:  font='5x7' or font='8x13'")
+    print("  TTF:     font='DejaVuSans:16' (name:size)")
+    print()

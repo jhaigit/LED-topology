@@ -25,7 +25,14 @@ from ltp_controller.virtual_sources.text_renderer import (
     wrap_text,
     hex_to_rgb,
 )
-from ltp_controller.virtual_sources.fonts import list_fonts, DEFAULT_FONT
+from ltp_controller.virtual_sources.fonts import (
+    list_fonts,
+    list_all_fonts,
+    DEFAULT_FONT,
+    HAS_PIL,
+    is_ttf_font,
+    parse_ttf_font_spec,
+)
 
 
 class TextSource(VirtualSource):
@@ -61,17 +68,34 @@ class TextSource(VirtualSource):
             )
         )
 
-        # Font selection
+        # Font selection - include both bitmap and TTF fonts
+        font_options = []
+        for font_info in list_all_fonts():
+            font_options.append({
+                "value": font_info["name"],
+                "label": font_info["label"],
+            })
         self._controls.register(
             EnumControl(
                 id="font",
                 name="Font",
-                description="Font to use",
+                description="Font to use (TTF fonts require PIL)",
                 value=DEFAULT_FONT,
-                options=[
-                    {"value": f, "label": f.upper()}
-                    for f in list_fonts()
-                ],
+                options=font_options,
+                group="text",
+            )
+        )
+
+        # TTF font size (only applies to TrueType fonts)
+        self._controls.register(
+            NumberControl(
+                id="ttf_size",
+                name="TTF Size",
+                description="Font size for TrueType fonts (pixels)",
+                value=16.0,
+                min=6.0,
+                max=64.0,
+                step=1.0,
                 group="text",
             )
         )
@@ -257,6 +281,12 @@ class TextSource(VirtualSource):
     def _get_renderer(self, width: int, height: int) -> TextRenderer:
         """Get or create the text renderer."""
         font = self.get_control("font")
+
+        # For TTF fonts, append size to create font spec like "DejaVuSans:16"
+        if is_ttf_font(font) and ":" not in font:
+            ttf_size = int(self.get_control("ttf_size"))
+            font = f"{font}:{ttf_size}"
+
         text_color = hex_to_rgb(self.get_control("text_color"))
         bg_color = hex_to_rgb(self.get_control("background_color"))
 
@@ -381,9 +411,8 @@ class TextSource(VirtualSource):
             if scroll_mode in (ScrollDirection.LEFT, ScrollDirection.RIGHT):
                 total_distance = metrics.width + (width if self.get_control("scroll_gap") else 0)
             else:
-                from ltp_controller.virtual_sources.fonts import get_font
-                font_info, _ = get_font(renderer.font_name)
-                total_distance = font_info.height + (height if self.get_control("scroll_gap") else 0)
+                # Use metrics.height which works for both bitmap and TTF fonts
+                total_distance = metrics.height + (height if self.get_control("scroll_gap") else 0)
 
             if total_distance > 0:
                 # Pixels scrolled = time * speed * multiplier
@@ -473,17 +502,32 @@ class CounterSource(VirtualSource):
             )
         )
 
-        # Inherit text display controls
+        # Inherit text display controls - include TTF fonts
+        font_options = []
+        for font_info in list_all_fonts():
+            font_options.append({
+                "value": font_info["name"],
+                "label": font_info["label"],
+            })
         self._controls.register(
             EnumControl(
                 id="font",
                 name="Font",
                 description="Font to use",
                 value=DEFAULT_FONT,
-                options=[
-                    {"value": f, "label": f.upper()}
-                    for f in list_fonts()
-                ],
+                options=font_options,
+                group="text",
+            )
+        )
+        self._controls.register(
+            NumberControl(
+                id="ttf_size",
+                name="TTF Size",
+                description="Font size for TrueType fonts (pixels)",
+                value=16.0,
+                min=6.0,
+                max=64.0,
+                step=1.0,
                 group="text",
             )
         )
@@ -522,6 +566,14 @@ class CounterSource(VirtualSource):
 
         self._renderer: TextRenderer | None = None
 
+    def _get_font_spec(self) -> str:
+        """Get font specification, adding size for TTF fonts."""
+        font = self.get_control("font")
+        if is_ttf_font(font) and ":" not in font:
+            ttf_size = int(self.get_control("ttf_size"))
+            font = f"{font}:{ttf_size}"
+        return font
+
     def render(self, num_pixels: int, time_elapsed: float) -> np.ndarray:
         """Render counter display."""
         dims = self.config.output_dimensions
@@ -558,7 +610,7 @@ class CounterSource(VirtualSource):
         if self._renderer is None or self._renderer.width != width or self._renderer.height != height:
             self._renderer = TextRenderer(width, height)
 
-        self._renderer.set_font(self.get_control("font"))
+        self._renderer.set_font(self._get_font_spec())
         self._renderer.text_color = hex_to_rgb(self.get_control("text_color"))
         self._renderer.background_color = hex_to_rgb(self.get_control("background_color"))
         self._renderer.align = TextAlign(self.get_control("align"))
@@ -617,17 +669,32 @@ class ClockSource(VirtualSource):
             )
         )
 
-        # Text display controls
+        # Text display controls - include TTF fonts
+        font_options = []
+        for font_info in list_all_fonts():
+            font_options.append({
+                "value": font_info["name"],
+                "label": font_info["label"],
+            })
         self._controls.register(
             EnumControl(
                 id="font",
                 name="Font",
                 description="Font to use",
                 value=DEFAULT_FONT,
-                options=[
-                    {"value": f, "label": f.upper()}
-                    for f in list_fonts()
-                ],
+                options=font_options,
+                group="text",
+            )
+        )
+        self._controls.register(
+            NumberControl(
+                id="ttf_size",
+                name="TTF Size",
+                description="Font size for TrueType fonts (pixels)",
+                value=16.0,
+                min=6.0,
+                max=64.0,
+                step=1.0,
                 group="text",
             )
         )
@@ -651,6 +718,14 @@ class ClockSource(VirtualSource):
         )
 
         self._renderer: TextRenderer | None = None
+
+    def _get_font_spec(self) -> str:
+        """Get font specification, adding size for TTF fonts."""
+        font = self.get_control("font")
+        if is_ttf_font(font) and ":" not in font:
+            ttf_size = int(self.get_control("ttf_size"))
+            font = f"{font}:{ttf_size}"
+        return font
 
     def render(self, num_pixels: int, time_elapsed: float) -> np.ndarray:
         """Render clock display."""
@@ -697,7 +772,7 @@ class ClockSource(VirtualSource):
         if self._renderer is None or self._renderer.width != width or self._renderer.height != height:
             self._renderer = TextRenderer(width, height)
 
-        self._renderer.set_font(self.get_control("font"))
+        self._renderer.set_font(self._get_font_spec())
         self._renderer.text_color = hex_to_rgb(self.get_control("text_color"))
         self._renderer.background_color = hex_to_rgb(self.get_control("background_color"))
         self._renderer.align = TextAlign.CENTER

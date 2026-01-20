@@ -19,6 +19,11 @@ from ltp_controller.virtual_sources.fonts import (
     list_fonts,
     DEFAULT_FONT,
     FontInfo,
+    is_ttf_font,
+    parse_ttf_font_spec,
+    render_ttf_text_to_numpy,
+    measure_ttf_text,
+    HAS_PIL,
 )
 
 
@@ -63,11 +68,20 @@ def measure_text(text: str, font_name: str = DEFAULT_FONT) -> TextMetrics:
 
     Args:
         text: Text to measure
-        font_name: Font to use
+        font_name: Font to use (bitmap font name or TTF spec like "DejaVuSans:16")
 
     Returns:
         TextMetrics with width, height, and character count
     """
+    # Check if this is a TTF font
+    if is_ttf_font(font_name):
+        ttf_name, size = parse_ttf_font_spec(font_name)
+        if not text:
+            return TextMetrics(0, size, 0)
+        width, height = measure_ttf_text(text, ttf_name, size)
+        return TextMetrics(width, height, len(text))
+
+    # Bitmap font
     info, _ = get_font(font_name)
 
     if not text:
@@ -117,11 +131,19 @@ def render_text_to_pixels(
 
     Args:
         text: Text to render
-        font_name: Font to use
+        font_name: Font to use (bitmap font name or TTF spec like "DejaVuSans:16")
 
     Returns:
         2D boolean array (height, width) where True = pixel on
     """
+    # Check if this is a TTF font
+    if is_ttf_font(font_name):
+        ttf_name, size = parse_ttf_font_spec(font_name)
+        if not text:
+            return np.zeros((size, 0), dtype=bool)
+        return render_ttf_text_to_numpy(text, ttf_name, size)
+
+    # Bitmap font rendering
     if not text:
         info, _ = get_font(font_name)
         return np.zeros((info.height, 0), dtype=bool)
@@ -185,12 +207,22 @@ class TextRenderer:
         self.align = align
         self.vertical_align = vertical_align
 
-        self._font_info, _ = get_font(font_name)
+        # Initialize font info
+        if is_ttf_font(font_name):
+            _, size = parse_ttf_font_spec(font_name)
+            self._font_info = FontInfo(name=font_name, width=size // 2, height=size, spacing=0)
+        else:
+            self._font_info, _ = get_font(font_name)
 
     def set_font(self, font_name: str) -> None:
         """Change the font."""
         self.font_name = font_name
-        self._font_info, _ = get_font(font_name)
+        if is_ttf_font(font_name):
+            # For TTF fonts, create a pseudo FontInfo
+            _, size = parse_ttf_font_spec(font_name)
+            self._font_info = FontInfo(name=font_name, width=size // 2, height=size, spacing=0)
+        else:
+            self._font_info, _ = get_font(font_name)
 
     def set_colors(
         self,
@@ -513,6 +545,56 @@ class TextRenderer:
         return frame.reshape(-1, 3)
 
 
+def _wrap_text_ttf(text: str, max_width: int, font_spec: str) -> list[str]:
+    """Wrap text using a TTF font to fit within a maximum pixel width.
+
+    Args:
+        text: Text to wrap
+        max_width: Maximum width in pixels
+        font_spec: TTF font specification (e.g., "DejaVuSans:16")
+
+    Returns:
+        List of wrapped lines
+    """
+    ttf_name, size = parse_ttf_font_spec(font_spec)
+
+    lines = []
+    words = text.split()
+    current_line = ""
+
+    for word in words:
+        test_line = f"{current_line} {word}".strip() if current_line else word
+        test_width, _ = measure_ttf_text(test_line, ttf_name, size)
+
+        if test_width <= max_width:
+            current_line = test_line
+        else:
+            if current_line:
+                lines.append(current_line)
+            # Handle words longer than a line - break at character level
+            word_width, _ = measure_ttf_text(word, ttf_name, size)
+            if word_width > max_width:
+                # Break word character by character
+                current_word = ""
+                for char in word:
+                    test_word = current_word + char
+                    w, _ = measure_ttf_text(test_word, ttf_name, size)
+                    if w <= max_width:
+                        current_word = test_word
+                    else:
+                        if current_word:
+                            lines.append(current_word)
+                        current_word = char
+                current_line = current_word
+            else:
+                current_line = word
+
+    if current_line:
+        lines.append(current_line)
+
+    return lines if lines else [""]
+
+
 def wrap_text(text: str, max_width: int, font_name: str = DEFAULT_FONT) -> list[str]:
     """Wrap text to fit within a maximum pixel width.
 
@@ -524,6 +606,11 @@ def wrap_text(text: str, max_width: int, font_name: str = DEFAULT_FONT) -> list[
     Returns:
         List of wrapped lines
     """
+    # For TTF fonts, use pixel-based wrapping
+    if is_ttf_font(font_name):
+        return _wrap_text_ttf(text, max_width, font_name)
+
+    # Bitmap font wrapping
     info, _ = get_font(font_name)
     char_width = info.width + info.spacing
 
