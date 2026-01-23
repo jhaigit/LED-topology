@@ -112,6 +112,19 @@ struct {
     uint32_t startTime = 0;
 } stats;
 
+// Heartbeat LED - only available if LED_BUILTIN doesn't conflict with SPI clock
+// On Arduino Uno, LED_BUILTIN (pin 13) is also SCK, so we can't use it with hardware SPI
+#if defined(LED_BUILTIN) && (LED_BUILTIN != CLOCK_PIN || !USE_HARDWARE_SPI)
+    #define HEARTBEAT_ENABLED   true
+    #define HEARTBEAT_PIN       LED_BUILTIN
+#else
+    #define HEARTBEAT_ENABLED   false
+    #define HEARTBEAT_PIN       -1
+#endif
+#define HEARTBEAT_INTERVAL  500  // ms
+uint32_t lastHeartbeat = 0;
+bool heartbeatState = false;
+
 // Control definitions
 #define NUM_CONTROLS 7
 
@@ -997,6 +1010,12 @@ void setup() {
     // Initialize serial
     Serial.begin(SERIAL_BAUD);
 
+    // Initialize heartbeat LED (if available)
+    #if HEARTBEAT_ENABLED
+    pinMode(HEARTBEAT_PIN, OUTPUT);
+    digitalWrite(HEARTBEAT_PIN, LOW);
+    #endif
+
     // Load saved configuration
     loadConfig();
 
@@ -1020,7 +1039,21 @@ void setup() {
     sendHello();
 }
 
+void updateHeartbeat() {
+    #if HEARTBEAT_ENABLED
+    uint32_t now = millis();
+    if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+        lastHeartbeat = now;
+        heartbeatState = !heartbeatState;
+        digitalWrite(HEARTBEAT_PIN, heartbeatState ? HIGH : LOW);
+    }
+    #endif
+}
+
 void loop() {
+    // Update heartbeat LED
+    updateHeartbeat();
+
     // Process incoming serial data
     if (protocol.processInput()) {
         processPacket(protocol.getPacket());

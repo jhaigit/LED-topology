@@ -131,6 +131,12 @@ struct {
     uint32_t inputEventsCount = 0;
 } stats;
 
+// Heartbeat LED
+#define HEARTBEAT_PIN       LED_BUILTIN  // Pin 13 on Teensy
+#define HEARTBEAT_INTERVAL  500          // ms
+uint32_t lastHeartbeat = 0;
+bool heartbeatState = false;
+
 // ============================================================================
 // CONFIG PERSISTENCE
 // ============================================================================
@@ -967,6 +973,10 @@ void processPacket(const LtpPacket& pkt) {
 void setup() {
     Serial.begin(SERIAL_BAUD);
 
+    // Initialize heartbeat LED
+    pinMode(HEARTBEAT_PIN, OUTPUT);
+    digitalWrite(HEARTBEAT_PIN, LOW);
+
     // Load saved configuration
     loadConfig();
 
@@ -1002,7 +1012,19 @@ void setup() {
     sendHello();
 }
 
+void updateHeartbeat() {
+    uint32_t now = millis();
+    if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+        lastHeartbeat = now;
+        heartbeatState = !heartbeatState;
+        digitalWrite(HEARTBEAT_PIN, heartbeatState ? HIGH : LOW);
+    }
+}
+
 void loop() {
+    // Update heartbeat LED
+    updateHeartbeat();
+
     // Process serial protocol
     if (protocol.processInput()) {
         processPacket(protocol.getPacket());
