@@ -472,6 +472,7 @@ class SerialSink:
                     if result:
                         self._controls.set_value(control_id, applied_value)
                         applied[control_id] = applied_value
+                        logger.info(f"Set control {control_id}={applied_value}")
                     else:
                         errors[control_id] = "Failed to set on device"
                 except Exception as e:
@@ -482,6 +483,7 @@ class SerialSink:
                 try:
                     self._controls.set_value(control_id, value)
                     applied[control_id] = self._controls.get_value(control_id)
+                    logger.info(f"Set control {control_id}={applied[control_id]}")
                 except Exception as e:
                     errors[control_id] = str(e)
 

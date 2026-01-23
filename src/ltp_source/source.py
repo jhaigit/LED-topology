@@ -257,6 +257,9 @@ class Source:
         values = message.data.get("values", {})
         applied, errors = self._controls.set_values(values)
 
+        for control_id, value in applied.items():
+            logger.info(f"Set control {control_id}={value}")
+
         # Update pattern parameters
         if self._pattern:
             for key, value in applied.items():

@@ -274,6 +274,7 @@ class ArtNetSink:
             try:
                 self._controls.set_value(control_id, value)
                 applied[control_id] = self._controls.get_value(control_id)
+                logger.info(f"Set control {control_id}={applied[control_id]}")
             except Exception as e:
                 errors[control_id] = str(e)
 

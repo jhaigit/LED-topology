@@ -251,6 +251,9 @@ class Sink:
         values = message.data.get("values", {})
         applied, errors = self._controls.set_values(values)
 
+        for control_id, value in applied.items():
+            logger.info(f"Set control {control_id}={value}")
+
         status = "ok" if not errors else "partial"
         return control_set_response(message.seq, status, applied, errors or None)
 
