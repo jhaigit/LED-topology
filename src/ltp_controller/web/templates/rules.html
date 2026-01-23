@@ -1,0 +1,669 @@
+{% extends "base.html" %}
+
+{% block title %}Rules - LTP Controller{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Rules</h1>
+        <p class="subtitle">Input-triggered automation rules</p>
+    </div>
+    <button class="btn btn-primary" onclick="showCreateModal()">Create Rule</button>
+</div>
+
+{% if rules %}
+<div class="rules-list">
+    {% for rule in rules %}
+    <div class="rule-card {% if rule.enabled %}enabled{% else %}disabled{% endif %}" data-rule-id="{{ rule.id }}">
+        <div class="rule-header">
+            <div class="rule-toggle">
+                <input type="checkbox" id="toggle-{{ rule.id }}"
+                       {% if rule.enabled %}checked{% endif %}
+                       onchange="toggleRule('{{ rule.id }}', this.checked)">
+                <label for="toggle-{{ rule.id }}"></label>
+            </div>
+            <h3 class="rule-name">{{ rule.name }}</h3>
+            <div class="rule-actions">
+                <button class="btn btn-sm" onclick="editRule('{{ rule.id }}')">Edit</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteRule('{{ rule.id }}')">Delete</button>
+            </div>
+        </div>
+
+        <div class="rule-body">
+            <div class="rule-trigger">
+                <span class="label">When:</span>
+                <span class="trigger-desc">
+                    Input <strong>{{ rule.trigger.input_id }}</strong>
+                    on sink <strong>{{ rule.trigger.sink_id[:8] }}...</strong>
+                    {% if rule.trigger.comparison == 'changed_to' %}changes to{% endif %}
+                    {% if rule.trigger.comparison == 'changed_from' %}changes from{% endif %}
+                    {% if rule.trigger.comparison == 'eq' %}equals{% endif %}
+                    {% if rule.trigger.comparison == 'ne' %}does not equal{% endif %}
+                    <strong>{{ rule.trigger.value }}</strong>
+                </span>
+            </div>
+            <div class="rule-actions-list">
+                <span class="label">Then:</span>
+                <ul>
+                    {% for action in rule.actions %}
+                    <li>
+                        {% if action.type == 'set_local_mode' %}Set local mode to <strong>{{ action.value }}</strong> on <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                        {% if action.type == 'enable_route' %}Enable route <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                        {% if action.type == 'disable_route' %}Disable route <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                        {% if action.type == 'set_control' %}Set <strong>{{ action.control_id }}</strong> to <strong>{{ action.value }}</strong> on <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                        {% if action.type == 'enable_source' %}Enable source <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                        {% if action.type == 'disable_source' %}Disable source <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="rule-footer">
+            <span class="rule-stats">
+                Triggered {{ rule.trigger_count }} times
+                {% if rule.last_triggered %}
+                | Last: <span class="last-triggered" data-timestamp="{{ rule.last_triggered }}"></span>
+                {% endif %}
+            </span>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="empty-state-large">
+    <p>No rules configured.</p>
+    <p>Create a rule to trigger actions based on input events from sinks.</p>
+    <button class="btn btn-primary" onclick="showCreateModal()">Create First Rule</button>
+</div>
+{% endif %}
+
+<!-- Create/Edit Modal -->
+<div id="ruleModal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h2 id="modalTitle">Create Rule</h2>
+            <button class="close-btn" onclick="hideModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="ruleForm" onsubmit="submitRule(event)">
+                <input type="hidden" id="ruleId" value="">
+
+                <div class="form-group">
+                    <label for="ruleName">Rule Name</label>
+                    <input type="text" id="ruleName" required placeholder="e.g., Button 1 triggers effect">
+                </div>
+
+                <fieldset class="form-section">
+                    <legend>Trigger</legend>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="triggerType">Trigger Type</label>
+                            <select id="triggerType">
+                                <option value="input_change">Input Change (edge)</option>
+                                <option value="input_state">Input State (level)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="triggerComparison">Comparison</label>
+                            <select id="triggerComparison">
+                                <option value="changed_to">Changed To</option>
+                                <option value="changed_from">Changed From</option>
+                                <option value="eq">Equals</option>
+                                <option value="ne">Not Equals</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="triggerSink">Sink</label>
+                            <select id="triggerSink" onchange="loadSinkInputs()">
+                                <option value="">Select sink...</option>
+                                {% for sink in sinks %}
+                                <option value="{{ sink.id }}">{{ sink.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="triggerInput">Input</label>
+                            <select id="triggerInput">
+                                <option value="">Select input...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="triggerValue">Value</label>
+                            <input type="text" id="triggerValue" value="true" placeholder="true/false or number">
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset class="form-section">
+                    <legend>Actions</legend>
+                    <div id="actionsList">
+                        <!-- Actions will be added here -->
+                    </div>
+                    <button type="button" class="btn btn-sm" onclick="addAction()">+ Add Action</button>
+                </fieldset>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="ruleEnabled" checked>
+                        Rule enabled
+                    </label>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="hideModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Rule</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<style>
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1.5rem;
+}
+.page-header h1 { margin: 0; }
+.page-header .subtitle { margin: 0.25rem 0 0 0; color: var(--text-muted, #9ca3af); }
+
+.rules-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.rule-card {
+    background: var(--card-bg, #1f2937);
+    border: 1px solid var(--border-color, #374151);
+    border-radius: 8px;
+    padding: 1rem;
+}
+.rule-card.disabled {
+    opacity: 0.6;
+}
+.rule-card.enabled {
+    border-left: 3px solid var(--success-color, #10b981);
+}
+
+.rule-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+.rule-name {
+    flex: 1;
+    margin: 0;
+    font-size: 1.1rem;
+}
+.rule-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.rule-toggle input {
+    display: none;
+}
+.rule-toggle label {
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    background: var(--secondary-bg, #374151);
+    border-radius: 11px;
+    position: relative;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.rule-toggle label::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+.rule-toggle input:checked + label {
+    background: var(--success-color, #10b981);
+}
+.rule-toggle input:checked + label::after {
+    transform: translateX(18px);
+}
+
+.rule-body {
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border-color, #374151);
+    border-bottom: 1px solid var(--border-color, #374151);
+}
+.rule-trigger, .rule-actions-list {
+    margin-bottom: 0.5rem;
+}
+.rule-trigger .label, .rule-actions-list .label {
+    display: inline-block;
+    width: 50px;
+    color: var(--text-muted, #9ca3af);
+    font-size: 0.85rem;
+}
+.trigger-desc {
+    font-size: 0.9rem;
+}
+.rule-actions-list ul {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.rule-actions-list li {
+    display: inline;
+    font-size: 0.9rem;
+}
+.rule-actions-list li:not(:last-child)::after {
+    content: ', ';
+}
+
+.rule-footer {
+    padding-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-muted, #9ca3af);
+}
+
+/* Modal styles */
+.modal-large {
+    max-width: 700px;
+}
+.form-section {
+    border: 1px solid var(--border-color, #374151);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+.form-section legend {
+    padding: 0 0.5rem;
+    font-weight: 500;
+}
+.form-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.form-row .form-group {
+    flex: 1;
+    min-width: 150px;
+}
+.form-group {
+    margin-bottom: 1rem;
+}
+.form-group label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-size: 0.9rem;
+    color: var(--text-muted, #9ca3af);
+}
+.form-group input, .form-group select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color, #374151);
+    border-radius: 4px;
+    background: var(--secondary-bg, #374151);
+    color: var(--text-color, #fff);
+}
+.form-group input[type="checkbox"] {
+    width: auto;
+    margin-right: 0.5rem;
+}
+
+.action-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding: 0.75rem;
+    background: var(--secondary-bg, #374151);
+    border-radius: 4px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+.action-row select, .action-row input {
+    padding: 0.4rem;
+    border: 1px solid var(--border-color, #4b5563);
+    border-radius: 4px;
+    background: var(--card-bg, #1f2937);
+    color: var(--text-color, #fff);
+}
+.action-row .action-type { width: 160px; }
+.action-row .action-target { flex: 1; min-width: 150px; }
+.action-row .action-control { width: 120px; }
+.action-row .action-value { width: 100px; }
+.action-row .remove-btn {
+    background: var(--danger-color, #ef4444);
+    color: white;
+    border: none;
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color, #374151);
+    margin-top: 1rem;
+}
+
+.empty-state-large {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-muted, #9ca3af);
+}
+.empty-state-large p {
+    margin: 0.5rem 0;
+}
+.empty-state-large .btn {
+    margin-top: 1rem;
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Data from server
+const sinks = {{ sinks | tojson | safe }};
+const routes = {{ routes | tojson | safe }};
+const virtualSources = {{ virtual_sources | tojson | safe }};
+
+let editingRuleId = null;
+let actionCounter = 0;
+
+// Format timestamps
+document.querySelectorAll('.last-triggered').forEach(el => {
+    const ts = parseFloat(el.dataset.timestamp);
+    if (ts) {
+        el.textContent = new Date(ts * 1000).toLocaleString();
+    }
+});
+
+function showCreateModal() {
+    editingRuleId = null;
+    document.getElementById('modalTitle').textContent = 'Create Rule';
+    document.getElementById('ruleForm').reset();
+    document.getElementById('ruleId').value = '';
+    document.getElementById('actionsList').innerHTML = '';
+    addAction(); // Add one default action
+    document.getElementById('ruleModal').style.display = 'flex';
+}
+
+function hideModal() {
+    document.getElementById('ruleModal').style.display = 'none';
+}
+
+function editRule(ruleId) {
+    editingRuleId = ruleId;
+    document.getElementById('modalTitle').textContent = 'Edit Rule';
+
+    fetch(`/api/rules/${ruleId}`)
+        .then(r => r.json())
+        .then(rule => {
+            document.getElementById('ruleId').value = rule.id;
+            document.getElementById('ruleName').value = rule.name;
+            document.getElementById('triggerType').value = rule.trigger.type;
+            document.getElementById('triggerComparison').value = rule.trigger.comparison;
+            document.getElementById('triggerSink').value = rule.trigger.sink_id;
+            document.getElementById('triggerValue').value = rule.trigger.value;
+            document.getElementById('ruleEnabled').checked = rule.enabled;
+
+            // Load inputs for selected sink
+            loadSinkInputs().then(() => {
+                document.getElementById('triggerInput').value = rule.trigger.input_id;
+            });
+
+            // Load actions
+            document.getElementById('actionsList').innerHTML = '';
+            for (const action of rule.actions) {
+                addAction(action);
+            }
+
+            document.getElementById('ruleModal').style.display = 'flex';
+        });
+}
+
+function deleteRule(ruleId) {
+    if (!confirm('Delete this rule?')) return;
+
+    fetch(`/api/rules/${ruleId}`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                location.reload();
+            } else {
+                alert('Error: ' + (data.error || 'Unknown error'));
+            }
+        });
+}
+
+function toggleRule(ruleId, enabled) {
+    const endpoint = enabled ? 'enable' : 'disable';
+    fetch(`/api/rules/${ruleId}/${endpoint}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                alert('Error: ' + (data.error || 'Unknown error'));
+                location.reload();
+            }
+        });
+}
+
+async function loadSinkInputs() {
+    const sinkId = document.getElementById('triggerSink').value;
+    const inputSelect = document.getElementById('triggerInput');
+    inputSelect.innerHTML = '<option value="">Select input...</option>';
+
+    if (!sinkId) return;
+
+    try {
+        const resp = await fetch(`/api/sinks/${sinkId}/inputs`);
+        const data = await resp.json();
+
+        for (const input of data.inputs || []) {
+            const option = document.createElement('option');
+            option.value = input.input_id;
+            option.textContent = `${input.name} (${input.type})`;
+            inputSelect.appendChild(option);
+        }
+    } catch (err) {
+        console.error('Failed to load inputs:', err);
+    }
+}
+
+function addAction(action = null) {
+    const id = actionCounter++;
+    const container = document.getElementById('actionsList');
+
+    const row = document.createElement('div');
+    row.className = 'action-row';
+    row.id = `action-${id}`;
+
+    // Build sink options
+    let sinkOptions = '<option value="">Select sink...</option>';
+    for (const sink of sinks) {
+        sinkOptions += `<option value="${sink.id}">${sink.name}</option>`;
+    }
+
+    // Build route options
+    let routeOptions = '<option value="">Select route...</option>';
+    for (const route of routes) {
+        routeOptions += `<option value="${route.id}">${route.name}</option>`;
+    }
+
+    // Build source options
+    let sourceOptions = '<option value="">Select source...</option>';
+    for (const vs of virtualSources) {
+        sourceOptions += `<option value="${vs.id}">${vs.name}</option>`;
+    }
+
+    row.innerHTML = `
+        <select class="action-type" onchange="updateActionTargets(${id})">
+            <option value="set_local_mode">Set Local Mode</option>
+            <option value="enable_route">Enable Route</option>
+            <option value="disable_route">Disable Route</option>
+            <option value="set_control">Set Control</option>
+            <option value="enable_source">Enable Source</option>
+            <option value="disable_source">Disable Source</option>
+        </select>
+        <select class="action-target" data-type="sink">${sinkOptions}</select>
+        <input type="text" class="action-control" placeholder="Control ID" style="display:none;">
+        <input type="text" class="action-value" placeholder="Value">
+        <button type="button" class="remove-btn" onclick="removeAction(${id})">X</button>
+    `;
+
+    container.appendChild(row);
+
+    // Pre-fill if editing
+    if (action) {
+        row.querySelector('.action-type').value = action.type;
+        updateActionTargets(id);
+        row.querySelector('.action-target').value = action.target_id;
+        if (action.control_id) {
+            row.querySelector('.action-control').value = action.control_id;
+        }
+        if (action.value !== null && action.value !== undefined) {
+            row.querySelector('.action-value').value = action.value;
+        }
+    }
+}
+
+function removeAction(id) {
+    const row = document.getElementById(`action-${id}`);
+    if (row) row.remove();
+}
+
+function updateActionTargets(id) {
+    const row = document.getElementById(`action-${id}`);
+    const actionType = row.querySelector('.action-type').value;
+    const targetSelect = row.querySelector('.action-target');
+    const controlInput = row.querySelector('.action-control');
+    const valueInput = row.querySelector('.action-value');
+
+    // Build options based on action type
+    let options = '';
+    let targetType = 'sink';
+
+    if (actionType === 'enable_route' || actionType === 'disable_route') {
+        targetType = 'route';
+        options = '<option value="">Select route...</option>';
+        for (const route of routes) {
+            options += `<option value="${route.id}">${route.name}</option>`;
+        }
+        controlInput.style.display = 'none';
+        valueInput.style.display = 'none';
+    } else if (actionType === 'enable_source' || actionType === 'disable_source') {
+        targetType = 'source';
+        options = '<option value="">Select source...</option>';
+        for (const vs of virtualSources) {
+            options += `<option value="${vs.id}">${vs.name}</option>`;
+        }
+        controlInput.style.display = 'none';
+        valueInput.style.display = 'none';
+    } else if (actionType === 'set_control') {
+        targetType = 'sink';
+        options = '<option value="">Select sink...</option>';
+        for (const sink of sinks) {
+            options += `<option value="${sink.id}">${sink.name}</option>`;
+        }
+        controlInput.style.display = '';
+        valueInput.style.display = '';
+    } else {
+        // set_local_mode
+        targetType = 'sink';
+        options = '<option value="">Select sink...</option>';
+        for (const sink of sinks) {
+            options += `<option value="${sink.id}">${sink.name}</option>`;
+        }
+        controlInput.style.display = 'none';
+        valueInput.style.display = '';
+    }
+
+    targetSelect.innerHTML = options;
+    targetSelect.dataset.type = targetType;
+}
+
+function submitRule(event) {
+    event.preventDefault();
+
+    // Parse trigger value (try to convert to bool/number)
+    let triggerValue = document.getElementById('triggerValue').value;
+    if (triggerValue === 'true') triggerValue = true;
+    else if (triggerValue === 'false') triggerValue = false;
+    else if (!isNaN(parseFloat(triggerValue))) triggerValue = parseFloat(triggerValue);
+
+    // Collect actions
+    const actions = [];
+    document.querySelectorAll('.action-row').forEach(row => {
+        const actionType = row.querySelector('.action-type').value;
+        const targetId = row.querySelector('.action-target').value;
+        const controlId = row.querySelector('.action-control').value;
+        let value = row.querySelector('.action-value').value;
+
+        // Parse value
+        if (value === 'true') value = true;
+        else if (value === 'false') value = false;
+        else if (value !== '' && !isNaN(parseFloat(value))) value = parseFloat(value);
+        else if (value === '') value = null;
+
+        if (targetId) {
+            const action = { type: actionType, target_id: targetId };
+            if (controlId) action.control_id = controlId;
+            if (value !== null) action.value = value;
+            actions.push(action);
+        }
+    });
+
+    if (actions.length === 0) {
+        alert('Please add at least one action');
+        return;
+    }
+
+    const ruleData = {
+        name: document.getElementById('ruleName').value,
+        enabled: document.getElementById('ruleEnabled').checked,
+        trigger: {
+            type: document.getElementById('triggerType').value,
+            sink_id: document.getElementById('triggerSink').value,
+            input_id: parseInt(document.getElementById('triggerInput').value),
+            comparison: document.getElementById('triggerComparison').value,
+            value: triggerValue,
+        },
+        actions: actions,
+    };
+
+    const method = editingRuleId ? 'PUT' : 'POST';
+    const url = editingRuleId ? `/api/rules/${editingRuleId}` : '/api/rules';
+
+    fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ruleData),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            alert('Error: ' + data.error);
+        } else {
+            location.reload();
+        }
+    })
+    .catch(err => {
+        alert('Error: ' + err.message);
+    });
+}
+</script>
+{% endblock %}

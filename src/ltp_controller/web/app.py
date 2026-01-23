@@ -8,7 +8,10 @@ from typing import Any
 from flask import Flask, jsonify, render_template, request
 
 from ltp_controller.controller import Controller
+from ltp_controller.input_manager import InputEventManager
 from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngine
+from ltp_controller.rule_engine import RuleEngine
+from ltp_controller.rules import Action, ActionType, ComparisonOp, Trigger, TriggerType
 from ltp_controller.scalar_sources import ScalarSourceManager, SCALAR_SOURCE_TYPES
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager, VIRTUAL_SOURCE_TYPES
@@ -22,6 +25,8 @@ def create_app(
     sink_controller: SinkController | None = None,
     virtual_source_manager: VirtualSourceManager | None = None,
     scalar_source_manager: ScalarSourceManager | None = None,
+    input_manager: InputEventManager | None = None,
+    rule_engine: RuleEngine | None = None,
     event_loop: asyncio.AbstractEventLoop | None = None,
 ) -> Flask:
     """Create and configure the Flask application."""
@@ -40,6 +45,8 @@ def create_app(
     app.config["sink_controller"] = sink_controller
     app.config["virtual_source_manager"] = virtual_source_manager
     app.config["scalar_source_manager"] = scalar_source_manager
+    app.config["input_manager"] = input_manager
+    app.config["rule_engine"] = rule_engine
     app.config["event_loop"] = event_loop
 
     # Helper to run async code from sync Flask handlers
@@ -350,9 +357,14 @@ def create_app(
 
         # Get paint buffer if exists
         buffer = sink_controller._paint_buffers.get(sink_id)
-        if buffer is not None:
-            # Convert numpy array to list of lists
+        if buffer is not None and len(buffer) == pixel_count:
+            # Buffer size matches, use it
             pixels = buffer.tolist()
+        elif buffer is not None:
+            # Buffer size mismatch - return fresh black buffer and clear old one
+            # The mismatch will be handled when painting next
+            del sink_controller._paint_buffers[sink_id]
+            pixels = [[0, 0, 0] for _ in range(pixel_count)]
         else:
             # Return empty/black buffer
             pixels = [[0, 0, 0] for _ in range(pixel_count)]
@@ -568,6 +580,7 @@ def create_app(
         config = {
             "virtual_sources": virtual_source_manager.to_config() if virtual_source_manager else [],
             "routes": [],
+            "rules": rule_engine.to_config() if rule_engine else [],
         }
 
         # Export routes
@@ -593,6 +606,13 @@ def create_app(
             return jsonify({"error": "Virtual sources not available"}), 503
         return jsonify(virtual_source_manager.to_config())
 
+    @app.route("/api/config/rules/export")
+    def api_config_rules_export() -> Any:
+        """Export rules configuration."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+        return jsonify(rule_engine.to_config())
+
     @app.route("/api/config/save", methods=["POST"])
     def api_config_save() -> Any:
         """Save current configuration to file.
@@ -610,6 +630,7 @@ def create_app(
         config = {
             "virtual_sources": virtual_source_manager.to_config() if virtual_source_manager else [],
             "routes": [],
+            "rules": rule_engine.to_config() if rule_engine else [],
         }
 
         # Export routes
@@ -696,10 +717,13 @@ def create_app(
             width = dimensions[0]
             height = 1
 
-        # Get paint buffer if exists
-        pixels = sink_controller._paint_buffers.get(sink_id)
-        if pixels is None:
-            # Return empty preview
+        # Get paint buffer if exists and size matches
+        pixel_count = width * height
+        buffer = sink_controller._paint_buffers.get(sink_id)
+        if buffer is not None and len(buffer) == pixel_count:
+            pixels = buffer
+        else:
+            # Return empty preview if no buffer or size mismatch
             pixels = []
 
         return _generate_led_svg_2d(pixels, width, height)
@@ -1110,5 +1134,239 @@ def create_app(
 
         run_async(source.stop())
         return jsonify({"status": "ok"})
+
+    # ==================== Page: Rules ====================
+
+    @app.route("/rules")
+    def rules_page() -> str:
+        """Rules management page."""
+        return render_template(
+            "rules.html",
+            rules=rule_engine.rules if rule_engine else [],
+            sinks=controller.sinks,
+            routes=router.routes,
+            virtual_sources=virtual_source_manager.sources if virtual_source_manager else [],
+        )
+
+    # ==================== API: Inputs ====================
+
+    @app.route("/api/inputs")
+    def api_inputs() -> Any:
+        """Get all inputs grouped by sink."""
+        if not input_manager:
+            return jsonify({"error": "Input manager not available"}), 503
+
+        result = {}
+        for sink_id, inputs in input_manager.get_all_inputs().items():
+            # Get sink name for display
+            sink = controller.get_sink(sink_id)
+            sink_name = sink.name if sink else sink_id
+
+            result[sink_id] = {
+                "sink_id": sink_id,
+                "sink_name": sink_name,
+                "connected": input_manager.is_connected_to_sink(sink_id),
+                "inputs": [inp.to_dict() for inp in inputs],
+            }
+
+        return jsonify(result)
+
+    @app.route("/api/sinks/<sink_id>/inputs")
+    def api_sink_inputs(sink_id: str) -> Any:
+        """Get inputs for a specific sink."""
+        if not input_manager:
+            return jsonify({"error": "Input manager not available"}), 503
+
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+
+        inputs = input_manager.get_inputs_for_sink(sink_id)
+        return jsonify({
+            "sink_id": sink_id,
+            "sink_name": sink.name,
+            "connected": input_manager.is_connected_to_sink(sink_id),
+            "inputs": [inp.to_dict() for inp in inputs],
+        })
+
+    # ==================== API: Rules ====================
+
+    @app.route("/api/rules")
+    def api_rules_list() -> Any:
+        """List all rules."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+        return jsonify([r.to_dict() for r in rule_engine.rules])
+
+    @app.route("/api/rules", methods=["POST"])
+    def api_rules_create() -> Any:
+        """Create a new rule."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Validate required fields
+        if "name" not in data:
+            return jsonify({"error": "Missing 'name' field"}), 400
+        if "trigger" not in data:
+            return jsonify({"error": "Missing 'trigger' field"}), 400
+        if "actions" not in data or not data["actions"]:
+            return jsonify({"error": "Missing or empty 'actions' field"}), 400
+
+        try:
+            # Parse trigger
+            trigger_data = data["trigger"]
+            trigger = Trigger(
+                type=TriggerType(trigger_data.get("type", "input_change")),
+                sink_id=trigger_data["sink_id"],
+                input_id=trigger_data["input_id"],
+                comparison=ComparisonOp(trigger_data.get("comparison", "changed_to")),
+                value=trigger_data.get("value", True),
+            )
+
+            # Parse actions
+            actions = []
+            for action_data in data["actions"]:
+                actions.append(Action(
+                    type=ActionType(action_data["type"]),
+                    target_id=action_data["target_id"],
+                    control_id=action_data.get("control_id"),
+                    value=action_data.get("value"),
+                ))
+
+            # Create rule
+            rule = rule_engine.create_rule(
+                name=data["name"],
+                trigger=trigger,
+                actions=actions,
+                enabled=data.get("enabled", True),
+            )
+
+            return jsonify(rule.to_dict()), 201
+
+        except (KeyError, ValueError) as e:
+            return jsonify({"error": f"Invalid data: {e}"}), 400
+
+    @app.route("/api/rules/<rule_id>")
+    def api_rule_get(rule_id: str) -> Any:
+        """Get a specific rule."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+
+        rule = rule_engine.get_rule(rule_id)
+        if not rule:
+            return jsonify({"error": "Rule not found"}), 404
+
+        return jsonify(rule.to_dict())
+
+    @app.route("/api/rules/<rule_id>", methods=["PUT"])
+    def api_rule_update(rule_id: str) -> Any:
+        """Update a rule."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+
+        rule = rule_engine.get_rule(rule_id)
+        if not rule:
+            return jsonify({"error": "Rule not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        try:
+            # Parse optional trigger
+            trigger = None
+            if "trigger" in data:
+                trigger_data = data["trigger"]
+                trigger = Trigger(
+                    type=TriggerType(trigger_data.get("type", "input_change")),
+                    sink_id=trigger_data["sink_id"],
+                    input_id=trigger_data["input_id"],
+                    comparison=ComparisonOp(trigger_data.get("comparison", "changed_to")),
+                    value=trigger_data.get("value", True),
+                )
+
+            # Parse optional actions
+            actions = None
+            if "actions" in data:
+                actions = []
+                for action_data in data["actions"]:
+                    actions.append(Action(
+                        type=ActionType(action_data["type"]),
+                        target_id=action_data["target_id"],
+                        control_id=action_data.get("control_id"),
+                        value=action_data.get("value"),
+                    ))
+
+            # Update rule
+            updated_rule = rule_engine.update_rule(
+                rule_id,
+                name=data.get("name"),
+                trigger=trigger,
+                actions=actions,
+                enabled=data.get("enabled"),
+            )
+
+            return jsonify(updated_rule.to_dict())
+
+        except (KeyError, ValueError) as e:
+            return jsonify({"error": f"Invalid data: {e}"}), 400
+
+    @app.route("/api/rules/<rule_id>", methods=["DELETE"])
+    def api_rule_delete(rule_id: str) -> Any:
+        """Delete a rule."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+
+        if rule_engine.delete_rule(rule_id):
+            return jsonify({"status": "ok"})
+        return jsonify({"error": "Rule not found"}), 404
+
+    @app.route("/api/rules/<rule_id>/enable", methods=["POST"])
+    def api_rule_enable(rule_id: str) -> Any:
+        """Enable a rule."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+
+        if rule_engine.enable_rule(rule_id):
+            return jsonify({"status": "ok"})
+        return jsonify({"error": "Rule not found"}), 404
+
+    @app.route("/api/rules/<rule_id>/disable", methods=["POST"])
+    def api_rule_disable(rule_id: str) -> Any:
+        """Disable a rule."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+
+        if rule_engine.disable_rule(rule_id):
+            return jsonify({"status": "ok"})
+        return jsonify({"error": "Rule not found"}), 404
+
+    @app.route("/api/rules/action-types")
+    def api_rule_action_types() -> Any:
+        """List available action types."""
+        return jsonify([
+            {"type": t.value, "name": t.name.replace("_", " ").title()}
+            for t in ActionType
+        ])
+
+    @app.route("/api/rules/trigger-types")
+    def api_rule_trigger_types() -> Any:
+        """List available trigger types."""
+        return jsonify([
+            {"type": t.value, "name": t.name.replace("_", " ").title()}
+            for t in TriggerType
+        ])
+
+    @app.route("/api/rules/comparison-ops")
+    def api_rule_comparison_ops() -> Any:
+        """List available comparison operators."""
+        return jsonify([
+            {"value": c.value, "name": c.name.replace("_", " ").title()}
+            for c in ComparisonOp
+        ])
 
     return app

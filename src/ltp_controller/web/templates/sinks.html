@@ -93,6 +93,10 @@
         </div>
         {% endif %}
 
+        <div class="device-inputs" id="inputs-{{ sink.id }}">
+            <!-- Inputs will be loaded dynamically -->
+        </div>
+
         <div class="device-actions">
             <button class="btn btn-sm" onclick="refreshDevice('sink', '{{ sink.id }}')">Refresh</button>
             {% if sink.online %}
@@ -429,6 +433,64 @@ function refreshDiscovery() {
             }, 2000);
         });
 }
+
+// Load inputs for all sinks
+function loadAllInputs() {
+    fetch('/api/inputs')
+        .then(r => r.json())
+        .then(data => {
+            for (const [sinkId, sinkData] of Object.entries(data)) {
+                renderInputs(sinkId, sinkData);
+            }
+        })
+        .catch(err => console.error('Failed to load inputs:', err));
+}
+
+function renderInputs(sinkId, sinkData) {
+    const container = document.getElementById('inputs-' + sinkId);
+    if (!container) return;
+
+    const inputs = sinkData.inputs || [];
+    if (inputs.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    let html = '<h4>Inputs</h4><div class="input-list">';
+    for (const input of inputs) {
+        const valueClass = input.value === true ? 'input-value-true' :
+                          input.value === false ? 'input-value-false' : '';
+        const displayValue = typeof input.value === 'boolean' ?
+                            (input.value ? 'ON' : 'OFF') : input.value;
+        html += `
+            <div class="input-row" data-input-id="${input.input_id}">
+                <span class="input-name">${input.name}</span>
+                <span class="input-type">${input.type}</span>
+                <span class="input-value ${valueClass}">${displayValue}</span>
+            </div>
+        `;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+// Refresh inputs periodically
+let inputsRefreshInterval = null;
+
+function startInputsRefresh() {
+    loadAllInputs();
+    inputsRefreshInterval = setInterval(loadAllInputs, 2000);
+}
+
+function stopInputsRefresh() {
+    if (inputsRefreshInterval) {
+        clearInterval(inputsRefreshInterval);
+        inputsRefreshInterval = null;
+    }
+}
+
+// Start loading inputs when page loads
+document.addEventListener('DOMContentLoaded', startInputsRefresh);
 </script>
 <style>
 .page-header {
@@ -468,6 +530,54 @@ function refreshDiscovery() {
     background: var(--secondary-bg, #374151);
     color: var(--text-muted, #9ca3af);
     font-family: monospace;
+}
+.device-inputs {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-color, #333);
+}
+.device-inputs h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.9rem;
+    color: var(--text-muted, #9ca3af);
+}
+.input-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: var(--secondary-bg, #374151);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+.input-name {
+    flex: 1;
+    font-weight: 500;
+}
+.input-type {
+    color: var(--text-muted, #9ca3af);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+}
+.input-value {
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    background: var(--bg-tertiary, #1f2937);
+}
+.input-value-true {
+    background: var(--success-bg, #065f46);
+    color: var(--success-text, #34d399);
+}
+.input-value-false {
+    background: var(--bg-tertiary, #1f2937);
+    color: var(--text-muted, #9ca3af);
 }
 </style>
 {% endblock %}

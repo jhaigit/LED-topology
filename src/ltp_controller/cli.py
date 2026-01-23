@@ -13,7 +13,10 @@ from uuid import UUID
 import yaml
 
 from ltp_controller.controller import Controller
+from ltp_controller.input_manager import InputEventManager
 from ltp_controller.router import RouteMode, RouteTransform, RoutingEngine
+from ltp_controller.rule_engine import RuleEngine
+from ltp_controller.rules import Action, ActionType, ComparisonOp, Trigger, TriggerType
 from ltp_controller.scalar_sources import ScalarSourceManager, SCALAR_SOURCE_TYPES
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager
@@ -110,6 +113,8 @@ async def run_controller(
     sink_controller: SinkController,
     virtual_source_manager: VirtualSourceManager,
     scalar_source_manager: ScalarSourceManager | None = None,
+    input_manager: InputEventManager | None = None,
+    rule_engine: RuleEngine | None = None,
     web_enabled: bool = True,
     web_host: str = "0.0.0.0",
     web_port: int = 8080,
@@ -139,6 +144,15 @@ async def run_controller(
         if scalar_source_manager:
             await scalar_source_manager.start_all()
 
+        # Start input event manager
+        if input_manager:
+            await input_manager.start()
+
+        # Start rule engine
+        if rule_engine:
+            rule_engine.set_event_loop(loop)
+            rule_engine.start()
+
         # Start web interface in a separate thread
         web_thread = None
         if web_enabled:
@@ -149,6 +163,8 @@ async def run_controller(
                 controller, router, sink_controller,
                 virtual_source_manager=virtual_source_manager,
                 scalar_source_manager=scalar_source_manager,
+                input_manager=input_manager,
+                rule_engine=rule_engine,
                 event_loop=loop,
             )
 
@@ -166,6 +182,10 @@ async def run_controller(
 
     finally:
         # Cleanup
+        if rule_engine:
+            rule_engine.stop()
+        if input_manager:
+            await input_manager.stop()
         if scalar_source_manager:
             await scalar_source_manager.stop_all()
         virtual_source_manager.stop()
@@ -239,6 +259,23 @@ def main() -> int:
     # Create sink controller for direct fills
     sink_controller = SinkController(controller)
 
+    # Create input event manager
+    input_manager = InputEventManager(controller)
+
+    # Create rule engine (needs to be wired after all managers exist)
+    rule_engine = RuleEngine(
+        controller=controller,
+        router=router,
+        virtual_source_manager=virtual_source_manager,
+        input_manager=input_manager,
+    )
+
+    # Load pre-configured rules
+    rules_config = config.get("rules", [])
+    if rules_config:
+        rule_engine.load_from_config(rules_config)
+        logger.info(f"Loaded {len(rules_config)} rules from config")
+
     # Create scalar source manager
     scalar_source_manager = ScalarSourceManager()
 
@@ -294,6 +331,8 @@ def main() -> int:
                 sink_controller=sink_controller,
                 virtual_source_manager=virtual_source_manager,
                 scalar_source_manager=scalar_source_manager,
+                input_manager=input_manager,
+                rule_engine=rule_engine,
                 web_enabled=web_enabled,
                 web_host=web_host,
                 web_port=web_port,
