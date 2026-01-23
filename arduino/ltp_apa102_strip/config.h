@@ -5,7 +5,7 @@
  *
  * Hardware:
  *   - Teensy 3.2
- *   - 144 APA102 LEDs (data pin 3, clock pin 2)
+ *   - 143 APA102 LEDs (data pin 3, clock pin 2)
  *   - 2 buttons (pins 4 and 5, active low)
  *   - Motion detector (pin 16, active high on detection)
  */
@@ -14,11 +14,19 @@
 #define LTP_APA102_CONFIG_H
 
 // ============================================================================
+// LED DRIVER SELECTION
+// ============================================================================
+
+// Uncomment ONE of the following to select LED driver:
+#define USE_CUSTOM_APA102_DRIVER    // Use simple custom bit-banged driver
+// #define USE_FASTLED              // Use FastLED library
+
+// ============================================================================
 // LED CONFIGURATION
 // ============================================================================
 
 // Number of LEDs in the strip
-#define NUM_LEDS            144
+#define NUM_LEDS            143
 
 // APA102 pins (hardware SPI-like)
 #define LED_DATA_PIN        3

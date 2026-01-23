@@ -17,16 +17,20 @@
  */
 
 #include <EEPROM.h>
-#include <FastLED.h>
 #include "config.h"
 #include <ltp_protocol.h>
 
 // ============================================================================
-// LED ARRAY
+// LED DRIVER SELECTION
 // ============================================================================
 
-CRGB leds[NUM_LEDS];
-uint8_t globalBrightness = 255;
+#ifdef USE_FASTLED
+    #include <FastLED.h>
+    CRGB leds[NUM_LEDS];
+#else
+    #include "apa102_driver.h"
+    APA102Driver ledDriver(NUM_LEDS, LED_DATA_PIN, LED_CLOCK_PIN);
+#endif
 
 // ============================================================================
 // PROTOCOL HANDLER
@@ -132,10 +136,9 @@ struct {
 } stats;
 
 // Heartbeat LED
-#define HEARTBEAT_PIN       LED_BUILTIN  // Pin 13 on Teensy
-#define HEARTBEAT_INTERVAL  500          // ms
+#define HEARTBEAT_PIN       13
+#define HEARTBEAT_INTERVAL  500  // ms
 uint32_t lastHeartbeat = 0;
-bool heartbeatState = false;
 
 // ============================================================================
 // CONFIG PERSISTENCE
@@ -174,6 +177,8 @@ void resetConfig() {
 // LED DRIVER HELPERS
 // ============================================================================
 
+#ifdef USE_FASTLED
+
 void showLeds() {
     FastLED.show();
 }
@@ -205,6 +210,160 @@ void fillRange(uint16_t start, uint16_t end, uint8_t r, uint8_t g, uint8_t b) {
     for (uint16_t i = start; i < end; i++) {
         leds[i] = CRGB(r, g, b);
     }
+}
+
+void setBrightness(uint8_t brightness) {
+    FastLED.setBrightness(brightness);
+}
+
+#else  // USE_CUSTOM_APA102_DRIVER
+
+void showLeds() {
+    ledDriver.show();
+}
+
+void clearLeds() {
+    ledDriver.clear();
+}
+
+void setPixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b) {
+    ledDriver.setPixel(idx, r, g, b);
+}
+
+uint32_t getPixelColor(uint16_t idx) {
+    return ledDriver.getPixelColor(idx);
+}
+
+void fillAll(uint8_t r, uint8_t g, uint8_t b) {
+    ledDriver.fill(r, g, b);
+}
+
+void fillRange(uint16_t start, uint16_t end, uint8_t r, uint8_t g, uint8_t b) {
+    if (start >= NUM_LEDS) return;
+    if (end > NUM_LEDS) end = NUM_LEDS;
+    for (uint16_t i = start; i < end; i++) {
+        ledDriver.setPixel(i, r, g, b);
+    }
+}
+
+void setBrightness(uint8_t brightness) {
+    ledDriver.setBrightness(brightness);
+}
+
+#endif  // USE_FASTLED
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+#ifndef USE_FASTLED
+// These are only needed when not using FastLED (which provides them)
+
+uint8_t random8() {
+    return random(256);
+}
+
+uint8_t random8(uint8_t lim) {
+    return random(lim);
+}
+
+uint8_t random8(uint8_t min, uint8_t lim) {
+    return min + random(lim - min);
+}
+
+uint16_t random16() {
+    return random(65536);
+}
+
+uint16_t random16(uint16_t lim) {
+    return random(lim);
+}
+
+uint8_t qadd8(uint8_t a, uint8_t b) {
+    uint16_t sum = (uint16_t)a + (uint16_t)b;
+    return sum > 255 ? 255 : sum;
+}
+
+#endif  // !USE_FASTLED
+
+// HSV to RGB conversion (used by both drivers for local modes)
+void hsvToRgbRainbow(uint8_t h, uint8_t s, uint8_t v, uint8_t& r, uint8_t& g, uint8_t& b) {
+#ifdef USE_FASTLED
+    CHSV hsv(h, s, v);
+    CRGB rgb;
+    hsv2rgb_rainbow(hsv, rgb);
+    r = rgb.r;
+    g = rgb.g;
+    b = rgb.b;
+#else
+    if (s == 0) {
+        r = g = b = v;
+        return;
+    }
+
+    uint8_t region = h / 43;
+    uint8_t remainder = (h - (region * 43)) * 6;
+
+    uint8_t p = (v * (255 - s)) >> 8;
+    uint8_t q = (v * (255 - ((s * remainder) >> 8))) >> 8;
+    uint8_t t = (v * (255 - ((s * (255 - remainder)) >> 8))) >> 8;
+
+    switch (region) {
+        case 0:  r = v; g = t; b = p; break;
+        case 1:  r = q; g = v; b = p; break;
+        case 2:  r = p; g = v; b = t; break;
+        case 3:  r = p; g = q; b = v; break;
+        case 4:  r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+    }
+#endif
+}
+
+// Heat color palette (for fire effect)
+void heatColor(uint8_t temperature, uint8_t& r, uint8_t& g, uint8_t& b) {
+#ifdef USE_FASTLED
+    CRGB color = HeatColor(temperature);
+    r = color.r;
+    g = color.g;
+    b = color.b;
+#else
+    // Scale 'heat' down from 0-255 to 0-191
+    uint8_t t192 = (temperature > 0) ? ((uint16_t)temperature * 191 / 255) : 0;
+
+    // Calculate ramp up from
+    uint8_t heatramp = t192 & 0x3F; // 0..63
+    heatramp <<= 2; // scale up to 0..252
+
+    if (t192 > 0x80) {        // hottest (white)
+        r = 255;
+        g = 255;
+        b = heatramp;
+    } else if (t192 > 0x40) { // middle (yellow)
+        r = 255;
+        g = heatramp;
+        b = 0;
+    } else {                   // coolest (red)
+        r = heatramp;
+        g = 0;
+        b = 0;
+    }
+#endif
+}
+
+// Fade pixel toward black
+void fadePixelToBlack(uint16_t idx, uint8_t fadeAmount) {
+#ifdef USE_FASTLED
+    if (idx < NUM_LEDS) {
+        leds[idx].fadeToBlackBy(fadeAmount);
+    }
+#else
+    uint8_t r, g, b;
+    ledDriver.getPixel(idx, r, g, b);
+    r = (r > fadeAmount) ? r - fadeAmount : 0;
+    g = (g > fadeAmount) ? g - fadeAmount : 0;
+    b = (b > fadeAmount) ? b - fadeAmount : 0;
+    ledDriver.setPixel(idx, r, g, b);
+#endif
 }
 
 // ============================================================================
@@ -295,12 +454,7 @@ void checkIdleTimeout() {
 // ============================================================================
 
 void hsvToRgb(uint8_t h, uint8_t s, uint8_t v, uint8_t& r, uint8_t& g, uint8_t& b) {
-    CHSV hsv(h, s, v);
-    CRGB rgb;
-    hsv2rgb_rainbow(hsv, rgb);
-    r = rgb.r;
-    g = rgb.g;
-    b = rgb.b;
+    hsvToRgbRainbow(h, s, v, r, g, b);
 }
 
 void exitLocalMode() {
@@ -338,15 +492,15 @@ void updateCylon() {
 
     // Fade all pixels
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        leds[i].fadeToBlackBy(fadeAmount);
+        fadePixelToBlack(i, fadeAmount);
     }
 
     // Draw the eye
     for (uint8_t i = 0; i < eyeSize; i++) {
         int16_t pos = modePosition + i - eyeSize/2;
         if (pos >= 0 && pos < NUM_LEDS) {
-            uint8_t brightness = 255 - abs(i - eyeSize/2) * 40;
-            leds[pos] = CRGB(brightness, 0, 0);
+            uint8_t bright = 255 - abs(i - eyeSize/2) * 40;
+            setPixel(pos, bright, 0, 0);
         }
     }
 
@@ -363,8 +517,10 @@ void updateCylon() {
 }
 
 void updateRainbow() {
+    uint8_t r, g, b;
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = CHSV(modeHue + (i * 256 / NUM_LEDS), 255, 200);
+        hsvToRgbRainbow(modeHue + (i * 256 / NUM_LEDS), 255, 200, r, g, b);
+        setPixel(i, r, g, b);
     }
     modeHue++;
     showLeds();
@@ -393,8 +549,10 @@ void updateFire() {
     }
 
     // Map heat to colors
+    uint8_t r, g, b;
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        leds[i] = HeatColor(heat[i]);
+        heatColor(heat[i], r, g, b);
+        setPixel(i, r, g, b);
     }
 
     showLeds();
@@ -405,14 +563,16 @@ void updateSparkle() {
 
     // Fade all pixels
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
-        leds[i].fadeToBlackBy(fadeAmount);
+        fadePixelToBlack(i, fadeAmount);
     }
 
     // Add random sparkles
     uint8_t sparkleCount = NUM_LEDS > 200 ? 8 : 3;
+    uint8_t r, g, b;
     for (uint8_t i = 0; i < sparkleCount; i++) {
         uint16_t pos = random16(NUM_LEDS);
-        leds[pos] = CHSV(random8(), 200, 255);
+        hsvToRgbRainbow(random8(), 200, 255, r, g, b);
+        setPixel(pos, r, g, b);
     }
 
     showLeds();
@@ -422,10 +582,12 @@ void updateChase() {
     clearLeds();
 
     const uint8_t chaseLength = 8;
+    uint8_t r, g, b;
 
     for (uint8_t i = 0; i < chaseLength; i++) {
         uint16_t pos = (modePosition + i) % NUM_LEDS;
-        leds[pos] = CHSV(modeHue, 255, 255 - i * 25);
+        hsvToRgbRainbow(modeHue, 255, 255 - i * 25, r, g, b);
+        setPixel(pos, r, g, b);
     }
 
     modePosition = (modePosition + 1) % NUM_LEDS;
@@ -759,7 +921,7 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
     switch (controlId) {
         case CTRL_ID_BRIGHTNESS:
             config.brightness = payload[1];
-            FastLED.setBrightness(config.brightness);
+            setBrightness(config.brightness);
             break;
 
         case CTRL_ID_GAMMA:
@@ -950,13 +1112,13 @@ void processPacket(const LtpPacket& pkt) {
 
         case CMD_LOAD_CONFIG:
             loadConfig();
-            FastLED.setBrightness(config.brightness);
+            setBrightness(config.brightness);
             protocol.sendAck(CMD_LOAD_CONFIG);
             break;
 
         case CMD_RESET_CONFIG:
             resetConfig();
-            FastLED.setBrightness(config.brightness);
+            setBrightness(config.brightness);
             protocol.sendAck(CMD_RESET_CONFIG);
             break;
 
@@ -971,18 +1133,27 @@ void processPacket(const LtpPacket& pkt) {
 // ============================================================================
 
 void setup() {
-    Serial.begin(SERIAL_BAUD);
-
     // Initialize heartbeat LED
     pinMode(HEARTBEAT_PIN, OUTPUT);
-    digitalWrite(HEARTBEAT_PIN, LOW);
+
+    Serial.begin(SERIAL_BAUD);
+    // Wait for USB serial to be ready (up to 3 seconds)
+    uint32_t serialStart = millis();
+    while (!Serial && millis() - serialStart < 3000) {
+        delay(10);
+    }
 
     // Load saved configuration
     loadConfig();
 
-    // Initialize FastLED
-    FastLED.addLeds<LED_CHIPSET, LED_DATA_PIN, LED_CLOCK_PIN, LED_COLOR_ORDER>(leds, NUM_LEDS);
-    FastLED.setBrightness(config.brightness);
+    // Initialize LED driver
+#ifdef USE_FASTLED
+    FastLED.addLeds<APA102, LED_DATA_PIN, LED_CLOCK_PIN, BGR>(leds, NUM_LEDS);
+#else
+    ledDriver.begin();
+#endif
+
+    setBrightness(config.brightness);
     clearLeds();
     showLeds();
 
@@ -993,15 +1164,14 @@ void setup() {
     lastActivityTime = millis();
     stats.startTime = lastActivityTime;
 
-    // Brief startup indicator
-    for (int i = 0; i < 3; i++) {
-        fill_solid(leds, min(10, NUM_LEDS), CRGB(0, 32, 0));  // Dim green
-        showLeds();
-        delay(100);
-        clearLeds();
-        showLeds();
-        delay(100);
+    // Brief startup indicator - green flash on first 10 LEDs
+    for (uint16_t i = 0; i < min((uint16_t)10, (uint16_t)NUM_LEDS); i++) {
+        setPixel(i, 0, 32, 0);
     }
+    showLeds();
+    delay(200);
+    clearLeds();
+    showLeds();
 
     // Start local mode if configured
     if (config.localMode != LOCAL_MODE_BLANK) {
@@ -1012,18 +1182,13 @@ void setup() {
     sendHello();
 }
 
-void updateHeartbeat() {
+void loop() {
+    // Heartbeat LED
     uint32_t now = millis();
     if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
         lastHeartbeat = now;
-        heartbeatState = !heartbeatState;
-        digitalWrite(HEARTBEAT_PIN, heartbeatState ? HIGH : LOW);
+        digitalWrite(HEARTBEAT_PIN, !digitalRead(HEARTBEAT_PIN));
     }
-}
-
-void loop() {
-    // Update heartbeat LED
-    updateHeartbeat();
 
     // Process serial protocol
     if (protocol.processInput()) {
