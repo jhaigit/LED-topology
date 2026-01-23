@@ -18,6 +18,9 @@ from ltp_controller.rules import (
 )
 from ltp_controller.virtual_sources import VirtualSourceManager
 
+# Standard control ID for local mode (from ltp_serial_cli.protocol)
+CTRL_ID_LOCAL_MODE = 6
+
 logger = logging.getLogger(__name__)
 
 
@@ -289,15 +292,15 @@ class RuleEngine:
             logger.warning(f"Sink not found for SET_LOCAL_MODE: {action.target_id}")
             return
 
-        # local_mode control is common on LTP sinks
-        control_id = action.control_id or "local_mode"
+        # Use numeric control ID for local_mode (standard LTP control ID 6)
+        control_id = CTRL_ID_LOCAL_MODE
         value = action.value if action.value is not None else 0
 
         success = await self.controller.set_device_control(sink, control_id, value)
         if success:
-            logger.info(f"Set {control_id}={value} on sink {sink.name}")
+            logger.info(f"Set local_mode={value} on sink {sink.name}")
         else:
-            logger.warning(f"Failed to set {control_id} on sink {sink.name}")
+            logger.warning(f"Failed to set local_mode on sink {sink.name}")
 
     async def _action_enable_route(self, action: Action) -> None:
         """Enable a route."""
