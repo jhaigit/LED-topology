@@ -518,7 +518,7 @@ function addAction(action = null) {
             <option value="disable_source">Disable Source</option>
         </select>
         <select class="action-target" data-type="sink" onchange="loadSinkControls(${id})">${sinkOptions}</select>
-        <select class="action-control" style="display:none;"><option value="">Select control...</option></select>
+        <select class="action-control"><option value="">Select control...</option></select>
         <input type="text" class="action-value" placeholder="Value">
         <button type="button" class="remove-btn" onclick="removeAction(${id})">X</button>
     `;
@@ -543,6 +543,9 @@ function addAction(action = null) {
         if (action.value !== null && action.value !== undefined) {
             row.querySelector('.action-value').value = action.value;
         }
+    } else {
+        // For new actions, initialize UI state (set_control is default)
+        updateActionTargets(id);
     }
 }
 
@@ -612,9 +615,11 @@ async function loadSinkControls(actionId) {
 
         let options = '<option value="">Select control...</option>';
         for (const ctrl of data.controls || []) {
-            const name = ctrl.name || ctrl.id;
-            const displayName = name.replace('hw_', '');
-            options += `<option value="${name}">${displayName}</option>`;
+            // ctrl.id is the control identifier (e.g., "hw_local_mode")
+            // ctrl.name is the display name (e.g., "Local Mode")
+            const ctrlId = ctrl.id;
+            const displayName = ctrl.name || ctrlId.replace('hw_', '');
+            options += `<option value="${ctrlId}">${displayName}</option>`;
         }
         controlSelect.innerHTML = options;
     } catch (err) {
