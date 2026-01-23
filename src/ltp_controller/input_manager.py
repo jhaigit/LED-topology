@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Any, Callable
 
-from libltp import ControlClient, Message, MessageType
+from libltp import ControlClient, Message, MessageType, capability_request
 
 from ltp_controller.controller import Controller, DeviceState
 from ltp_controller.rules import InputState
@@ -144,8 +144,48 @@ class InputEventManager:
                 self._connections[sink_id] = client
                 logger.info(f"Connected to sink {sink.name} for input events")
 
+                # Query initial input states from capability response
+                await self._query_initial_inputs(sink_id, client)
+
             except Exception as e:
                 logger.warning(f"Failed to connect to sink {sink.name} for input events: {e}")
+
+    async def _query_initial_inputs(self, sink_id: str, client: ControlClient) -> None:
+        """Query sink capabilities to get initial input states."""
+        try:
+            cap_req = capability_request(0)
+            cap_resp = await client.request(cap_req, timeout=5.0)
+
+            if "device" not in cap_resp.data:
+                return
+
+            device = cap_resp.data["device"]
+            inputs = device.get("inputs", [])
+
+            if not inputs:
+                return
+
+            # Populate initial input states
+            if sink_id not in self._input_states:
+                self._input_states[sink_id] = {}
+
+            for inp in inputs:
+                input_id = inp.get("id")
+                if input_id is None:
+                    continue
+
+                self._input_states[sink_id][input_id] = InputState(
+                    input_id=input_id,
+                    name=inp.get("name", f"Input {input_id}"),
+                    input_type=inp.get("type", "unknown"),
+                    value=inp.get("value"),
+                    timestamp=None,
+                )
+
+            logger.info(f"Loaded {len(inputs)} initial inputs from sink {sink_id}")
+
+        except Exception as e:
+            logger.debug(f"Failed to query initial inputs from {sink_id}: {e}")
 
     async def _disconnect_from_sink(self, sink_id: str) -> None:
         """Disconnect from a sink."""
