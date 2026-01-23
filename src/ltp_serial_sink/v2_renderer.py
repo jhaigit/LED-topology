@@ -287,14 +287,22 @@ class V2Renderer:
         # Parse value from data
         value = bool(data[0]) if data else False
 
-        # Update stored input state
+        # Update stored input state or create new entry
         if input_id in self._inputs:
             self._inputs[input_id].value = value
             input_name = self._inputs[input_id].name
             input_type_name = self._inputs[input_id].input_type
         else:
-            input_name = f"input_{input_id}"
+            # Create new input entry for inputs not reported in capabilities
             input_type_name = INPUT_TYPE_NAMES.get(input_type, "unknown")
+            input_name = f"input_{input_id}"
+            self._inputs[input_id] = DeviceInput(
+                id=input_id,
+                name=input_name,
+                input_type=input_type_name,
+                value=value,
+            )
+            logger.info(f"Discovered new input: {input_name} ({input_type_name})")
 
         logger.debug(f"Input event: {input_name} ({input_type_name}) = {value}")
 

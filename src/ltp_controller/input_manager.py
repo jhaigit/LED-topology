@@ -152,40 +152,53 @@ class InputEventManager:
 
     async def _query_initial_inputs(self, sink_id: str, client: ControlClient) -> None:
         """Query sink capabilities to get initial input states."""
-        try:
-            cap_req = capability_request(0)
-            cap_resp = await client.request(cap_req, timeout=5.0)
+        inputs = []
 
-            if "device" not in cap_resp.data:
-                return
+        # First try to get inputs from the controller's cached capabilities
+        sink = self.controller.get_sink(sink_id)
+        if sink and sink.capabilities:
+            inputs = sink.capabilities.get("inputs", [])
+            if inputs:
+                logger.debug(f"Using {len(inputs)} cached inputs from controller for {sink_id}")
 
-            device = cap_resp.data["device"]
-            inputs = device.get("inputs", [])
+        # If no cached inputs, query the sink directly
+        if not inputs:
+            try:
+                cap_req = capability_request(0)
+                cap_resp = await client.request(cap_req, timeout=5.0)
 
-            if not inputs:
-                return
+                if "device" in cap_resp.data:
+                    device = cap_resp.data["device"]
+                    inputs = device.get("inputs", [])
+                    if inputs:
+                        logger.debug(f"Queried {len(inputs)} inputs from sink {sink_id}")
+                    else:
+                        logger.debug(f"Sink {sink_id} has no inputs in capability response")
 
-            # Populate initial input states
-            if sink_id not in self._input_states:
-                self._input_states[sink_id] = {}
+            except Exception as e:
+                logger.warning(f"Failed to query inputs from {sink_id}: {e}")
 
-            for inp in inputs:
-                input_id = inp.get("id")
-                if input_id is None:
-                    continue
+        if not inputs:
+            return
 
-                self._input_states[sink_id][input_id] = InputState(
-                    input_id=input_id,
-                    name=inp.get("name", f"Input {input_id}"),
-                    input_type=inp.get("type", "unknown"),
-                    value=inp.get("value"),
-                    timestamp=None,
-                )
+        # Populate initial input states
+        if sink_id not in self._input_states:
+            self._input_states[sink_id] = {}
 
-            logger.info(f"Loaded {len(inputs)} initial inputs from sink {sink_id}")
+        for inp in inputs:
+            input_id = inp.get("id")
+            if input_id is None:
+                continue
 
-        except Exception as e:
-            logger.debug(f"Failed to query initial inputs from {sink_id}: {e}")
+            self._input_states[sink_id][input_id] = InputState(
+                input_id=input_id,
+                name=inp.get("name", f"Input {input_id}"),
+                input_type=inp.get("type", "unknown"),
+                value=inp.get("value"),
+                timestamp=None,
+            )
+
+        logger.info(f"Loaded {len(inputs)} initial inputs for sink {sink_id}")
 
     async def _disconnect_from_sink(self, sink_id: str) -> None:
         """Disconnect from a sink."""
@@ -208,6 +221,11 @@ class InputEventManager:
                     await self._connect_to_sink(sink)
                 elif not self._connections[sink_id].is_connected:
                     await self._connect_to_sink(sink)
+                # Also check if we have inputs for connected sinks that we might have missed
+                elif sink_id not in self._input_states or not self._input_states[sink_id]:
+                    # Try to load inputs from controller's cached capabilities
+                    if sink.capabilities and sink.capabilities.get("inputs"):
+                        await self._query_initial_inputs(sink_id, self._connections[sink_id])
 
     def _handle_message(self, sink_id: str, message: Message) -> None:
         """Handle incoming messages from a sink."""
