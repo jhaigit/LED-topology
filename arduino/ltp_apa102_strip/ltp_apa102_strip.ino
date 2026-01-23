@@ -980,7 +980,13 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
             break;
 
         case CTRL_ID_LOCAL_MODE:
-            startLocalMode(payload[1]);
+            // Validate mode value: 0-5 are valid modes, 255 is cycle mode
+            if (payload[1] < LOCAL_MODE_COUNT || payload[1] == LOCAL_MODE_CYCLE) {
+                startLocalMode(payload[1]);
+            } else {
+                protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
+                return;
+            }
             break;
 
         default:
