@@ -182,6 +182,9 @@ class DeviceStats:
 # Type alias for input event callback
 InputEventCallback = Callable[[int, int, int, bytes], None]
 
+# Type alias for device reset callback (called when device sends unsolicited HELLO)
+ResetCallback = Callable[[], None]
+
 
 class LtpDevice:
     """
@@ -230,11 +233,13 @@ class LtpDevice:
 
         # For async input events
         self._input_callback: Optional[InputEventCallback] = None
+        self._reset_callback: Optional[ResetCallback] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._stop_reader = threading.Event()
         self._response_queue: list[LtpPacket] = []
         self._response_lock = threading.Lock()
         self._response_event = threading.Event()
+        self._connected_once = False  # Track if we've connected at least once
 
     @property
     def info(self) -> Optional[DeviceInfo]:
@@ -303,6 +308,7 @@ class LtpDevice:
                 except LtpTimeoutError:
                     pass  # Strip info optional
 
+        self._connected_once = True
         return self._info
 
     def close(self):
@@ -618,6 +624,16 @@ class LtpDevice:
         """
         self._input_callback = callback
 
+    def set_reset_callback(self, callback: Optional[ResetCallback]):
+        """
+        Set callback for device reset detection.
+
+        Called when the device sends an unsolicited HELLO packet, which
+        indicates the device has reset/restarted. This allows the host
+        to refresh control values and other state.
+        """
+        self._reset_callback = callback
+
     # =========================================================================
     # Internal Methods
     # =========================================================================
@@ -687,6 +703,17 @@ class LtpDevice:
         """Handle a received packet."""
         if self.debug:
             self._debug_rx(packet)
+
+        # Handle device reset detection (unsolicited HELLO after initial connection)
+        if packet.cmd == CMD_HELLO and self._connected_once:
+            # Device has reset - update info and notify callback
+            self._info = self._parse_hello(packet)
+            if self._reset_callback:
+                try:
+                    self._reset_callback()
+                except Exception:
+                    pass  # Don't let callback errors crash the reader thread
+            return
 
         # Handle async events
         if packet.cmd == CMD_INPUT_EVENT:

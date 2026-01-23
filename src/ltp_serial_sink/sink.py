@@ -272,6 +272,11 @@ class SerialSink:
         # Setup input event callback
         self._renderer.set_input_event_callback(self._handle_input_event)
 
+    def _on_device_reset(self) -> None:
+        """Handle device reset detection - refresh controls from device."""
+        logger.info("Device reset detected, refreshing controls")
+        self._setup_device_controls()
+
     def _handle_input_event(
         self,
         input_id: int,
@@ -470,6 +475,23 @@ class SerialSink:
                         applied_value = device_value
 
                     if result:
+                        # Query actual value from device to confirm what was set
+                        # (device may reject invalid values like out-of-range local_mode)
+                        actual_value = self._renderer.get_control(device_ctrl_id)
+                        if actual_value is not None:
+                            # Convert back to the appropriate type for the control
+                            if device_ctrl.control_type == "bool":
+                                applied_value = bool(actual_value)
+                            elif device_ctrl.name == "gamma":
+                                applied_value = float(actual_value) / 10.0
+                            elif device_ctrl.control_type == "enum":
+                                if actual_value == 255 and "cycle" in device_ctrl.enum_values:
+                                    applied_value = "cycle"
+                                elif actual_value < len(device_ctrl.enum_values):
+                                    applied_value = device_ctrl.enum_values[actual_value]
+                            else:
+                                applied_value = int(actual_value)
+
                         self._controls.set_value(control_id, applied_value)
                         applied[control_id] = applied_value
                         logger.info(f"Set control {control_id}={applied_value}")
@@ -616,6 +638,9 @@ class SerialSink:
                     self._renderer.open()
                     logger.info(f"Serial device connected via v2 protocol")
                     reconnect_delay = 1.0
+
+                    # Set up reset callback to refresh controls when device resets
+                    self._renderer.set_reset_callback(self._on_device_reset)
 
                     # Update config from device on connect/reconnect
                     self._update_from_device()

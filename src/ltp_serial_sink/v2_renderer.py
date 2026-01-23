@@ -127,6 +127,9 @@ class V2Renderer:
         # External callback for input events
         self._input_event_callback: InputEventCallback | None = None
 
+        # External callback for device reset
+        self._reset_callback: Any = None
+
     def is_connected(self) -> bool:
         """Check if device is connected."""
         return self._connected and self._device is not None and self._device.is_connected
@@ -168,6 +171,9 @@ class V2Renderer:
 
                 # Set up input event callback
                 self._device.set_input_callback(self._handle_input_event)
+
+                # Set up reset detection callback
+                self._device.set_reset_callback(self._handle_device_reset)
 
             # Configure device for streaming
             if self.config.auto_show:
@@ -328,6 +334,31 @@ class V2Renderer:
         The callback receives: (input_id, input_name, input_type, value, timestamp)
         """
         self._input_event_callback = callback
+
+    def _handle_device_reset(self) -> None:
+        """Handle device reset detection (unsolicited HELLO)."""
+        logger.info("Device reset detected, refreshing controls and inputs")
+
+        # Refresh device info
+        self._device_info = self._device.info if self._device else None
+
+        # Re-populate controls with fresh values from device
+        self._populate_controls()
+        self._populate_inputs()
+
+        # Notify external callback if set
+        if self._reset_callback:
+            try:
+                self._reset_callback()
+            except Exception as e:
+                logger.warning(f"Reset callback error: {e}")
+
+    def set_reset_callback(self, callback: Any) -> None:
+        """Set callback for device reset detection.
+
+        Called when the device resets and control values may have changed.
+        """
+        self._reset_callback = callback
 
     def close(self) -> None:
         """Close connection to the device."""
