@@ -161,12 +161,15 @@ class SerialSink:
             current_value = self._renderer.get_control(ctrl_id)
 
             # Create appropriate control type based on device control type
+            # Use the device's control name directly (no hardcoded transformation)
+            ctrl_name = device_ctrl.name
+
             if device_ctrl.control_type == "bool":
                 self._controls.register(
                     BooleanControl(
                         id=f"hw_{device_ctrl.name}",
-                        name=f"Hardware {device_ctrl.name.replace('_', ' ').title()}",
-                        description=f"Device control: {device_ctrl.name}",
+                        name=ctrl_name,
+                        description="",
                         value=bool(current_value) if current_value is not None else False,
                         group="hardware",
                     )
@@ -187,8 +190,8 @@ class SerialSink:
                 self._controls.register(
                     NumberControl(
                         id=f"hw_{device_ctrl.name}",
-                        name=f"Hardware {device_ctrl.name.replace('_', ' ').title()}",
-                        description=f"Device control: {device_ctrl.name}",
+                        name=ctrl_name,
+                        description="",
                         value=value,
                         min=min_val,
                         max=max_val,
@@ -199,7 +202,7 @@ class SerialSink:
             elif device_ctrl.control_type == "enum":
                 # Create enum options from the device control's enum_values
                 options = [
-                    EnumOption(value=v, label=v.replace('_', ' ').title())
+                    EnumOption(value=v, label=v)
                     for v in device_ctrl.enum_values
                 ]
                 # Map numeric value to enum string
@@ -213,8 +216,8 @@ class SerialSink:
                 self._controls.register(
                     EnumControl(
                         id=f"hw_{device_ctrl.name}",
-                        name=f"Hardware {device_ctrl.name.replace('_', ' ').title()}",
-                        description=f"Device control: {device_ctrl.name}",
+                        name=ctrl_name,
+                        description="",
                         value=str_value,
                         options=options,
                         group="hardware",
