@@ -464,10 +464,10 @@ class SerialSink:
                         result = self._renderer.set_control(device_ctrl_id, device_value)
                         applied_value = value
                     else:
-                        # Numeric control
+                        # Numeric control (integer)
                         device_value = int(float(value))
                         result = self._renderer.set_control(device_ctrl_id, device_value)
-                        applied_value = float(device_value)
+                        applied_value = device_value
 
                     if result:
                         self._controls.set_value(control_id, applied_value)
