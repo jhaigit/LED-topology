@@ -251,11 +251,8 @@ class V2Renderer:
         if not self._device or not self._device_info:
             return
 
-        # Check if device supports inputs
-        if not self._device_info.has_inputs or self._device_info.input_count == 0:
-            logger.debug("Device has no inputs")
-            return
-
+        # Always try to query inputs - some devices may not properly report
+        # has_inputs capability but still support inputs
         try:
             # Query all inputs from device
             inputs_data = self._device.get_inputs()
