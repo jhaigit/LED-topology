@@ -617,10 +617,10 @@ class SerialSink:
                     logger.info(f"Serial device connected via v2 protocol")
                     reconnect_delay = 1.0
 
-                    # Update config from device on first connect
-                    if not was_connected:
-                        self._update_from_device()
-                        was_connected = True
+                    # Update config from device on connect/reconnect
+                    self._update_from_device()
+                    self._setup_device_controls()
+                    was_connected = True
 
                 except Exception as e:
                     logger.warning(f"Serial connection failed: {e}")
