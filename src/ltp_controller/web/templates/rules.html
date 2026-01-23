@@ -60,10 +60,10 @@
 
         <div class="rule-footer">
             <span class="rule-stats">
-                Triggered {{ rule.trigger_count }} times
-                {% if rule.last_triggered %}
-                | Last: <span class="last-triggered" data-timestamp="{{ rule.last_triggered }}"></span>
-                {% endif %}
+                Triggered <span class="trigger-count" data-rule-id="{{ rule.id }}">{{ rule.trigger_count }}</span> times
+                <span class="last-triggered-wrapper" data-rule-id="{{ rule.id }}" {% if not rule.last_triggered %}style="display:none;"{% endif %}>
+                | Last: <span class="last-triggered" data-timestamp="{{ rule.last_triggered or 0 }}"></span>
+                </span>
             </span>
         </div>
     </div>
@@ -384,12 +384,49 @@ let editingRuleId = null;
 let actionCounter = 0;
 
 // Format timestamps
-document.querySelectorAll('.last-triggered').forEach(el => {
-    const ts = parseFloat(el.dataset.timestamp);
-    if (ts) {
-        el.textContent = new Date(ts * 1000).toLocaleString();
+function formatTimestamps() {
+    document.querySelectorAll('.last-triggered').forEach(el => {
+        const ts = parseFloat(el.dataset.timestamp);
+        if (ts) {
+            el.textContent = new Date(ts * 1000).toLocaleString();
+        }
+    });
+}
+formatTimestamps();
+
+// Auto-refresh rule stats every 3 seconds
+async function refreshRuleStats() {
+    try {
+        const resp = await fetch('/api/rules');
+        const rules = await resp.json();
+
+        for (const rule of rules) {
+            // Update trigger count
+            const countEl = document.querySelector(`.trigger-count[data-rule-id="${rule.id}"]`);
+            if (countEl) {
+                countEl.textContent = rule.trigger_count;
+            }
+
+            // Update last triggered
+            const wrapperEl = document.querySelector(`.last-triggered-wrapper[data-rule-id="${rule.id}"]`);
+            if (wrapperEl) {
+                if (rule.last_triggered) {
+                    wrapperEl.style.display = '';
+                    const tsEl = wrapperEl.querySelector('.last-triggered');
+                    if (tsEl) {
+                        tsEl.dataset.timestamp = rule.last_triggered;
+                        tsEl.textContent = new Date(rule.last_triggered * 1000).toLocaleString();
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        console.error('Failed to refresh rule stats:', err);
     }
-});
+}
+
+// Start auto-refresh
+setInterval(refreshRuleStats, 3000);
 
 function showCreateModal() {
     editingRuleId = null;
