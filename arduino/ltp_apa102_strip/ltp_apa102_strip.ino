@@ -410,7 +410,11 @@ void updateInputs() {
 }
 
 void sendInputEvent(uint8_t inputId, bool state) {
-    uint8_t payload[6];
+    const char* name = inputNames[inputId];
+    uint8_t nameLen = strlen(name);
+    if (nameLen > 15) nameLen = 15;
+
+    uint8_t payload[6 + 1 + nameLen];
     payload[0] = inputId;                   // Input ID
     payload[1] = inputs[inputId].type;      // Input type
     // Timestamp (16-bit, little-endian)
@@ -419,9 +423,10 @@ void sendInputEvent(uint8_t inputId, bool state) {
     payload[3] = timestamp >> 8;
     // Data: current value
     payload[4] = state ? 1 : 0;             // Current value
-    payload[5] = 0;                         // Reserved
+    payload[5] = nameLen;                   // Name length
+    memcpy(payload + 6, name, nameLen);     // Name
 
-    protocol.sendPacket(CMD_INPUT_EVENT, payload, 6);
+    protocol.sendPacket(CMD_INPUT_EVENT, payload, 6 + 1 + nameLen);
 }
 
 // ============================================================================
@@ -783,19 +788,28 @@ void handleGetInput(const uint8_t* payload, uint16_t length) {
     uint8_t inputId = payload[0];
 
     if (inputId == 0xFF) {
-        // Return all inputs
-        uint8_t response[2 + NUM_INPUTS * 4];
-        response[0] = NUM_INPUTS;
-        response[1] = 0; // Reserved
+        // Return all inputs with names
+        // Format: [num_inputs, reserved, (id, type, value, nameLen, name[])...]
+        uint8_t response[128];  // Should be enough for a few inputs with names
+        uint8_t offset = 0;
+
+        response[offset++] = NUM_INPUTS;
+        response[offset++] = 0; // Reserved
 
         for (uint8_t i = 0; i < NUM_INPUTS; i++) {
-            response[2 + i * 4 + 0] = i;                    // Input ID
-            response[2 + i * 4 + 1] = inputs[i].type;       // Type
-            response[2 + i * 4 + 2] = inputs[i].currentState ? 1 : 0;
-            response[2 + i * 4 + 3] = 0;                    // Reserved
+            const char* name = inputNames[i];
+            uint8_t nameLen = strlen(name);
+            if (nameLen > 15) nameLen = 15;
+
+            response[offset++] = i;                         // Input ID
+            response[offset++] = inputs[i].type;            // Type
+            response[offset++] = inputs[i].currentState ? 1 : 0;  // Value
+            response[offset++] = nameLen;                   // Name length
+            memcpy(response + offset, name, nameLen);       // Name
+            offset += nameLen;
         }
 
-        protocol.sendPacket(CMD_INPUTS_LIST, response, 2 + NUM_INPUTS * 4);
+        protocol.sendPacket(CMD_INPUTS_LIST, response, offset);
     } else if (inputId < NUM_INPUTS) {
         // Return single input
         uint8_t response[8];

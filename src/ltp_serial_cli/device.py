@@ -534,7 +534,7 @@ class LtpDevice:
         """Get all device inputs.
 
         Returns:
-            List of input info dicts with keys: id, type, value, name (optional)
+            List of input info dicts with keys: id, type, value, name
         """
         self._send(LtpProtocol.build_get_input(0xFF))  # 0xFF = all inputs
         packet = self._wait_for_response(CMD_INPUTS_LIST)
@@ -550,14 +550,21 @@ class LtpDevice:
                     input_id = packet.payload[offset]
                     input_type = packet.payload[offset + 1]
                     input_value = bool(packet.payload[offset + 2])
-                    # reserved = packet.payload[offset + 3]
+                    name_len = packet.payload[offset + 3]
+                    offset += 4
+
+                    # Parse name if present
+                    name = f"input_{input_id}"
+                    if name_len > 0 and offset + name_len <= len(packet.payload):
+                        name = packet.payload[offset:offset + name_len].decode("utf-8", errors="replace")
+                        offset += name_len
 
                     inputs.append({
                         "id": input_id,
                         "type": input_type,
                         "value": input_value,
+                        "name": name,
                     })
-                    offset += 4
 
         return inputs
 

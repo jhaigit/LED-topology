@@ -265,8 +265,6 @@ class V2Renderer:
                     input_type_code = input_info.get("type", 0x01)
                     input_type_name = INPUT_TYPE_NAMES.get(input_type_code, "unknown")
                     input_value = input_info.get("value", False)
-
-                    # Generate name if not provided
                     input_name = input_info.get("name", f"input_{input_id}")
 
                     self._inputs[input_id] = DeviceInput(
@@ -284,18 +282,30 @@ class V2Renderer:
         self, input_id: int, input_type: int, timestamp: int, data: bytes
     ) -> None:
         """Handle input event from device."""
-        # Parse value from data
+        # Parse value and optional name from data
+        # Format: [value, name_len, name...]
         value = bool(data[0]) if data else False
+
+        # Parse name if present (new format)
+        parsed_name = None
+        if len(data) >= 2:
+            name_len = data[1]
+            if name_len > 0 and len(data) >= 2 + name_len:
+                parsed_name = data[2:2 + name_len].decode("utf-8", errors="replace")
+
+        input_type_name = INPUT_TYPE_NAMES.get(input_type, "unknown")
 
         # Update stored input state or create new entry
         if input_id in self._inputs:
             self._inputs[input_id].value = value
+            # Update name if we got one from the event and current name is auto-generated
+            if parsed_name and self._inputs[input_id].name.startswith("input_"):
+                self._inputs[input_id].name = parsed_name
             input_name = self._inputs[input_id].name
             input_type_name = self._inputs[input_id].input_type
         else:
             # Create new input entry for inputs not reported in capabilities
-            input_type_name = INPUT_TYPE_NAMES.get(input_type, "unknown")
-            input_name = f"input_{input_id}"
+            input_name = parsed_name or f"input_{input_id}"
             self._inputs[input_id] = DeviceInput(
                 id=input_id,
                 name=input_name,
