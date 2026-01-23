@@ -47,10 +47,9 @@
                 <ul>
                     {% for action in rule.actions %}
                     <li>
-                        {% if action.type == 'set_local_mode' %}Set local mode to <strong>{{ action.value }}</strong> on <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                        {% if action.type == 'set_control' %}Set <strong>{{ action.control_id }}</strong> to <strong>{{ action.value }}</strong> on <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
                         {% if action.type == 'enable_route' %}Enable route <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
                         {% if action.type == 'disable_route' %}Disable route <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
-                        {% if action.type == 'set_control' %}Set <strong>{{ action.control_id }}</strong> to <strong>{{ action.value }}</strong> on <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
                         {% if action.type == 'enable_source' %}Enable source <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
                         {% if action.type == 'disable_source' %}Disable source <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
                     </li>
@@ -512,15 +511,14 @@ function addAction(action = null) {
 
     row.innerHTML = `
         <select class="action-type" onchange="updateActionTargets(${id})">
-            <option value="set_local_mode">Set Local Mode</option>
+            <option value="set_control">Set Control</option>
             <option value="enable_route">Enable Route</option>
             <option value="disable_route">Disable Route</option>
-            <option value="set_control">Set Control</option>
             <option value="enable_source">Enable Source</option>
             <option value="disable_source">Disable Source</option>
         </select>
-        <select class="action-target" data-type="sink">${sinkOptions}</select>
-        <input type="text" class="action-control" placeholder="Control ID" style="display:none;">
+        <select class="action-target" data-type="sink" onchange="loadSinkControls(${id})">${sinkOptions}</select>
+        <select class="action-control" style="display:none;"><option value="">Select control...</option></select>
         <input type="text" class="action-value" placeholder="Value">
         <button type="button" class="remove-btn" onclick="removeAction(${id})">X</button>
     `;
@@ -532,9 +530,16 @@ function addAction(action = null) {
         row.querySelector('.action-type').value = action.type;
         updateActionTargets(id);
         row.querySelector('.action-target').value = action.target_id;
-        if (action.control_id) {
-            row.querySelector('.action-control').value = action.control_id;
+
+        // For set_control, load controls then set value
+        if (action.type === 'set_control' && action.target_id) {
+            loadSinkControls(id).then(() => {
+                if (action.control_id) {
+                    row.querySelector('.action-control').value = action.control_id;
+                }
+            });
         }
+
         if (action.value !== null && action.value !== undefined) {
             row.querySelector('.action-value').value = action.value;
         }
@@ -550,7 +555,7 @@ function updateActionTargets(id) {
     const row = document.getElementById(`action-${id}`);
     const actionType = row.querySelector('.action-type').value;
     const targetSelect = row.querySelector('.action-target');
-    const controlInput = row.querySelector('.action-control');
+    const controlSelect = row.querySelector('.action-control');
     const valueInput = row.querySelector('.action-value');
 
     // Build options based on action type
@@ -563,7 +568,7 @@ function updateActionTargets(id) {
         for (const route of routes) {
             options += `<option value="${route.id}">${route.name}</option>`;
         }
-        controlInput.style.display = 'none';
+        controlSelect.style.display = 'none';
         valueInput.style.display = 'none';
     } else if (actionType === 'enable_source' || actionType === 'disable_source') {
         targetType = 'source';
@@ -571,29 +576,51 @@ function updateActionTargets(id) {
         for (const vs of virtualSources) {
             options += `<option value="${vs.id}">${vs.name}</option>`;
         }
-        controlInput.style.display = 'none';
+        controlSelect.style.display = 'none';
         valueInput.style.display = 'none';
-    } else if (actionType === 'set_control') {
-        targetType = 'sink';
-        options = '<option value="">Select sink...</option>';
-        for (const sink of sinks) {
-            options += `<option value="${sink.id}">${sink.name}</option>`;
-        }
-        controlInput.style.display = '';
-        valueInput.style.display = '';
     } else {
-        // set_local_mode
+        // set_control
         targetType = 'sink';
         options = '<option value="">Select sink...</option>';
         for (const sink of sinks) {
             options += `<option value="${sink.id}">${sink.name}</option>`;
         }
-        controlInput.style.display = 'none';
+        controlSelect.style.display = '';
+        controlSelect.innerHTML = '<option value="">Select control...</option>';
         valueInput.style.display = '';
     }
 
     targetSelect.innerHTML = options;
     targetSelect.dataset.type = targetType;
+}
+
+async function loadSinkControls(actionId) {
+    const row = document.getElementById(`action-${actionId}`);
+    const actionType = row.querySelector('.action-type').value;
+    const sinkId = row.querySelector('.action-target').value;
+    const controlSelect = row.querySelector('.action-control');
+
+    // Only load controls for set_control action
+    if (actionType !== 'set_control' || !sinkId) {
+        controlSelect.innerHTML = '<option value="">Select control...</option>';
+        return;
+    }
+
+    try {
+        const resp = await fetch(`/api/sinks/${sinkId}/available-controls`);
+        const data = await resp.json();
+
+        let options = '<option value="">Select control...</option>';
+        for (const ctrl of data.controls || []) {
+            const name = ctrl.name || ctrl.id;
+            const displayName = name.replace('hw_', '');
+            options += `<option value="${name}">${displayName}</option>`;
+        }
+        controlSelect.innerHTML = options;
+    } catch (err) {
+        console.error('Failed to load controls:', err);
+        controlSelect.innerHTML = '<option value="">Error loading controls</option>';
+    }
 }
 
 function submitRule(event) {

@@ -16,10 +16,9 @@ class TriggerType(str, Enum):
 class ActionType(str, Enum):
     """Type of action to execute."""
 
-    SET_LOCAL_MODE = "set_local_mode"
+    SET_CONTROL = "set_control"
     ENABLE_ROUTE = "enable_route"
     DISABLE_ROUTE = "disable_route"
-    SET_CONTROL = "set_control"
     ENABLE_SOURCE = "enable_source"
     DISABLE_SOURCE = "disable_source"
 

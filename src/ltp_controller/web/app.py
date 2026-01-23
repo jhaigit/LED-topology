@@ -1194,6 +1194,24 @@ def create_app(
             "inputs": [inp.to_dict() for inp in inputs],
         })
 
+    @app.route("/api/sinks/<sink_id>/available-controls")
+    def api_sink_available_controls(sink_id: str) -> Any:
+        """Get available controls for a sink (for rule creation).
+
+        Returns the list of controls exposed by the sink, including both
+        local controls and hardware controls (prefixed with hw_).
+        """
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+
+        controls = sink.controls or []
+        return jsonify({
+            "sink_id": sink_id,
+            "sink_name": sink.name,
+            "controls": controls,
+        })
+
     # ==================== API: Rules ====================
 
     @app.route("/api/rules")

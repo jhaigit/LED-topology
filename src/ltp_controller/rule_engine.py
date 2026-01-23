@@ -18,9 +18,6 @@ from ltp_controller.rules import (
 )
 from ltp_controller.virtual_sources import VirtualSourceManager
 
-# Standard control ID for local mode (from ltp_serial_cli.protocol)
-CTRL_ID_LOCAL_MODE = 6
-
 logger = logging.getLogger(__name__)
 
 
@@ -270,37 +267,18 @@ class RuleEngine:
         """Execute a single action."""
         logger.debug(f"Executing action: {action.type.value} on {action.target_id}")
 
-        if action.type == ActionType.SET_LOCAL_MODE:
-            await self._action_set_local_mode(action)
+        if action.type == ActionType.SET_CONTROL:
+            await self._action_set_control(action)
         elif action.type == ActionType.ENABLE_ROUTE:
             await self._action_enable_route(action)
         elif action.type == ActionType.DISABLE_ROUTE:
             await self._action_disable_route(action)
-        elif action.type == ActionType.SET_CONTROL:
-            await self._action_set_control(action)
         elif action.type == ActionType.ENABLE_SOURCE:
             await self._action_enable_source(action)
         elif action.type == ActionType.DISABLE_SOURCE:
             await self._action_disable_source(action)
         else:
             logger.warning(f"Unknown action type: {action.type}")
-
-    async def _action_set_local_mode(self, action: Action) -> None:
-        """Set local mode on a sink."""
-        sink = self.controller.get_sink(action.target_id)
-        if not sink:
-            logger.warning(f"Sink not found for SET_LOCAL_MODE: {action.target_id}")
-            return
-
-        # Use numeric control ID for local_mode (standard LTP control ID 6)
-        control_id = CTRL_ID_LOCAL_MODE
-        value = action.value if action.value is not None else 0
-
-        success = await self.controller.set_device_control(sink, control_id, value)
-        if success:
-            logger.info(f"Set local_mode={value} on sink {sink.name}")
-        else:
-            logger.warning(f"Failed to set local_mode on sink {sink.name}")
 
     async def _action_enable_route(self, action: Action) -> None:
         """Enable a route."""
