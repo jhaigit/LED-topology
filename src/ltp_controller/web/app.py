@@ -1140,12 +1140,17 @@ def create_app(
     @app.route("/rules")
     def rules_page() -> str:
         """Rules management page."""
+        # Serialize objects to dicts for JSON in template
+        sinks_data = [{"id": s.id, "name": s.name} for s in controller.sinks]
+        routes_data = [{"id": r.id, "name": r.name} for r in router.routes]
+        vs_data = [{"id": vs.id, "name": vs.name} for vs in (virtual_source_manager.sources if virtual_source_manager else [])]
+
         return render_template(
             "rules.html",
             rules=rule_engine.rules if rule_engine else [],
-            sinks=controller.sinks,
-            routes=router.routes,
-            virtual_sources=virtual_source_manager.sources if virtual_source_manager else [],
+            sinks=sinks_data,
+            routes=routes_data,
+            virtual_sources=vs_data,
         )
 
     # ==================== API: Inputs ====================
