@@ -25,6 +25,7 @@ from .protocol import (
     CMD_PIXEL_RESPONSE,
     CMD_CONTROL_RESPONSE,
     CMD_INPUT_EVENT,
+    CMD_INPUTS_LIST,
     CMD_FRAME_ACK,
     CMD_STATUS_UPDATE,
     INFO_ALL,
@@ -528,6 +529,37 @@ class LtpDevice:
         self._send(LtpProtocol.build_get_info(INFO_STATS))
         packet = self._wait_for_response(CMD_INFO_RESPONSE)
         return self._parse_stats_response(packet)
+
+    def get_inputs(self) -> list[dict]:
+        """Get all device inputs.
+
+        Returns:
+            List of input info dicts with keys: id, type, value, name (optional)
+        """
+        self._send(LtpProtocol.build_get_input(0xFF))  # 0xFF = all inputs
+        packet = self._wait_for_response(CMD_INPUTS_LIST)
+
+        inputs = []
+        if len(packet.payload) >= 2:
+            num_inputs = packet.payload[0]
+            # reserved = packet.payload[1]
+            offset = 2
+
+            for i in range(num_inputs):
+                if offset + 4 <= len(packet.payload):
+                    input_id = packet.payload[offset]
+                    input_type = packet.payload[offset + 1]
+                    input_value = bool(packet.payload[offset + 2])
+                    # reserved = packet.payload[offset + 3]
+
+                    inputs.append({
+                        "id": input_id,
+                        "type": input_type,
+                        "value": input_value,
+                    })
+                    offset += 4
+
+        return inputs
 
     def get_pixels(
         self, start: int = 0, count: int = 0, strip_id: int = 0

@@ -74,6 +74,32 @@ class DeviceControl:
     readonly: bool = False
 
 
+@dataclass
+class DeviceInput:
+    """Information about an input exposed by the serial device."""
+
+    id: int
+    name: str
+    input_type: str  # "button", "switch", "encoder", "analog", etc.
+    value: Any = False  # Current value
+
+
+# Input type mapping from protocol constants to names
+INPUT_TYPE_NAMES = {
+    0x01: "button",
+    0x02: "encoder",
+    0x03: "encoder_button",
+    0x04: "analog",
+    0x05: "touch",
+    0x06: "switch",
+    0x07: "multi_button",
+}
+
+
+# Callback type for input events
+InputEventCallback = Any  # Callable[[int, str, str, Any, int], None]
+
+
 class V2Renderer:
     """Renders pixel data using LTP Serial Protocol v2.
 
@@ -96,6 +122,10 @@ class V2Renderer:
         # Device info cached after connection
         self._device_info: DeviceInfo | None = None
         self._controls: dict[int, DeviceControl] = {}
+        self._inputs: dict[int, DeviceInput] = {}
+
+        # External callback for input events
+        self._input_event_callback: InputEventCallback | None = None
 
     def is_connected(self) -> bool:
         """Check if device is connected."""
@@ -132,6 +162,12 @@ class V2Renderer:
 
                 # Build controls list from device capabilities
                 self._populate_controls()
+
+                # Query and store inputs
+                self._populate_inputs()
+
+                # Set up input event callback
+                self._device.set_input_callback(self._handle_input_event)
 
             # Configure device for streaming
             if self.config.auto_show:
@@ -208,6 +244,76 @@ class V2Renderer:
 
         logger.debug(f"Device controls: {list(self._controls.keys())}")
 
+    def _populate_inputs(self) -> None:
+        """Query and store inputs from the device."""
+        self._inputs.clear()
+
+        if not self._device or not self._device_info:
+            return
+
+        # Check if device supports inputs
+        if not self._device_info.has_inputs or self._device_info.input_count == 0:
+            logger.debug("Device has no inputs")
+            return
+
+        try:
+            # Query all inputs from device
+            inputs_data = self._device.get_inputs()
+            if inputs_data:
+                for input_info in inputs_data:
+                    input_id = input_info.get("id", 0)
+                    input_type_code = input_info.get("type", 0x01)
+                    input_type_name = INPUT_TYPE_NAMES.get(input_type_code, "unknown")
+                    input_value = input_info.get("value", False)
+
+                    # Generate name if not provided
+                    input_name = input_info.get("name", f"input_{input_id}")
+
+                    self._inputs[input_id] = DeviceInput(
+                        id=input_id,
+                        name=input_name,
+                        input_type=input_type_name,
+                        value=input_value,
+                    )
+
+            logger.info(f"Device inputs: {[inp.name for inp in self._inputs.values()]}")
+        except Exception as e:
+            logger.warning(f"Failed to query device inputs: {e}")
+
+    def _handle_input_event(
+        self, input_id: int, input_type: int, timestamp: int, data: bytes
+    ) -> None:
+        """Handle input event from device."""
+        # Parse value from data
+        value = bool(data[0]) if data else False
+
+        # Update stored input state
+        if input_id in self._inputs:
+            self._inputs[input_id].value = value
+            input_name = self._inputs[input_id].name
+            input_type_name = self._inputs[input_id].input_type
+        else:
+            input_name = f"input_{input_id}"
+            input_type_name = INPUT_TYPE_NAMES.get(input_type, "unknown")
+
+        logger.debug(f"Input event: {input_name} ({input_type_name}) = {value}")
+
+        # Call external callback if set
+        if self._input_event_callback:
+            try:
+                self._input_event_callback(
+                    input_id, input_name, input_type_name, value, timestamp
+                )
+            except Exception as e:
+                logger.warning(f"Input event callback error: {e}")
+
+    def set_input_event_callback(self, callback: InputEventCallback | None) -> None:
+        """Set callback for input events.
+
+        The callback receives: (input_id, input_name, input_type, value, timestamp)
+        """
+        self._input_event_callback = callback
+
     def close(self) -> None:
         """Close connection to the device."""
         if self._device:
@@ -240,6 +346,11 @@ class V2Renderer:
     def controls(self) -> dict[int, DeviceControl]:
         """Get available device controls."""
         return self._controls
+
+    @property
+    def inputs(self) -> dict[int, DeviceInput]:
+        """Get available device inputs."""
+        return self._inputs
 
     def get_control(self, control_id: int) -> Any:
         """Get a control value from the device."""

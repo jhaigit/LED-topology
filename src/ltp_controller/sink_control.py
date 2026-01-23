@@ -70,6 +70,11 @@ class SinkController:
                 # Quick check - if client is closed, recreate
                 if stream.client._writer is None or stream.client._writer.is_closing():
                     raise ConnectionError("Stream closed")
+                # Check if pixel count changed (device might have reconnected with different config)
+                current_pixel_count = self._get_pixel_count(sink)
+                if stream.pixel_count != current_pixel_count:
+                    logger.info(f"Pixel count changed for {sink_id}: {stream.pixel_count} -> {current_pixel_count}, recreating stream")
+                    raise ConnectionError("Pixel count changed")
                 return stream
             except Exception:
                 # Clean up old stream
@@ -387,7 +392,11 @@ class SinkController:
                 width = dimensions[0]
 
                 # Get current buffer or create black one
-                if sink_id not in self._paint_buffers:
+                # Also recreate if size doesn't match (e.g., pixel count changed)
+                existing_buffer = self._paint_buffers.get(sink_id)
+                if existing_buffer is None or len(existing_buffer) != pixel_count:
+                    if existing_buffer is not None:
+                        logger.info(f"Paint buffer size mismatch for {sink_id}: {len(existing_buffer)} -> {pixel_count}, recreating")
                     self._paint_buffers[sink_id] = np.zeros((pixel_count, 3), dtype=np.uint8)
                 pixels = self._paint_buffers[sink_id]
 
@@ -427,10 +436,7 @@ class SinkController:
                     return {"status": "error", "message": "Unknown paint mode"}
 
                 # Send the frame
-                stream.sender.send(
-                    pixels=pixels,
-                    color_format=ColorFormat.RGB,
-                )
+                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
 
                 return {"status": "ok", "pixels_set": pixel_count}
 
@@ -553,7 +559,9 @@ class SinkController:
                     self._paint_buffers[sink_id] = pixels.copy()
                 else:
                     # Overlay: only copy non-background pixels
-                    if sink_id not in self._paint_buffers:
+                    # Also recreate if size doesn't match
+                    existing_buffer = self._paint_buffers.get(sink_id)
+                    if existing_buffer is None or len(existing_buffer) != pixel_count:
                         self._paint_buffers[sink_id] = np.zeros((pixel_count, 3), dtype=np.uint8)
                     buffer = self._paint_buffers[sink_id]
 
@@ -564,10 +572,7 @@ class SinkController:
                     pixels = buffer
 
                 # Send frame
-                stream.sender.send(
-                    pixels=pixels,
-                    color_format=ColorFormat.RGB,
-                )
+                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
 
                 logger.info(f"Painted text '{text[:20]}...' on sink {sink.name}")
                 return {

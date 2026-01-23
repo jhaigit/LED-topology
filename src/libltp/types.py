@@ -142,6 +142,9 @@ class MessageType(str, Enum):
     ROUTE_DELETE = "route_delete"
     ROUTE_DELETE_RESPONSE = "route_delete_response"
 
+    # Input events
+    INPUT_EVENT = "input_event"
+
     # Error
     ERROR = "error"
 

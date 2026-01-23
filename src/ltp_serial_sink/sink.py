@@ -120,6 +120,7 @@ class SerialSink:
         self._pixel_buffer: np.ndarray | None = None
         self._reconnect_task: asyncio.Task | None = None
         self._stats_task: asyncio.Task | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
         # Serial render thread with frame dropping
         self._render_thread: threading.Thread | None = None
@@ -265,6 +266,30 @@ class SerialSink:
         # Setup device controls
         self._setup_device_controls()
 
+        # Setup input event callback
+        self._renderer.set_input_event_callback(self._handle_input_event)
+
+    def _handle_input_event(
+        self,
+        input_id: int,
+        input_name: str,
+        input_type: str,
+        value: Any,
+        timestamp: int,
+    ) -> None:
+        """Handle input event from device and broadcast to clients."""
+        logger.info(f"Input event: {input_name} ({input_type}) = {value}")
+
+        # Broadcast to connected clients
+        if self._control_server:
+            from libltp import input_event
+            msg = input_event(input_id, input_name, input_type, value, timestamp)
+            # Run broadcast in the event loop
+            asyncio.run_coroutine_threadsafe(
+                self._control_server.broadcast(msg),
+                self._loop,
+            )
+
     def _handle_message(self, message: Message) -> Message | None:
         """Handle incoming control channel messages."""
         logger.debug(f"Handling message: {message.type}")
@@ -316,6 +341,18 @@ class SerialSink:
         if self._renderer and self._renderer.device_info:
             device_info["backend"]["firmware"] = self._renderer.device_info.firmware_version
             device_info["backend"]["device_name"] = self._renderer.device_info.device_name
+
+        # Add inputs if available
+        if self._renderer and self._renderer.inputs:
+            device_info["inputs"] = [
+                {
+                    "id": inp.id,
+                    "name": inp.name,
+                    "type": inp.input_type,
+                    "value": inp.value,
+                }
+                for inp in self._renderer.inputs.values()
+            ]
 
         return capability_response(message.seq, device_info)
 
@@ -632,6 +669,9 @@ class SerialSink:
         """Start the serial sink."""
         if self._running:
             return
+
+        # Store event loop reference for input event callbacks from sync thread
+        self._loop = asyncio.get_running_loop()
 
         if self.config.no_serial:
             logger.info(f"Starting serial sink: {self.config.name} (NO SERIAL - test mode)")

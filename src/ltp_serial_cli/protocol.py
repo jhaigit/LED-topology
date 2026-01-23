@@ -413,6 +413,15 @@ class LtpProtocol:
         return LtpProtocol.build_packet(CMD_GET_CONTROL, bytes([control_id]))
 
     @staticmethod
+    def build_get_input(input_id: int = 0xFF) -> bytes:
+        """Build a GET_INPUT packet.
+
+        Args:
+            input_id: Input ID to query, or 0xFF for all inputs
+        """
+        return LtpProtocol.build_packet(CMD_GET_INPUT, bytes([input_id]))
+
+    @staticmethod
     def build_pixel_set_all(r: int, g: int, b: int, strip_id: int = STRIP_ALL) -> bytes:
         """Build a PIXEL_SET_ALL packet."""
         payload = bytes([strip_id, r, g, b])

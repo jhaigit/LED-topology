@@ -176,6 +176,33 @@ def control_changed(values: dict[str, Any]) -> Message:
     return Message(MessageType.CONTROL_CHANGED, None, values=values)
 
 
+def input_event(
+    input_id: int,
+    input_name: str,
+    input_type: str,
+    value: Any,
+    timestamp: int | None = None,
+) -> Message:
+    """Create an input event notification.
+
+    Args:
+        input_id: Device-specific input ID
+        input_name: Human-readable input name
+        input_type: Input type (button, switch, encoder, analog, etc.)
+        value: Current value (bool for button/switch, int for encoder/analog)
+        timestamp: Device timestamp in milliseconds (optional)
+    """
+    return Message(
+        MessageType.INPUT_EVENT,
+        None,
+        input_id=input_id,
+        input_name=input_name,
+        input_type=input_type,
+        value=value,
+        timestamp=timestamp,
+    )
+
+
 def subscribe(
     seq: int,
     dimensions: list[int],
