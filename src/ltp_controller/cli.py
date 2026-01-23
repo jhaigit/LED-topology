@@ -166,6 +166,7 @@ async def run_controller(
                 input_manager=input_manager,
                 rule_engine=rule_engine,
                 event_loop=loop,
+                config_path=args.config,
             )
 
             def run_web() -> None:

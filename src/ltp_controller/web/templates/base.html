@@ -22,6 +22,9 @@
             <li><a href="/rules" class="{% if request.path == '/rules' %}active{% endif %}">Rules</a></li>
             <li><a href="/preview" class="{% if request.path == '/preview' %}active{% endif %}">Preview</a></li>
         </ul>
+        <div class="navbar-actions">
+            <button id="save-config-btn" class="btn btn-save" title="Save routes and rules to config file">Save Config</button>
+        </div>
     </nav>
 
     <main class="container">

@@ -54,3 +54,35 @@ function showToast(message, type = 'info') {
 function confirmAction(message) {
     return confirm(message);
 }
+
+// Save config button handler
+(function() {
+    const saveBtn = document.getElementById('save-config-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+
+            try {
+                const response = await fetch('/api/config/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showToast('Configuration saved successfully', 'success');
+                } else {
+                    showToast(result.error || 'Failed to save configuration', 'error');
+                }
+            } catch (err) {
+                showToast('Error saving configuration: ' + err.message, 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Config';
+            }
+        });
+    }
+})();

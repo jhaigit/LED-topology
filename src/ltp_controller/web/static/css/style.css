@@ -67,6 +67,26 @@ body {
     background: var(--bg-card);
 }
 
+.navbar-actions {
+    margin-left: auto;
+}
+
+.btn-save {
+    background: var(--success);
+    border-color: var(--success);
+}
+
+.btn-save:hover {
+    background: #45a049;
+    border-color: #45a049;
+}
+
+.btn-save:disabled {
+    background: var(--text-secondary);
+    border-color: var(--text-secondary);
+    cursor: not-allowed;
+}
+
 /* Container */
 .container {
     max-width: 1400px;
@@ -482,6 +502,45 @@ h2 {
     gap: 1rem;
     padding: 1rem 1.5rem;
     border-top: 1px solid var(--border);
+}
+
+/* Toast Notifications */
+.toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 1rem 1.5rem;
+    border-radius: 4px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: all 0.3s ease;
+    z-index: 2000;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.toast-success {
+    background: var(--success);
+}
+
+.toast-error {
+    background: var(--error);
+}
+
+.toast-warning {
+    background: var(--warning);
+    color: #000;
+}
+
+.toast-info {
+    background: var(--bg-card);
+    border: 1px solid var(--accent);
 }
 
 /* Footer */

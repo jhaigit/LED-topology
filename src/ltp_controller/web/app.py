@@ -28,6 +28,7 @@ def create_app(
     input_manager: InputEventManager | None = None,
     rule_engine: RuleEngine | None = None,
     event_loop: asyncio.AbstractEventLoop | None = None,
+    config_path: str | None = None,
 ) -> Flask:
     """Create and configure the Flask application."""
     template_dir = Path(__file__).parent / "templates"
@@ -48,6 +49,7 @@ def create_app(
     app.config["input_manager"] = input_manager
     app.config["rule_engine"] = rule_engine
     app.config["event_loop"] = event_loop
+    app.config["config_path"] = config_path
 
     # Helper to run async code from sync Flask handlers
     def run_async(coro: Any) -> Any:
@@ -618,22 +620,34 @@ def create_app(
         """Save current configuration to file.
 
         Request body: {"path": "/path/to/config.yaml"} or empty for default
+        Uses the config file path from startup if not specified.
+        Preserves existing config settings (device, logging, web, etc.)
+        and only updates routes, rules, and virtual_sources sections.
         """
         import yaml
 
         data = request.get_json() or {}
-        config_path = data.get("path")
+        save_path = data.get("path") or app.config.get("config_path")
 
-        if not config_path:
-            return jsonify({"error": "Config path not specified"}), 400
+        if not save_path:
+            return jsonify({"error": "Config path not specified and no default config file"}), 400
 
-        config = {
-            "virtual_sources": virtual_source_manager.to_config() if virtual_source_manager else [],
-            "routes": [],
-            "rules": rule_engine.to_config() if rule_engine else [],
-        }
+        # Load existing config to preserve other settings
+        existing_config: dict[str, Any] = {}
+        try:
+            with open(save_path) as f:
+                existing_config = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            pass  # New file, start fresh
+        except Exception as e:
+            logger.warning(f"Could not read existing config: {e}")
+
+        # Update only the routes, rules, and virtual_sources sections
+        existing_config["virtual_sources"] = virtual_source_manager.to_config() if virtual_source_manager else []
+        existing_config["rules"] = rule_engine.to_config() if rule_engine else []
 
         # Export routes
+        existing_config["routes"] = []
         for route in router.routes:
             route_data = {
                 "name": route.name,
@@ -644,12 +658,13 @@ def create_app(
             }
             if route.transform:
                 route_data["transform"] = route.transform.to_dict()
-            config["routes"].append(route_data)
+            existing_config["routes"].append(route_data)
 
         try:
-            with open(config_path, "w") as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-            return jsonify({"status": "ok", "path": config_path})
+            with open(save_path, "w") as f:
+                yaml.dump(existing_config, f, default_flow_style=False, sort_keys=False)
+            logger.info(f"Configuration saved to {save_path}")
+            return jsonify({"status": "ok", "path": save_path})
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
