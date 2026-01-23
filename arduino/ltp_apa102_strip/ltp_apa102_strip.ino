@@ -492,8 +492,20 @@ void startLocalMode(uint8_t mode) {
 
 void updateCylon() {
     static bool direction = true;
+    static uint16_t lastPosition = 0xFFFF;
     const uint8_t eyeSize = 5;
     const uint8_t fadeAmount = 64;
+
+    // Detect mode restart (modePosition reset to 0 by startLocalMode)
+    // or underflow protection
+    if (modePosition == 0 && lastPosition > 1) {
+        direction = true;  // Reset direction on mode start
+    }
+    if (modePosition > NUM_LEDS) {
+        modePosition = 0;
+        direction = true;
+    }
+    lastPosition = modePosition;
 
     // Fade all pixels
     for (uint16_t i = 0; i < NUM_LEDS; i++) {
