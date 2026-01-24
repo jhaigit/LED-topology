@@ -111,6 +111,19 @@ public:
         pixelBuffer[offset + 3] = scale8(r);
     }
 
+    void getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) override {
+        if (index >= numPixels || !pixelBuffer) {
+            r = g = b = 0;
+            return;
+        }
+        // Decode from BGR buffer (brightness byte at offset+0)
+        // Note: Returns raw buffer value, not accounting for brightness
+        uint16_t offset = index * 4;
+        b = pixelBuffer[offset + 1];
+        g = pixelBuffer[offset + 2];
+        r = pixelBuffer[offset + 3];
+    }
+
     void clear() override {
         if (!pixelBuffer) return;
         for (uint16_t i = 0; i < numPixels; i++) {

@@ -58,6 +58,17 @@ public:
         }
     }
 
+    void getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) override {
+        if (index >= numPixels) {
+            r = g = b = 0;
+            return;
+        }
+        uint32_t c = strip.getPixelColor(index);
+        r = (c >> 16) & 0xFF;
+        g = (c >> 8) & 0xFF;
+        b = c & 0xFF;
+    }
+
     void clear() override {
         strip.clear();
     }
@@ -106,6 +117,17 @@ public:
             pixelBuffer[offset + 1] = r;
             pixelBuffer[offset + 2] = b;
         }
+    }
+
+    void getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) override {
+        if (index >= numPixels || !pixelBuffer) {
+            r = g = b = 0;
+            return;
+        }
+        uint16_t offset = index * 3;
+        g = pixelBuffer[offset + 0]; // GRB order
+        r = pixelBuffer[offset + 1];
+        b = pixelBuffer[offset + 2];
     }
 
     uint8_t getLedType() const override {

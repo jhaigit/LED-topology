@@ -33,6 +33,9 @@ public:
     // Set a single pixel (RGB order, driver converts internally)
     virtual void setPixel(uint16_t index, uint8_t r, uint8_t g, uint8_t b) = 0;
 
+    // Get a single pixel (RGB order, driver converts from internal format)
+    virtual void getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) = 0;
+
     // Set a single pixel with white channel (RGBW strips)
     virtual void setPixelW(uint16_t index, uint8_t r, uint8_t g, uint8_t b, uint8_t w) {
         setPixel(index, r, g, b); // Default: ignore white

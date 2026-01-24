@@ -265,13 +265,14 @@ void updateCylon() {
     }
     lastPosition = modePosition;
 
-    // Fade all pixels
+    // Fade all pixels using driver abstraction
     for (uint16_t i = 0; i < NUM_PIXELS; i++) {
-        uint8_t* buf = leds.getPixelBuffer();
-        uint16_t idx = i * leds.getBytesPerPixel();
-        buf[idx] = buf[idx] > fadeAmount ? buf[idx] - fadeAmount : 0;
-        buf[idx+1] = buf[idx+1] > fadeAmount ? buf[idx+1] - fadeAmount : 0;
-        buf[idx+2] = buf[idx+2] > fadeAmount ? buf[idx+2] - fadeAmount : 0;
+        uint8_t r, g, b;
+        leds.getPixel(i, r, g, b);
+        r = r > fadeAmount ? r - fadeAmount : 0;
+        g = g > fadeAmount ? g - fadeAmount : 0;
+        b = b > fadeAmount ? b - fadeAmount : 0;
+        leds.setPixel(i, r, g, b);
     }
 
     // Draw the eye
@@ -358,13 +359,16 @@ void updateFire() {
 
 // Sparkle animation
 void updateSparkle() {
-    // Fade all pixels
+    const uint8_t fadeAmount = 20;
+
+    // Fade all pixels using driver abstraction
     for (uint16_t i = 0; i < NUM_PIXELS; i++) {
-        uint8_t* buf = leds.getPixelBuffer();
-        uint16_t idx = i * leds.getBytesPerPixel();
-        buf[idx] = buf[idx] > 20 ? buf[idx] - 20 : 0;
-        buf[idx+1] = buf[idx+1] > 20 ? buf[idx+1] - 20 : 0;
-        buf[idx+2] = buf[idx+2] > 20 ? buf[idx+2] - 20 : 0;
+        uint8_t r, g, b;
+        leds.getPixel(i, r, g, b);
+        r = r > fadeAmount ? r - fadeAmount : 0;
+        g = g > fadeAmount ? g - fadeAmount : 0;
+        b = b > fadeAmount ? b - fadeAmount : 0;
+        leds.setPixel(i, r, g, b);
     }
 
     // Add random sparkles

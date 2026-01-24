@@ -97,6 +97,21 @@ public:
         pixelBuffer[offset + 2] = 0x80 | (scale8(b) >> 1); // B
     }
 
+    void getPixel(uint16_t index, uint8_t& r, uint8_t& g, uint8_t& b) override {
+        if (index >= numPixels || !pixelBuffer) {
+            r = g = b = 0;
+            return;
+        }
+
+        // Decode from 7-bit LPD8806 format (0x80 | value) back to 8-bit RGB
+        // Note: This returns the raw buffer value, not accounting for brightness
+        // since we can't reverse the brightness scaling accurately
+        uint16_t offset = index * 3;
+        g = (pixelBuffer[offset + 0] & 0x7F) << 1;
+        r = (pixelBuffer[offset + 1] & 0x7F) << 1;
+        b = (pixelBuffer[offset + 2] & 0x7F) << 1;
+    }
+
     void clear() override {
         if (!pixelBuffer) return;
         // LPD8806 "off" is 0x80 (high bit set, value 0)
