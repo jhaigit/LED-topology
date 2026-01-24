@@ -86,7 +86,7 @@ public:
         state = WifiState::CONNECTING;
         connectStartTime = millis();
 
-        Serial.printf("WiFi: Connecting to %s...\n", ssid);
+        Serial.printf("WiFi: Connecting to %s...\r\n", ssid);
         return true;
     }
 
@@ -146,7 +146,7 @@ public:
         txt.apply();
 
         mdnsStarted = true;
-        Serial.printf("mDNS: Started as %s.local, service _ltp-sink._tcp\n", hostname);
+        Serial.printf("mDNS: Started as %s.local, service _ltp-sink._tcp\r\n", hostname);
     }
 
     // Check if client is connected
@@ -229,11 +229,11 @@ private:
     void handleConnecting() {
         if (WiFi.status() == WL_CONNECTED) {
             state = WifiState::CONNECTED;
-            Serial.printf("WiFi: Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+            Serial.printf("WiFi: Connected! IP: %s\r\n", WiFi.localIP().toString().c_str());
 
             // Start TCP server
             server.begin();
-            Serial.printf("WiFi: TCP server started on port %d\n", serverPort);
+            Serial.printf("WiFi: TCP server started on port %d\r\n", serverPort);
         } else if (millis() - connectStartTime >= WIFI_CONNECT_TIMEOUT) {
             Serial.println("WiFi: Connection timeout");
             state = WifiState::DISCONNECTED;
@@ -260,7 +260,7 @@ private:
                 client = newClient;
                 state = WifiState::CLIENT_ACTIVE;
                 linePos = 0;
-                Serial.printf("WiFi: Client connected from %s\n",
+                Serial.printf("WiFi: Client connected from %s\r\n",
                               client.remoteIP().toString().c_str());
             } else if (state == WifiState::CLIENT_ACTIVE) {
                 state = WifiState::CONNECTED;

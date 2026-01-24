@@ -68,7 +68,7 @@ public:
         DeserializationError error = deserializeJson(doc, jsonLine);
 
         if (error) {
-            Serial.printf("JSON parse error: %s\n", error.c_str());
+            Serial.printf("JSON parse error: %s\r\n", error.c_str());
             return buildError(0, 1, "INVALID_FORMAT", "JSON parse error");
         }
 
@@ -362,16 +362,19 @@ bool SinkProtocol::setControlValue(const char* id, float value) {
     if (strcmp(id, "brightness") == 0) {
         config->brightness = constrain((int)value, 0, 255);
         if (leds) leds->setBrightness(config->brightness);
+        Serial.printf("Protocol: brightness=%d\r\n", config->brightness);
         return true;
     }
     if (strcmp(id, "gamma") == 0) {
         config->gamma = constrain((int)(value * 10), 10, 30);
+        Serial.printf("Protocol: gamma=%.1f\r\n", config->gamma / 10.0);
         return true;
     }
     if (strcmp(id, "local_mode") == 0) {
         int mode = (int)value;
         if (mode < LOCAL_MODE_COUNT || mode == LOCAL_MODE_CYCLE) {
             config->localMode = mode;
+            Serial.printf("Protocol: local_mode=%d\r\n", mode);
             return true;
         }
         return false;

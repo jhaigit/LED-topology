@@ -57,7 +57,7 @@ public:
         if (udp.begin(listenPort)) {
             port = listenPort;
             running = true;
-            Serial.printf("UDP receiver started on port %d\n", port);
+            Serial.printf("UDP receiver started on port %d\r\n", port);
             return true;
         }
 
@@ -96,7 +96,7 @@ public:
         // Parse packet header (big-endian)
         uint16_t magic = (packet[0] << 8) | packet[1];
         if (magic != PACKET_MAGIC) {
-            Serial.printf("UDP: Invalid magic 0x%04X\n", magic);
+            Serial.printf("UDP: Invalid magic 0x%04X\r\n", magic);
             return 0;
         }
 
@@ -122,12 +122,12 @@ public:
 
         // Only support RGB raw for now
         if (colorFormat != COLOR_FMT_RGB) {
-            Serial.printf("UDP: Unsupported color format %d\n", colorFormat);
+            Serial.printf("UDP: Unsupported color format %d\r\n", colorFormat);
             return 0;
         }
 
         if (encoding != ENCODING_RAW) {
-            Serial.printf("UDP: Unsupported encoding %d\n", encoding);
+            Serial.printf("UDP: Unsupported encoding %d\r\n", encoding);
             return 0;
         }
 
@@ -137,7 +137,7 @@ public:
         uint16_t dataOffset = PACKET_HEADER_SIZE + FRAME_HEADER_SIZE;
 
         if (len < dataOffset + expectedDataSize) {
-            Serial.printf("UDP: Insufficient data: got %d, need %d\n",
+            Serial.printf("UDP: Insufficient data: got %d, need %d\r\n",
                           len - dataOffset, expectedDataSize);
             return 0;
         }

@@ -180,7 +180,7 @@ void checkIdleTimeout() {
 // ============================================================================
 
 void onTouchEvent(uint8_t touchIdx) {
-    Serial.printf("Touch %d detected\n", touchIdx);
+    Serial.printf("Touch %d detected\r\n", touchIdx);
 
     // Flash corresponding WS2812
     leds.flashWS2812(touchIdx);
@@ -285,7 +285,7 @@ void UsbTerminal::processCommand(const char* line) {
     } else if (strcmp(cmd, "test") == 0) {
         cmdTest();
     } else {
-        Serial.printf("Unknown command: %s\n", cmd);
+        Serial.printf("Unknown command: %s\r\n", cmd);
         Serial.println("Type 'help' for available commands");
     }
 }
@@ -307,9 +307,9 @@ void UsbTerminal::cmdHelp() {
 
 void UsbTerminal::cmdStatus() {
     Serial.println("=== Device Status ===");
-    Serial.printf("Name: %s\n", config->deviceName);
-    Serial.printf("Device ID: %s\n", deviceId);
-    Serial.printf("WiFi SSID: %s\n", config->wifiSsid);
+    Serial.printf("Name: %s\r\n", config->deviceName);
+    Serial.printf("Device ID: %s\r\n", deviceId);
+    Serial.printf("WiFi SSID: %s\r\n", config->wifiSsid);
 
     if (transport) {
         const char* stateStr;
@@ -320,32 +320,32 @@ void UsbTerminal::cmdStatus() {
             case WifiState::CLIENT_ACTIVE: stateStr = "Client Active"; break;
             default: stateStr = "Unknown"; break;
         }
-        Serial.printf("WiFi State: %s\n", stateStr);
+        Serial.printf("WiFi State: %s\r\n", stateStr);
 
         if (transport->isWifiConnected()) {
-            Serial.printf("IP Address: %s\n", transport->getIP().toString().c_str());
-            Serial.printf("Signal: %d dBm\n", transport->getRSSI());
-            Serial.printf("Control Port: %d (TCP)\n", transport->getPort());
+            Serial.printf("IP Address: %s\r\n", transport->getIP().toString().c_str());
+            Serial.printf("Signal: %d dBm\r\n", transport->getRSSI());
+            Serial.printf("Control Port: %d (TCP)\r\n", transport->getPort());
         }
     }
 
-    Serial.printf("UDP Data Port: %d\n", udpReceiver.getPort());
+    Serial.printf("UDP Data Port: %d\r\n", udpReceiver.getPort());
     Serial.println("--- Controls ---");
-    Serial.printf("Brightness: %d\n", config->brightness);
-    Serial.printf("Gamma: %.1f\n", config->gamma / 10.0);
-    Serial.printf("Local Mode: %d\n", config->localMode);
-    Serial.printf("WS2812 Offset: %d\n", config->ws2812Offset);
-    Serial.printf("Idle Timeout: %d sec\n", config->idleTimeout);
-    Serial.printf("Input Events: %s\n", config->inputEventsEnabled ? "enabled" : "disabled");
+    Serial.printf("Brightness: %d\r\n", config->brightness);
+    Serial.printf("Gamma: %.1f\r\n", config->gamma / 10.0);
+    Serial.printf("Local Mode: %d\r\n", config->localMode);
+    Serial.printf("WS2812 Offset: %d\r\n", config->ws2812Offset);
+    Serial.printf("Idle Timeout: %d sec\r\n", config->idleTimeout);
+    Serial.printf("Input Events: %s\r\n", config->inputEventsEnabled ? "enabled" : "disabled");
     Serial.println("--- Stats ---");
-    Serial.printf("UDP Packets: %lu received, %lu dropped\n",
+    Serial.printf("UDP Packets: %lu received, %lu dropped\r\n",
                   udpReceiver.getPacketsReceived(), udpReceiver.getPacketsDropped());
 }
 
 void UsbTerminal::cmdWifi(const char* args) {
     if (strlen(args) == 0) {
         Serial.println("Usage: wifi <ssid> <password>");
-        Serial.printf("Current SSID: %s\n", config->wifiSsid);
+        Serial.printf("Current SSID: %s\r\n", config->wifiSsid);
         return;
     }
 
@@ -367,41 +367,41 @@ void UsbTerminal::cmdWifi(const char* args) {
     strncpy(config->wifiSsid, ssid, sizeof(config->wifiSsid));
     strncpy(config->wifiPassword, password, sizeof(config->wifiPassword));
 
-    Serial.printf("WiFi credentials set: %s\n", ssid);
+    Serial.printf("WiFi credentials set: %s\r\n", ssid);
     Serial.println("Use 'save' to persist, then restart to connect");
 }
 
 void UsbTerminal::cmdName(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current name: %s\n", config->deviceName);
+        Serial.printf("Current name: %s\r\n", config->deviceName);
         return;
     }
 
     strncpy(config->deviceName, args, DEVICE_NAME_MAX_LEN);
     config->deviceName[DEVICE_NAME_MAX_LEN] = '\0';
-    Serial.printf("Device name set to: %s\n", config->deviceName);
+    Serial.printf("Device name set to: %s\r\n", config->deviceName);
 }
 
 void UsbTerminal::cmdOffset(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current WS2812 offset: %d\n", config->ws2812Offset);
+        Serial.printf("Current WS2812 offset: %d\r\n", config->ws2812Offset);
         return;
     }
 
     int offset = atoi(args);
     if (offset < 0 || offset >= RING_NUM_PIXELS) {
-        Serial.printf("Offset must be 0-%d\n", RING_NUM_PIXELS - 1);
+        Serial.printf("Offset must be 0-%d\r\n", RING_NUM_PIXELS - 1);
         return;
     }
 
     config->ws2812Offset = offset;
     if (leds) leds->setWS2812Offset(offset);
-    Serial.printf("WS2812 offset set to: %d\n", offset);
+    Serial.printf("WS2812 offset set to: %d\r\n", offset);
 }
 
 void UsbTerminal::cmdBrightness(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current brightness: %d\n", config->brightness);
+        Serial.printf("Current brightness: %d\r\n", config->brightness);
         return;
     }
 
@@ -413,12 +413,12 @@ void UsbTerminal::cmdBrightness(const char* args) {
 
     config->brightness = bright;
     if (leds) leds->setBrightness(bright);
-    Serial.printf("Brightness set to: %d\n", bright);
+    Serial.printf("Brightness set to: %d\r\n", bright);
 }
 
 void UsbTerminal::cmdMode(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current mode: %d\n", config->localMode);
+        Serial.printf("Current mode: %d\r\n", config->localMode);
         Serial.println("Modes: 0=blank, 1=cylon, 2=rainbow, 3=fire, 4=sparkle, 5=chase, 255=cycle");
         return;
     }
@@ -431,7 +431,7 @@ void UsbTerminal::cmdMode(const char* args) {
 
     config->localMode = mode;
     localModes.start(mode);
-    Serial.printf("Local mode set to: %d\n", mode);
+    Serial.printf("Local mode set to: %d\r\n", mode);
 }
 
 void UsbTerminal::cmdSave() {
@@ -447,7 +447,7 @@ void UsbTerminal::cmdTouch() {
     Serial.println("Touch sensor values:");
     if (touch) {
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
-            Serial.printf("  Touch %d: value=%d, baseline=%d, threshold=%d, touched=%s\n",
+            Serial.printf("  Touch %d: value=%d, baseline=%d, threshold=%d, touched=%s\r\n",
                           i, touch->getRawValue(i), touch->getBaseline(i),
                           touch->getThreshold(i), touch->isTouched(i) ? "YES" : "no");
         }
@@ -515,7 +515,7 @@ void setup() {
 
     // Generate device ID from MAC
     generateDeviceId();
-    Serial.printf("Device ID: %s\n", deviceId);
+    Serial.printf("Device ID: %s\r\n", deviceId);
 
     // Initialize LED driver
     leds.begin();
@@ -551,7 +551,7 @@ void setup() {
     lastActivityTime = millis();
 
     Serial.println("Initialization complete!");
-    Serial.printf("Ring: %d pixels, WS2812: %d satellites\n", RING_NUM_PIXELS, WS2812_NUM_LEDS);
+    Serial.printf("Ring: %d pixels, WS2812: %d satellites\r\n", RING_NUM_PIXELS, WS2812_NUM_LEDS);
 }
 
 void loop() {

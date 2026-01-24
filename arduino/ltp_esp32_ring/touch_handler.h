@@ -55,7 +55,7 @@ public:
             baselines[i] = sum / TOUCH_CALIBRATION_SAMPLES;
             thresholds[i] = (uint16_t)(baselines[i] * TOUCH_THRESHOLD_RATIO);
 
-            Serial.printf("  Touch %d: baseline=%d, threshold=%d\n",
+            Serial.printf("  Touch %d: baseline=%d, threshold=%d\r\n",
                           i, baselines[i], thresholds[i]);
         }
 

@@ -1,0 +1,18 @@
+
+- ESP32
+- WiFi support
+- 202 APA102 RGB LEDs arranged in a ring
+- 4 WS2812 RGB LEDs
+- 4 capacitence touch sesoors (wires from pins to expost metal)
+- the WS2812 LEDs are each associated with one capacitance sensor
+- the WS2812 LEDs are located evenely spaced just outside the ring
+  - the expeact positioning of those relative to the ring start will have to be configurable
+- the WS2812 LEDs assume the same color as the average of the 5 or so closest pixels to them, a wheighted average favoring the closest would be good
+- the touch sensors cause the cooresponding WS2812 LED to flash
+- the touch sensors by default cause an entry into a local mode, 255 for cycle through local modes
+- the ring pixels are exposed as one strip, the WS2812 LEDs need not be exposed.
+- the touch sensors are to be exposed
+- local modes include
+  - the usual ones
+  - modes that use the ring, making a seamless effect not exposing the start and end of the ring
+- if the sink protocol cannot be implemnted in the ESP32 then a simpler protocol may be used between the the ESP32 and a sink protocol program on a Linux host
