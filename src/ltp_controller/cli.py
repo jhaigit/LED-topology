@@ -118,6 +118,7 @@ async def run_controller(
     web_enabled: bool = True,
     web_host: str = "0.0.0.0",
     web_port: int = 8080,
+    config_path: str | None = None,
 ) -> None:
     """Run the controller."""
     stop_event = asyncio.Event()
@@ -166,7 +167,7 @@ async def run_controller(
                 input_manager=input_manager,
                 rule_engine=rule_engine,
                 event_loop=loop,
-                config_path=args.config,
+                config_path=config_path,
             )
 
             def run_web() -> None:
@@ -337,6 +338,7 @@ def main() -> int:
                 web_enabled=web_enabled,
                 web_host=web_host,
                 web_port=web_port,
+                config_path=args.config,
             )
         )
     except KeyboardInterrupt:
