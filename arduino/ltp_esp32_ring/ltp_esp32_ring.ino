@@ -526,18 +526,17 @@ void setup() {
         localModes.start(config.localMode);
     }
 
-    // Initialize UDP receiver
-    udpReceiver.begin(5001);  // Fixed port for UDP data
-
-    // Initialize protocol handler
-    protocol.begin(&config, &leds, udpReceiver.getPort());
-
-    // Initialize WiFi
+    // Initialize WiFi first (required before UDP)
     if (strlen(config.wifiSsid) > 0) {
         wifi.begin(config.wifiSsid, config.wifiPassword, config.deviceName);
     } else {
         Serial.println("WiFi: No credentials configured. Use terminal to set.");
+        // Still need to init WiFi stack for UDP to work later
+        WiFi.mode(WIFI_STA);
     }
+
+    // Initialize protocol handler (UDP receiver started when WiFi connects)
+    protocol.begin(&config, &leds, 5001);  // UDP port will be 5001
 
     // Initialize USB terminal
     terminal.begin(&config, &wifi, &leds, &touch);
@@ -554,11 +553,15 @@ void loop() {
     // Update WiFi connection
     wifi.update();
 
-    // Start mDNS when WiFi connects
-    static bool mdnsStarted = false;
-    if (wifi.isWifiConnected() && !mdnsStarted) {
+    // Start mDNS and UDP receiver when WiFi connects
+    static bool networkStarted = false;
+    if (wifi.isWifiConnected() && !networkStarted) {
+        // Start UDP receiver now that WiFi is ready
+        udpReceiver.begin(5001);
+
+        // Start mDNS advertisement
         wifi.startMdns(deviceId, config.deviceName, RING_NUM_PIXELS, "rgb", 60);
-        mdnsStarted = true;
+        networkStarted = true;
     }
 
     // Handle client connection/disconnection
