@@ -3,6 +3,7 @@
  *
  * Manages WiFi connection and TCP server for JSON control channel.
  * Messages are newline-delimited JSON.
+ * Supports multiple simultaneous client connections.
  */
 
 #ifndef WIFI_TRANSPORT_H
@@ -12,6 +13,12 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include "config.h"
+
+// Maximum simultaneous TCP clients
+#define MAX_TCP_CLIENTS 4
+
+// Per-client line buffer size
+#define CLIENT_LINE_BUFFER_SIZE 1024
 
 // Connection state enum
 enum class WifiState {
@@ -66,8 +73,12 @@ public:
         , connectStartTime(0)
         , lastReconnectAttempt(0)
         , mdnsStarted(false)
-        , linePos(0)
-    {}
+        , activeClientIdx(-1)
+    {
+        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+            linePos[i] = 0;
+        }
+    }
 
     // Initialize WiFi connection
     bool begin(const char* ssid, const char* password, const char* hostname) {
@@ -149,9 +160,25 @@ public:
         Serial.printf("mDNS: Started as %s.local, service _ltp-sink._tcp\r\n", hostname);
     }
 
-    // Check if client is connected
+    // Check if any client is connected
     bool hasClient() {
-        return client && client.connected();
+        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+            if (clients[i] && clients[i].connected()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Get number of connected clients
+    int clientCount() {
+        int count = 0;
+        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+            if (clients[i] && clients[i].connected()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     // Get current WiFi state
@@ -175,56 +202,75 @@ public:
     // Get TCP server port
     uint16_t getPort() const { return serverPort; }
 
-    // Read a line from client (returns empty string if no complete line)
+    // Read a line from any client (returns empty string if no complete line)
+    // Sets activeClientIdx to the client that sent the message
     String readLine() {
-        if (!client || !client.connected()) {
-            return String();
-        }
+        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+            if (!clients[i] || !clients[i].connected()) {
+                continue;
+            }
 
-        while (client.available()) {
-            char c = client.read();
-            if (c == '\n') {
-                lineBuffer[linePos] = '\0';
-                String line = String(lineBuffer);
-                linePos = 0;
-                return line;
-            } else if (c != '\r' && linePos < sizeof(lineBuffer) - 1) {
-                lineBuffer[linePos++] = c;
+            while (clients[i].available()) {
+                char c = clients[i].read();
+                if (c == '\n') {
+                    lineBuffers[i][linePos[i]] = '\0';
+                    String line = String(lineBuffers[i]);
+                    linePos[i] = 0;
+                    activeClientIdx = i;  // Remember which client sent this
+                    return line;
+                } else if (c != '\r' && linePos[i] < CLIENT_LINE_BUFFER_SIZE - 1) {
+                    lineBuffers[i][linePos[i]++] = c;
+                }
             }
         }
 
         return String();
     }
 
-    // Send a string to client
+    // Send a string to the client that last sent a message
     void send(const String& data) {
-        if (client && client.connected()) {
-            client.print(data);
+        if (activeClientIdx >= 0 && activeClientIdx < MAX_TCP_CLIENTS) {
+            if (clients[activeClientIdx] && clients[activeClientIdx].connected()) {
+                clients[activeClientIdx].print(data);
+            }
         }
     }
 
-    // Disconnect client
-    void disconnectClient() {
-        if (client) {
-            client.stop();
+    // Send a string to all connected clients
+    void broadcast(const String& data) {
+        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+            if (clients[i] && clients[i].connected()) {
+                clients[i].print(data);
+            }
         }
+    }
+
+    // Disconnect all clients
+    void disconnectAllClients() {
+        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+            if (clients[i]) {
+                clients[i].stop();
+            }
+            linePos[i] = 0;
+        }
+        activeClientIdx = -1;
         if (state == WifiState::CLIENT_ACTIVE) {
             state = WifiState::CONNECTED;
         }
-        linePos = 0;
     }
 
 private:
     WiFiServer server;
-    WiFiClient client;
+    WiFiClient clients[MAX_TCP_CLIENTS];
     uint16_t serverPort;
     WifiState state;
     uint32_t connectStartTime;
     uint32_t lastReconnectAttempt;
     bool mdnsStarted;
     char hostname[32];
-    char lineBuffer[1024];
-    size_t linePos;
+    char lineBuffers[MAX_TCP_CLIENTS][CLIENT_LINE_BUFFER_SIZE];
+    size_t linePos[MAX_TCP_CLIENTS];
+    int activeClientIdx;  // Index of client that last sent a complete message
 
     void handleConnecting() {
         if (WiFi.status() == WL_CONNECTED) {
@@ -246,29 +292,51 @@ private:
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("WiFi: Disconnected");
             state = WifiState::DISCONNECTED;
-            if (client) {
-                client.stop();
-            }
-            linePos = 0;
+            disconnectAllClients();
             return;
         }
 
-        // Check for new client connections (accept even if one exists)
+        // Check for new client connections
         WiFiClient newClient = server.available();
         if (newClient) {
-            // Close existing client if any
-            if (client && client.connected()) {
-                Serial.println("WiFi: Closing existing client for new connection");
-                client.stop();
+            // Find an empty slot
+            int slot = -1;
+            for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+                if (!clients[i] || !clients[i].connected()) {
+                    slot = i;
+                    break;
+                }
             }
-            client = newClient;
+
+            if (slot >= 0) {
+                clients[slot] = newClient;
+                linePos[slot] = 0;
+                state = WifiState::CLIENT_ACTIVE;
+                Serial.printf("WiFi: Client %d connected from %s (%d total)\r\n",
+                              slot, newClient.remoteIP().toString().c_str(), clientCount());
+            } else {
+                // No slots available, reject connection
+                Serial.println("WiFi: Max clients reached, rejecting connection");
+                newClient.stop();
+            }
+        }
+
+        // Update state based on client count
+        int count = clientCount();
+        if (count > 0 && state != WifiState::CLIENT_ACTIVE) {
             state = WifiState::CLIENT_ACTIVE;
-            linePos = 0;
-            Serial.printf("WiFi: Client connected from %s\r\n",
-                          client.remoteIP().toString().c_str());
-        } else if (state == WifiState::CLIENT_ACTIVE && (!client || !client.connected())) {
+        } else if (count == 0 && state == WifiState::CLIENT_ACTIVE) {
             state = WifiState::CONNECTED;
-            Serial.println("WiFi: Client disconnected");
+            Serial.println("WiFi: All clients disconnected");
+        }
+
+        // Clean up disconnected clients
+        for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
+            if (clients[i] && !clients[i].connected()) {
+                Serial.printf("WiFi: Client %d disconnected\r\n", i);
+                clients[i].stop();
+                linePos[i] = 0;
+            }
         }
     }
 };
