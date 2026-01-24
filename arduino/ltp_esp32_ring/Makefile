@@ -55,6 +55,7 @@ setup:
 	$(CLI) core install esp32:esp32
 	@echo ""
 	@echo "Installing required libraries..."
+	$(CLI) lib update-index
 	$(CLI) lib install "FastLED@$(FASTLED_VERSION)"
 	$(CLI) lib install "ArduinoJson@$(ARDUINOJSON_VERSION)"
 	@echo ""
@@ -62,9 +63,9 @@ setup:
 
 # Install/update libraries only
 install-libs:
+	$(CLI) lib update-index
 	$(CLI) lib install "FastLED@$(FASTLED_VERSION)"
 	$(CLI) lib install "ArduinoJson@$(ARDUINOJSON_VERSION)"
-	$(CLI) lib update-index
 	@echo "Libraries installed/updated."
 
 # Compile the sketch
