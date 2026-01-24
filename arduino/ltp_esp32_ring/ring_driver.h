@@ -29,9 +29,11 @@ public:
         FastLED.addLeds<APA102, RING_DATA_PIN, RING_CLOCK_PIN, RING_COLOR_ORDER, DATA_RATE_MHZ(8)>(
             ringLeds, RING_NUM_PIXELS);
 
-        // Initialize WS2812 satellites
-        FastLED.addLeds<WS2812, WS2812_DATA_PIN, WS2812_COLOR_ORDER>(
-            ws2812Leds, WS2812_NUM_LEDS);
+        // Initialize WS2812 satellites (each on separate pin)
+        FastLED.addLeds<WS2812, WS2812_PIN_0, WS2812_COLOR_ORDER>(ws2812Leds + 0, 1);
+        FastLED.addLeds<WS2812, WS2812_PIN_1, WS2812_COLOR_ORDER>(ws2812Leds + 1, 1);
+        FastLED.addLeds<WS2812, WS2812_PIN_2, WS2812_COLOR_ORDER>(ws2812Leds + 2, 1);
+        FastLED.addLeds<WS2812, WS2812_PIN_3, WS2812_COLOR_ORDER>(ws2812Leds + 3, 1);
 
         FastLED.setBrightness(brightness);
         clear();

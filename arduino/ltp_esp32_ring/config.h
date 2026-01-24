@@ -18,10 +18,13 @@
 #define RING_CLOCK_PIN      18      // VSPI CLK
 #define RING_SPI_SPEED      8000000 // 8 MHz SPI clock
 
-// WS2812 Satellite LEDs
+// WS2812 Satellite LEDs (each on separate pin)
 #define WS2812_NUM_LEDS     4
-#define WS2812_DATA_PIN     16      // RMT Channel 0
-#define WS2812_DEFAULT_OFFSET 0     // Ring position offset for WS2812 mapping
+#define WS2812_PIN_0        16      // WS2812 LED 0
+#define WS2812_PIN_1        17      // WS2812 LED 1
+#define WS2812_PIN_2        25      // WS2812 LED 2
+#define WS2812_PIN_3        26      // WS2812 LED 3
+#define WS2812_DEFAULT_OFFSET 21    // Ring position offset for WS2812 mapping
 
 // LED color order
 #define RING_COLOR_ORDER    BGR     // APA102 typical order
