@@ -406,7 +406,9 @@ class V2Renderer:
         try:
             return self._device.get_control(control_id)
         except LtpError as e:
-            logger.warning(f"Failed to get control {control_id}: {e}")
+            ctrl = self._controls.get(control_id)
+            ctrl_name = ctrl.name if ctrl else f"id={control_id}"
+            logger.warning(f"Failed to get control {ctrl_name}: {e}")
             return None
 
     def set_control(self, control_id: int, value: Any) -> bool:
@@ -418,7 +420,9 @@ class V2Renderer:
             self._device.set_control(control_id, value)
             return True
         except LtpError as e:
-            logger.warning(f"Failed to set control {control_id}: {e}")
+            ctrl = self._controls.get(control_id)
+            ctrl_name = ctrl.name if ctrl else f"id={control_id}"
+            logger.warning(f"Failed to set control {ctrl_name} to {value!r}: {e}")
             return False
 
     def set_brightness(self, value: int) -> bool:
