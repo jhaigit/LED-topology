@@ -12,7 +12,12 @@
 
 // Protocol constants
 #define LTP_START_BYTE      0xAA
-#define LTP_MAX_PAYLOAD     4096
+// LTP_MAX_PAYLOAD can be overridden before including this header
+// For AVR (Arduino Uno): use 256 or less
+// For ARM (Teensy, ESP32): can use up to 4096
+#ifndef LTP_MAX_PAYLOAD
+#define LTP_MAX_PAYLOAD     512  // Default for moderate RAM boards
+#endif
 #define LTP_PROTOCOL_MAJOR  2
 #define LTP_PROTOCOL_MINOR  0
 

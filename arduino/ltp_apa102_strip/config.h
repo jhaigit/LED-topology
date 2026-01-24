@@ -72,7 +72,9 @@
 #define DEVICE_NAME         "LTP-APA102"
 
 // Maximum payload size (Teensy 3.2 has 64KB RAM)
-#define MAX_PAYLOAD_SIZE    2048
+// LTP_MAX_PAYLOAD must be defined before including ltp_protocol.h
+#define LTP_MAX_PAYLOAD     2048
+#define MAX_PAYLOAD_SIZE    LTP_MAX_PAYLOAD
 
 // ============================================================================
 // IDLE TIMEOUT

@@ -46,7 +46,9 @@
 
 // Maximum payload we can handle (limited by RAM)
 // For AVR: keep small. For ARM (Teensy): can increase to 512+
-#define MAX_PAYLOAD_SIZE    192
+// MUST be defined before including ltp_protocol.h
+#define LTP_MAX_PAYLOAD     192
+#define MAX_PAYLOAD_SIZE    LTP_MAX_PAYLOAD
 
 // ============================================================================
 // GLOBALS
