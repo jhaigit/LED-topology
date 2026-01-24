@@ -14,6 +14,11 @@
  *   - Serial: USB (115200 baud default)
  */
 
+// Maximum payload size - MUST be defined before including ltp_protocol.h
+// 160 pixels * 3 bytes = 480 bytes for full frame
+#define LTP_MAX_PAYLOAD     512
+#define MAX_PAYLOAD_SIZE    LTP_MAX_PAYLOAD
+
 #include <EEPROM.h>
 #include <ltp_protocol.h>
 #include "led_driver.h"
@@ -24,9 +29,7 @@
 // ============================================================================
 
 // LED strip configuration
-// NOTE: Arduino Uno has only 2KB RAM. Max ~100 pixels with local modes,
-// or ~150 pixels without. For more pixels, use Teensy or disable features.
-#define NUM_PIXELS          100
+#define NUM_PIXELS          160
 #define DATA_PIN            11
 #define CLOCK_PIN           13
 #define USE_HARDWARE_SPI    true
@@ -38,17 +41,6 @@
 #define FIRMWARE_VERSION_MAJOR  1
 #define FIRMWARE_VERSION_MINOR  0
 #define DEVICE_NAME         "LTP-LPD8806"
-
-// Feature flags - disable to save flash/RAM on small boards
-#define ENABLE_LOCAL_MODES  1       // Set to 0 to disable local animations (~2KB flash)
-#define ENABLE_SUBMATRIX    0       // Set to 0 to disable submatrix support (~1KB flash)
-#define ENABLE_GET_PIXELS   0       // Set to 0 to disable pixel readback (~500B flash + dynamic RAM)
-
-// Maximum payload we can handle (limited by RAM)
-// For AVR: keep small. For ARM (Teensy): can increase to 512+
-// MUST be defined before including ltp_protocol.h
-#define LTP_MAX_PAYLOAD     192
-#define MAX_PAYLOAD_SIZE    LTP_MAX_PAYLOAD
 
 // ============================================================================
 // GLOBALS
@@ -66,7 +58,7 @@ LtpProtocol protocol(Serial, MAX_PAYLOAD_SIZE);
 #define EEPROM_CONFIG_ADDR  0
 #define DEFAULT_IDLE_TIMEOUT 600  // 10 minutes default
 
-// Local display modes (always defined for config compatibility)
+// Local display modes
 #define LOCAL_MODE_BLANK    0   // No local animation (default)
 #define LOCAL_MODE_CYLON    1   // Scanning red eye
 #define LOCAL_MODE_RAINBOW  2   // Rainbow cycle
@@ -74,11 +66,7 @@ LtpProtocol protocol(Serial, MAX_PAYLOAD_SIZE);
 #define LOCAL_MODE_SPARKLE  4   // Random sparkles
 #define LOCAL_MODE_CHASE    5   // Color chase
 #define LOCAL_MODE_CYCLE    255 // Cycle through all modes
-#if ENABLE_LOCAL_MODES
 #define LOCAL_MODE_COUNT    6   // Number of actual modes (excluding cycle)
-#else
-#define LOCAL_MODE_COUNT    1   // Only BLANK mode available
-#endif
 
 // Device configuration (stored in EEPROM)
 struct Config {
@@ -108,14 +96,12 @@ uint32_t lastActivityTime = 0;
 bool isIdle = false;
 
 // Local mode state
-#if ENABLE_LOCAL_MODES
 bool localModeActive = false;       // True if local mode is running
 uint8_t currentDisplayMode = 0;     // Actual mode being displayed (for cycle)
 uint32_t lastModeUpdate = 0;        // Last animation frame time
 uint32_t modeStartTime = 0;         // When current mode started (for cycle)
 uint16_t modePosition = 0;          // Animation position/state
 uint8_t modeHue = 0;                // Hue for rainbow/chase effects
-#endif
 
 // Statistics
 struct {
@@ -206,8 +192,6 @@ void checkIdleTimeout() {
 // ============================================================================
 // LOCAL DISPLAY MODES
 // ============================================================================
-
-#if ENABLE_LOCAL_MODES
 
 // HSV to RGB conversion (h: 0-255, s: 0-255, v: 0-255)
 void hsvToRgb(uint8_t h, uint8_t s, uint8_t v, uint8_t& r, uint8_t& g, uint8_t& b) {
@@ -324,12 +308,11 @@ void updateRainbow() {
 }
 
 // Fire effect animation
-// Uses fixed 64-byte heat array to save RAM, effect still looks good
 void updateFire() {
-    static uint8_t heat[64];
+    static uint8_t heat[NUM_PIXELS > 256 ? 256 : NUM_PIXELS];
     const uint8_t cooling = 55;
     const uint8_t sparking = 120;
-    const uint16_t numPixels = 64;
+    uint16_t numPixels = NUM_PIXELS > 256 ? 256 : NUM_PIXELS;
 
     // Cool down every cell
     for (uint16_t i = 0; i < numPixels; i++) {
@@ -349,10 +332,9 @@ void updateFire() {
         if (heat[y] > 255) heat[y] = 255;
     }
 
-    // Map heat to colors - scale 64 heat values to NUM_PIXELS LEDs
-    for (uint16_t i = 0; i < NUM_PIXELS; i++) {
-        uint16_t heatIdx = (i * numPixels) / NUM_PIXELS;
-        uint8_t t192 = (heat[heatIdx] * 192) / 255;
+    // Map heat to colors
+    for (uint16_t i = 0; i < numPixels; i++) {
+        uint8_t t192 = (heat[i] * 192) / 255;
         uint8_t r, g, b;
 
         if (t192 < 64) {
@@ -459,15 +441,6 @@ void updateLocalMode() {
     }
 }
 
-#else // !ENABLE_LOCAL_MODES
-
-// Stub functions when local modes are disabled
-void exitLocalMode() {}
-void startLocalMode(uint8_t mode) { (void)mode; }
-void updateLocalMode() {}
-
-#endif // ENABLE_LOCAL_MODES
-
 // ============================================================================
 // PROTOCOL HANDLERS
 // ============================================================================
@@ -483,15 +456,7 @@ void sendHello() {
     payload[6] = NUM_PIXELS >> 8;
     payload[7] = leds.getColorFormat();
     payload[8] = CAPS_BRIGHTNESS | CAPS_EXTENDED; // Caps byte 1
-    // Caps byte 2 (extended) - only advertise enabled features
-    payload[9] = CAPS_EEPROM
-#if ENABLE_GET_PIXELS
-        | CAPS_PIXEL_READBACK
-#endif
-#if ENABLE_SUBMATRIX
-        | CAPS_SUBMATRIX
-#endif
-        ;
+    payload[9] = CAPS_PIXEL_READBACK | CAPS_SUBMATRIX | CAPS_EEPROM; // Caps byte 2 (extended)
     payload[10] = NUM_CONTROLS; // Control count
     payload[11] = 0; // Input count (no inputs in this example)
 
@@ -519,14 +484,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             response[respLen++] = NUM_PIXELS >> 8;
             response[respLen++] = leds.getColorFormat();
             response[respLen++] = CAPS_BRIGHTNESS | CAPS_EXTENDED;
-            response[respLen++] = CAPS_EEPROM
-#if ENABLE_GET_PIXELS
-                | CAPS_PIXEL_READBACK
-#endif
-#if ENABLE_SUBMATRIX
-                | CAPS_SUBMATRIX
-#endif
-                ;
+            response[respLen++] = CAPS_PIXEL_READBACK | CAPS_SUBMATRIX;
             response[respLen++] = NUM_CONTROLS;
             // Device name (null-terminated, max 16 bytes)
             {
@@ -736,7 +694,6 @@ void handlePixelFrame(const uint8_t* payload, uint16_t length) {
     }
 }
 
-#if ENABLE_SUBMATRIX
 void handlePixelSubmatrix(const uint8_t* payload, uint16_t length) {
     // Payload format:
     // [0] strip_id
@@ -825,7 +782,6 @@ void handlePixelSubmatrix(const uint8_t* payload, uint16_t length) {
         stats.framesDisplayed++;
     }
 }
-#endif // ENABLE_SUBMATRIX
 
 void handleSetControl(const uint8_t* payload, uint16_t length) {
     if (length < 2) {
@@ -931,7 +887,6 @@ void handleGetControl(const uint8_t* payload, uint16_t length) {
     protocol.sendPacket(CMD_CONTROL_RESPONSE, response, respLen);
 }
 
-#if ENABLE_GET_PIXELS
 void handleGetPixels(const uint8_t* payload, uint16_t length) {
     if (length < 5) {
         protocol.sendNak(CMD_GET_PIXELS, ERR_INVALID_LENGTH);
@@ -975,7 +930,6 @@ void handleGetPixels(const uint8_t* payload, uint16_t length) {
     protocol.sendPacket(CMD_PIXEL_RESPONSE, response, 5 + count * leds.getBytesPerPixel());
     delete[] response;
 }
-#endif // ENABLE_GET_PIXELS
 
 void processPacket(const LtpPacket& pkt) {
     switch (pkt.cmd) {
@@ -1017,11 +971,7 @@ void processPacket(const LtpPacket& pkt) {
             break;
 
         case CMD_GET_PIXELS:
-#if ENABLE_GET_PIXELS
             handleGetPixels(pkt.payload, pkt.length);
-#else
-            protocol.sendNak(CMD_GET_PIXELS, ERR_INVALID_CMD);
-#endif
             break;
 
         case CMD_GET_CONTROL:
@@ -1041,11 +991,7 @@ void processPacket(const LtpPacket& pkt) {
             break;
 
         case CMD_PIXEL_SUBMATRIX:
-#if ENABLE_SUBMATRIX
             handlePixelSubmatrix(pkt.payload, pkt.length);
-#else
-            protocol.sendNak(CMD_PIXEL_SUBMATRIX, ERR_INVALID_CMD);
-#endif
             break;
 
         case CMD_SET_CONTROL:
@@ -1103,11 +1049,9 @@ void setup() {
     stats.startTime = lastActivityTime;
 
     // Start local mode if configured
-#if ENABLE_LOCAL_MODES
     if (config.localMode != LOCAL_MODE_BLANK) {
         startLocalMode(config.localMode);
     }
-#endif
 
     // Send HELLO to announce ourselves
     delay(100); // Small delay for serial to stabilize
