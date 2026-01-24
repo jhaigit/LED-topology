@@ -330,9 +330,14 @@ void UsbTerminal::cmdStatus() {
     }
 
     Serial.printf("UDP Data Port: %d\n", udpReceiver.getPort());
+    Serial.println("--- Controls ---");
     Serial.printf("Brightness: %d\n", config->brightness);
+    Serial.printf("Gamma: %.1f\n", config->gamma / 10.0);
     Serial.printf("Local Mode: %d\n", config->localMode);
     Serial.printf("WS2812 Offset: %d\n", config->ws2812Offset);
+    Serial.printf("Idle Timeout: %d sec\n", config->idleTimeout);
+    Serial.printf("Input Events: %s\n", config->inputEventsEnabled ? "enabled" : "disabled");
+    Serial.println("--- Stats ---");
     Serial.printf("UDP Packets: %lu received, %lu dropped\n",
                   udpReceiver.getPacketsReceived(), udpReceiver.getPacketsDropped());
 }
