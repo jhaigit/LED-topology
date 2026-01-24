@@ -195,13 +195,7 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     localMode["min"] = 0;
     localMode["max"] = 255;
 
-    JsonObject ws2812Offset = controls.add<JsonObject>();
-    ws2812Offset["id"] = "ws2812_offset";
-    ws2812Offset["name"] = "WS2812 Offset";
-    ws2812Offset["type"] = "number";
-    ws2812Offset["value"] = config->ws2812Offset;
-    ws2812Offset["min"] = 0;
-    ws2812Offset["max"] = RING_NUM_PIXELS - 1;
+    // Note: ws2812_offset is USB-terminal only, not exposed via sink protocol
 
     // Inputs (touch sensors)
     JsonArray inputs = device["inputs"].to<JsonArray>();
@@ -284,11 +278,10 @@ String SinkProtocol::handleControlGet(int seq, JsonDocument& doc) {
             values[idStr] = getControlValue(idStr);
         }
     } else {
-        // Return all controls
+        // Return all controls (ws2812_offset is USB-only)
         values["brightness"] = config->brightness;
         values["gamma"] = config->gamma / 10.0;
         values["local_mode"] = config->localMode;
-        values["ws2812_offset"] = config->ws2812Offset;
     }
 
     String response;
@@ -361,7 +354,7 @@ float SinkProtocol::getControlValue(const char* id) {
     if (strcmp(id, "brightness") == 0) return config->brightness;
     if (strcmp(id, "gamma") == 0) return config->gamma / 10.0;
     if (strcmp(id, "local_mode") == 0) return config->localMode;
-    if (strcmp(id, "ws2812_offset") == 0) return config->ws2812Offset;
+    // ws2812_offset is USB-terminal only
     return 0;
 }
 
@@ -383,11 +376,7 @@ bool SinkProtocol::setControlValue(const char* id, float value) {
         }
         return false;
     }
-    if (strcmp(id, "ws2812_offset") == 0) {
-        config->ws2812Offset = constrain((int)value, 0, RING_NUM_PIXELS - 1);
-        if (leds) leds->setWS2812Offset(config->ws2812Offset);
-        return true;
-    }
+    // ws2812_offset is USB-terminal only
     return false;
 }
 
