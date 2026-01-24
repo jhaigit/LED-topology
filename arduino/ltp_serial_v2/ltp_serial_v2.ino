@@ -24,7 +24,9 @@
 // ============================================================================
 
 // LED strip configuration
-#define NUM_PIXELS          160
+// NOTE: Arduino Uno has only 2KB RAM. Max ~100 pixels with local modes,
+// or ~150 pixels without. For more pixels, use Teensy or disable features.
+#define NUM_PIXELS          100
 #define DATA_PIN            11
 #define CLOCK_PIN           13
 #define USE_HARDWARE_SPI    true
@@ -43,8 +45,8 @@
 #define ENABLE_GET_PIXELS   0       // Set to 0 to disable pixel readback (~500B flash + dynamic RAM)
 
 // Maximum payload we can handle (limited by RAM)
-// Reduced for AVR boards - increase for ARM boards with more RAM
-#define MAX_PAYLOAD_SIZE    256
+// For AVR: keep small. For ARM (Teensy): can increase to 512+
+#define MAX_PAYLOAD_SIZE    192
 
 // ============================================================================
 // GLOBALS
@@ -320,11 +322,12 @@ void updateRainbow() {
 }
 
 // Fire effect animation
+// Uses fixed 64-byte heat array to save RAM, effect still looks good
 void updateFire() {
-    static uint8_t heat[NUM_PIXELS > 256 ? 256 : NUM_PIXELS];
+    static uint8_t heat[64];
     const uint8_t cooling = 55;
     const uint8_t sparking = 120;
-    uint16_t numPixels = NUM_PIXELS > 256 ? 256 : NUM_PIXELS;
+    const uint16_t numPixels = 64;
 
     // Cool down every cell
     for (uint16_t i = 0; i < numPixels; i++) {
@@ -344,9 +347,10 @@ void updateFire() {
         if (heat[y] > 255) heat[y] = 255;
     }
 
-    // Map heat to colors
-    for (uint16_t i = 0; i < numPixels; i++) {
-        uint8_t t192 = (heat[i] * 192) / 255;
+    // Map heat to colors - scale 64 heat values to NUM_PIXELS LEDs
+    for (uint16_t i = 0; i < NUM_PIXELS; i++) {
+        uint16_t heatIdx = (i * numPixels) / NUM_PIXELS;
+        uint8_t t192 = (heat[heatIdx] * 192) / 255;
         uint8_t r, g, b;
 
         if (t192 < 64) {
