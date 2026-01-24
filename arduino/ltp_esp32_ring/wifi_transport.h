@@ -253,19 +253,22 @@ private:
             return;
         }
 
-        // Check for new client connections
-        if (!client || !client.connected()) {
-            WiFiClient newClient = server.available();
-            if (newClient) {
-                client = newClient;
-                state = WifiState::CLIENT_ACTIVE;
-                linePos = 0;
-                Serial.printf("WiFi: Client connected from %s\r\n",
-                              client.remoteIP().toString().c_str());
-            } else if (state == WifiState::CLIENT_ACTIVE) {
-                state = WifiState::CONNECTED;
-                Serial.println("WiFi: Client disconnected");
+        // Check for new client connections (accept even if one exists)
+        WiFiClient newClient = server.available();
+        if (newClient) {
+            // Close existing client if any
+            if (client && client.connected()) {
+                Serial.println("WiFi: Closing existing client for new connection");
+                client.stop();
             }
+            client = newClient;
+            state = WifiState::CLIENT_ACTIVE;
+            linePos = 0;
+            Serial.printf("WiFi: Client connected from %s\r\n",
+                          client.remoteIP().toString().c_str());
+        } else if (state == WifiState::CLIENT_ACTIVE && (!client || !client.connected())) {
+            state = WifiState::CONNECTED;
+            Serial.println("WiFi: Client disconnected");
         }
     }
 };
