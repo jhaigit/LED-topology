@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 
 from libltp import (
-    ControlClient,
     DataSender,
     stream_control,
     stream_setup,
@@ -31,6 +30,12 @@ from ltp_controller.virtual_sources.fonts import (
     HAS_PIL,
 )
 
+# Avoid circular import
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ltp_controller.sink_connection_pool import SinkConnectionPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +44,6 @@ class SinkStream:
     """Active stream to a sink."""
 
     sink_id: str
-    client: ControlClient
     sender: DataSender
     stream_id: str
     udp_port: int
@@ -53,11 +57,20 @@ class SinkController:
     patterns without requiring a source device.
     """
 
-    def __init__(self, controller: Controller):
+    def __init__(
+        self,
+        controller: Controller,
+        connection_pool: "SinkConnectionPool | None" = None,
+    ):
         self.controller = controller
+        self._pool = connection_pool
         self._streams: dict[str, SinkStream] = {}
         self._paint_buffers: dict[str, np.ndarray] = {}
         self._lock = asyncio.Lock()
+
+    def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
+        """Set the connection pool (for late binding)."""
+        self._pool = pool
 
     async def _get_or_create_stream(self, sink: DeviceState) -> SinkStream:
         """Get existing stream or create new one to sink."""
@@ -67,9 +80,9 @@ class SinkController:
             stream = self._streams[sink_id]
             # Verify stream is still valid
             try:
-                # Quick check - if client is closed, recreate
-                if stream.client._writer is None or stream.client._writer.is_closing():
-                    raise ConnectionError("Stream closed")
+                # Check if connection is still active via pool
+                if self._pool and not self._pool.is_connected(sink_id):
+                    raise ConnectionError("Pool connection closed")
                 # Check if pixel count changed (device might have reconnected with different config)
                 current_pixel_count = self._get_pixel_count(sink)
                 if stream.pixel_count != current_pixel_count:
@@ -80,17 +93,15 @@ class SinkController:
                 # Clean up old stream
                 await self._cleanup_stream(sink_id)
 
-        # Create new stream
-        client = ControlClient(sink.host, sink.port)
-        await client.connect()
+        # Set up stream via pool
+        if not self._pool:
+            raise ValueError("No connection pool available")
 
-        # Set up stream
         setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
-        setup_resp = await client.request(setup_req)
+        setup_resp = await self._pool.request(sink_id, setup_req)
 
-        if setup_resp.data.get("status") != "ok":
-            await client.close()
-            raise ValueError(f"Stream setup failed: {setup_resp.data}")
+        if not setup_resp or setup_resp.data.get("status") != "ok":
+            raise ValueError(f"Stream setup failed: {setup_resp.data if setup_resp else 'no response'}")
 
         udp_port = setup_resp.data["udp_port"]
         stream_id = setup_resp.data["stream_id"]
@@ -101,7 +112,7 @@ class SinkController:
 
         # Start stream
         start_req = stream_control(0, stream_id, StreamAction.START)
-        await client.request(start_req)
+        await self._pool.request(sink_id, start_req)
 
         # Get pixel count and dimensions from sink
         pixel_count = self._get_pixel_count(sink)
@@ -109,7 +120,6 @@ class SinkController:
 
         stream = SinkStream(
             sink_id=sink_id,
-            client=client,
             sender=sender,
             stream_id=stream_id,
             udp_port=udp_port,
@@ -127,20 +137,16 @@ class SinkController:
         if not stream:
             return
 
-        try:
-            # Stop stream
-            stop_req = stream_control(0, stream.stream_id, StreamAction.STOP)
-            await stream.client.request(stop_req, timeout=2.0)
-        except Exception:
-            pass
+        # Stop stream via pool
+        if self._pool and self._pool.is_connected(sink_id):
+            try:
+                stop_req = stream_control(0, stream.stream_id, StreamAction.STOP)
+                await self._pool.request(sink_id, stop_req, timeout=2.0)
+            except Exception:
+                pass
 
         try:
             await stream.sender.stop()
-        except Exception:
-            pass
-
-        try:
-            await stream.client.close()
         except Exception:
             pass
 
@@ -150,15 +156,15 @@ class SinkController:
         """Get pixel count from sink device."""
         props = sink.device.properties
 
-        if "pixels" in props:
+        if props.get("pixels"):
             return int(props["pixels"])
 
-        if "dim" in props:
+        if props.get("dim"):
             dims = [int(d) for d in props["dim"].split("x")]
             return int(np.prod(dims))
 
         # Check capabilities
-        if sink.capabilities and "pixels" in sink.capabilities:
+        if sink.capabilities and sink.capabilities.get("pixels"):
             return sink.capabilities["pixels"]
 
         # Default
@@ -168,11 +174,11 @@ class SinkController:
         """Get dimensions from sink device."""
         props = sink.device.properties
 
-        if "dim" in props:
+        if props.get("dim"):
             return [int(d) for d in props["dim"].split("x")]
 
         # Check capabilities
-        if sink.capabilities and "dimensions" in sink.capabilities:
+        if sink.capabilities and sink.capabilities.get("dimensions"):
             return sink.capabilities["dimensions"]
 
         # Fall back to pixel count as 1D

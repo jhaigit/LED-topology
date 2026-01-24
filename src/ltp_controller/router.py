@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ltp_controller.virtual_sources import VirtualSourceManager
+    from ltp_controller.sink_connection_pool import SinkConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -154,9 +155,11 @@ class RoutingEngine:
         self,
         controller: Controller,
         virtual_source_manager: "VirtualSourceManager | None" = None,
+        connection_pool: "SinkConnectionPool | None" = None,
     ):
         self.controller = controller
         self._virtual_source_manager = virtual_source_manager
+        self._pool = connection_pool
         self._routes: dict[str, Route] = {}
         self._running = False
         self._route_tasks: dict[str, asyncio.Task] = {}
@@ -167,6 +170,10 @@ class RoutingEngine:
     def set_virtual_source_manager(self, manager: "VirtualSourceManager") -> None:
         """Set the virtual source manager (for late binding)."""
         self._virtual_source_manager = manager
+
+    def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
+        """Set the connection pool (for late binding)."""
+        self._pool = pool
 
     def _is_virtual_source(self, source_id: str) -> bool:
         """Check if a source ID refers to a virtual source."""
@@ -391,14 +398,19 @@ class RoutingEngine:
         """Run a proxy route where controller forwards data."""
         logger.info(f"Starting proxy route: {route.name}")
 
-        # Connect to sink
-        route._sink_client = ControlClient(sink.host, sink.port)
-        await route._sink_client.connect()
-
-        # Set up stream to sink
+        # Set up stream to sink via pool
         sink_dims = self._get_dimensions(sink)
         setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
-        setup_resp = await route._sink_client.request(setup_req)
+
+        if self._pool:
+            setup_resp = await self._pool.request(sink.id, setup_req)
+            if not setup_resp:
+                raise ValueError("Sink stream setup failed: no response from pool")
+        else:
+            # Fallback to direct connection if no pool
+            route._sink_client = ControlClient(sink.host, sink.port)
+            await route._sink_client.connect()
+            setup_resp = await route._sink_client.request(setup_req)
 
         if setup_resp.data.get("status") != "ok":
             raise ValueError(f"Sink stream setup failed: {setup_resp.data}")
@@ -412,7 +424,10 @@ class RoutingEngine:
 
         # Start stream on sink
         start_req = stream_control(0, route._sink_stream_id, StreamAction.START)
-        await route._sink_client.request(start_req)
+        if self._pool:
+            await self._pool.request(sink.id, start_req)
+        else:
+            await route._sink_client.request(start_req)
 
         # Start data receiver FIRST to get the port for callback
         source_dims = self._get_dimensions(source)
@@ -506,12 +521,18 @@ class RoutingEngine:
         """Run a direct route where source sends directly to sink."""
         logger.info(f"Starting direct route: {route.name}")
 
-        # Connect to sink and set up stream
-        route._sink_client = ControlClient(sink.host, sink.port)
-        await route._sink_client.connect()
-
+        # Set up stream to sink via pool
         setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
-        setup_resp = await route._sink_client.request(setup_req)
+
+        if self._pool:
+            setup_resp = await self._pool.request(sink.id, setup_req)
+            if not setup_resp:
+                raise ValueError("Sink stream setup failed: no response from pool")
+        else:
+            # Fallback to direct connection if no pool
+            route._sink_client = ControlClient(sink.host, sink.port)
+            await route._sink_client.connect()
+            setup_resp = await route._sink_client.request(setup_req)
 
         if setup_resp.data.get("status") != "ok":
             raise ValueError(f"Sink stream setup failed: {setup_resp.data}")
@@ -521,7 +542,10 @@ class RoutingEngine:
 
         # Start stream on sink
         start_req = stream_control(0, route._sink_stream_id, StreamAction.START)
-        await route._sink_client.request(start_req)
+        if self._pool:
+            await self._pool.request(sink.id, start_req)
+        else:
+            await route._sink_client.request(start_req)
 
         # Connect to source and tell it to stream to sink
         route._source_client = ControlClient(source.host, source.port)
@@ -588,17 +612,22 @@ class RoutingEngine:
         logger.info(f"Virtual source config: output_dimensions={virtual_source.config.output_dimensions}")
         logger.info(f"Sink properties: {sink.device.properties}")
 
-        # Connect to sink
-        route._sink_client = ControlClient(sink.host, sink.port)
-        await route._sink_client.connect()
-
         # Get sink dimensions
         sink_dims = self._get_dimensions(sink)
         num_pixels = np.prod(sink_dims)
 
-        # Set up stream to sink
+        # Set up stream to sink via pool
         setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
-        setup_resp = await route._sink_client.request(setup_req)
+
+        if self._pool:
+            setup_resp = await self._pool.request(sink.id, setup_req)
+            if not setup_resp:
+                raise ValueError("Sink stream setup failed: no response from pool")
+        else:
+            # Fallback to direct connection if no pool
+            route._sink_client = ControlClient(sink.host, sink.port)
+            await route._sink_client.connect()
+            setup_resp = await route._sink_client.request(setup_req)
 
         if setup_resp.data.get("status") != "ok":
             raise ValueError(f"Sink stream setup failed: {setup_resp.data}")
@@ -612,7 +641,10 @@ class RoutingEngine:
 
         # Start stream on sink
         start_req = stream_control(0, route._sink_stream_id, StreamAction.START)
-        await route._sink_client.request(start_req)
+        if self._pool:
+            await self._pool.request(sink.id, start_req)
+        else:
+            await route._sink_client.request(start_req)
 
         # Store dimension info
         source_dims = virtual_source.config.output_dimensions
@@ -803,16 +835,16 @@ class RoutingEngine:
         props = device.device.properties
 
         # Try dim property (e.g., "60" or "16x16")
-        if "dim" in props:
+        if props.get("dim"):
             dim_str = props["dim"]
             return [int(d) for d in dim_str.split("x")]
 
         # Try pixels property
-        if "pixels" in props:
+        if props.get("pixels"):
             return [int(props["pixels"])]
 
         # Try output property (for sources)
-        if "output" in props:
+        if props.get("output"):
             output_str = props["output"]
             return [int(d) for d in output_str.split("x")]
 
@@ -835,7 +867,7 @@ class RoutingEngine:
     async def _cleanup_route(self, route: Route) -> None:
         """Clean up route resources."""
         logger.info(f"Cleaning up route {route.name}: sink_client={route._sink_client is not None}, "
-                   f"sink_stream_id={route._sink_stream_id}")
+                   f"sink_stream_id={route._sink_stream_id}, using_pool={self._pool is not None}")
 
         # Stop receiver
         if route._receiver:
@@ -847,17 +879,25 @@ class RoutingEngine:
             await route._sender.stop()
             route._sender = None
 
-        # Stop streams and close connections
-        if route._sink_client and route._sink_stream_id:
+        # Stop stream on sink (via pool or direct client)
+        if route._sink_stream_id:
             try:
                 logger.info(f"Sending STOP command for stream {route._sink_stream_id} to sink")
                 stop_req = stream_control(0, route._sink_stream_id, StreamAction.STOP)
-                resp = await route._sink_client.request(stop_req, timeout=2.0)
-                logger.info(f"STOP response from sink: {resp.data if resp else 'None'}")
+
+                if self._pool and not route._sink_client:
+                    # Get sink_id from the route
+                    resp = await self._pool.request(route.sink_id, stop_req, timeout=2.0)
+                    logger.info(f"STOP response from sink (via pool): {resp.data if resp else 'None'}")
+                elif route._sink_client:
+                    resp = await route._sink_client.request(stop_req, timeout=2.0)
+                    logger.info(f"STOP response from sink: {resp.data if resp else 'None'}")
+                else:
+                    logger.info(f"Skipping STOP for route {route.name}: no pool or sink_client")
             except Exception as e:
                 logger.warning(f"Failed to send STOP to sink for route {route.name}: {e}")
         else:
-            logger.info(f"Skipping STOP for route {route.name}: no sink_client or sink_stream_id")
+            logger.info(f"Skipping STOP for route {route.name}: no sink_stream_id")
 
         # Stop stream on source
         if route._source_client and route._source_stream_id:

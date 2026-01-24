@@ -18,6 +18,7 @@ from ltp_controller.router import RouteMode, RouteTransform, RoutingEngine
 from ltp_controller.rule_engine import RuleEngine
 from ltp_controller.rules import Action, ActionType, ComparisonOp, Trigger, TriggerType
 from ltp_controller.scalar_sources import ScalarSourceManager, SCALAR_SOURCE_TYPES
+from ltp_controller.sink_connection_pool import SinkConnectionPool
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager
 
@@ -112,6 +113,7 @@ async def run_controller(
     router: RoutingEngine,
     sink_controller: SinkController,
     virtual_source_manager: VirtualSourceManager,
+    connection_pool: SinkConnectionPool,
     scalar_source_manager: ScalarSourceManager | None = None,
     input_manager: InputEventManager | None = None,
     rule_engine: RuleEngine | None = None,
@@ -134,6 +136,9 @@ async def run_controller(
     try:
         # Start controller
         await controller.start()
+
+        # Start connection pool (after controller so it can register for sink discovery)
+        await connection_pool.start()
 
         # Start routing engine
         await router.start()
@@ -193,6 +198,7 @@ async def run_controller(
         virtual_source_manager.stop()
         await sink_controller.cleanup_all()
         await router.stop()
+        await connection_pool.stop()
         await controller.stop()
 
 
@@ -246,6 +252,12 @@ def main() -> int:
         health_check_interval=config.get("discovery", {}).get("health_check_interval", 10.0),
     )
 
+    # Create shared connection pool for sinks
+    connection_pool = SinkConnectionPool(controller)
+
+    # Wire pool to controller
+    controller.set_connection_pool(connection_pool)
+
     # Create virtual source manager
     virtual_source_manager = VirtualSourceManager()
 
@@ -255,14 +267,14 @@ def main() -> int:
         virtual_source_manager.load_from_config(vs_config)
         logger.info(f"Loaded {len(vs_config)} virtual sources from config")
 
-    # Create routing engine with virtual source manager
-    router = RoutingEngine(controller, virtual_source_manager)
+    # Create routing engine with virtual source manager and pool
+    router = RoutingEngine(controller, virtual_source_manager, connection_pool)
 
-    # Create sink controller for direct fills
-    sink_controller = SinkController(controller)
+    # Create sink controller for direct fills (with pool)
+    sink_controller = SinkController(controller, connection_pool)
 
-    # Create input event manager
-    input_manager = InputEventManager(controller)
+    # Create input event manager (with pool)
+    input_manager = InputEventManager(controller, connection_pool)
 
     # Create rule engine (needs to be wired after all managers exist)
     rule_engine = RuleEngine(
@@ -332,6 +344,7 @@ def main() -> int:
                 router=router,
                 sink_controller=sink_controller,
                 virtual_source_manager=virtual_source_manager,
+                connection_pool=connection_pool,
                 scalar_source_manager=scalar_source_manager,
                 input_manager=input_manager,
                 rule_engine=rule_engine,

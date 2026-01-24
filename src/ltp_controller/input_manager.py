@@ -4,10 +4,16 @@ import asyncio
 import logging
 from typing import Any, Callable
 
-from libltp import ControlClient, Message, MessageType, capability_request
+from libltp import Message, MessageType, capability_request
 
 from ltp_controller.controller import Controller, DeviceState
 from ltp_controller.rules import InputState
+
+# Avoid circular import
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ltp_controller.sink_connection_pool import SinkConnectionPool
 
 logger = logging.getLogger(__name__)
 
@@ -17,21 +23,28 @@ InputEventCallback = Callable[[str, int, str, str, Any, Any], None]
 
 
 class InputEventManager:
-    """Manages persistent connections to sinks to receive input events.
+    """Manages input events received from sinks.
 
-    Maintains TCP connections to all discovered sinks and listens for
-    INPUT_EVENT messages. Tracks the current state of all inputs and
-    notifies listeners when input values change.
+    Listens for INPUT_EVENT messages via the shared connection pool and
+    tracks the current state of all inputs. Notifies listeners when input
+    values change.
     """
 
-    def __init__(self, controller: Controller):
+    def __init__(
+        self,
+        controller: Controller,
+        connection_pool: "SinkConnectionPool | None" = None,
+    ):
         self.controller = controller
-        self._connections: dict[str, ControlClient] = {}  # sink_id -> client
+        self._pool = connection_pool
         self._input_states: dict[str, dict[int, InputState]] = {}  # sink_id -> {input_id -> state}
         self._listeners: list[InputEventCallback] = []
         self._running = False
-        self._reconnect_task: asyncio.Task | None = None
-        self._lock = asyncio.Lock()
+        self._retry_task: asyncio.Task | None = None
+
+    def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
+        """Set the connection pool (for late binding)."""
+        self._pool = pool
 
     def add_listener(self, callback: InputEventCallback) -> None:
         """Add a listener for input events.
@@ -77,12 +90,16 @@ class InputEventManager:
         # Register for sink discovery callbacks
         self.controller.on_sink_change(self._on_sink_change)
 
-        # Connect to all existing online sinks
-        for sink in self.controller.online_sinks:
-            asyncio.create_task(self._connect_to_sink(sink))
+        # Register as listener for unsolicited messages (INPUT_EVENT)
+        if self._pool:
+            self._pool.add_unsolicited_listener(self._handle_message)
 
-        # Start reconnection loop
-        self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+        # Load initial inputs from all existing online sinks
+        for sink in self.controller.online_sinks:
+            asyncio.create_task(self._load_inputs_for_sink(sink))
+
+        # Start periodic retry loop for sinks missing inputs
+        self._retry_task = asyncio.create_task(self._retry_load_inputs_loop())
 
         logger.info("Input event manager started")
 
@@ -93,90 +110,89 @@ class InputEventManager:
 
         self._running = False
 
-        # Cancel reconnection task
-        if self._reconnect_task:
-            self._reconnect_task.cancel()
+        # Cancel retry task
+        if self._retry_task:
+            self._retry_task.cancel()
             try:
-                await self._reconnect_task
+                await self._retry_task
             except asyncio.CancelledError:
                 pass
-            self._reconnect_task = None
+            self._retry_task = None
 
-        # Disconnect from all sinks
-        async with self._lock:
-            for sink_id in list(self._connections.keys()):
-                await self._disconnect_from_sink(sink_id)
+        # Unregister from pool
+        if self._pool:
+            self._pool.remove_unsolicited_listener(self._handle_message)
 
         logger.info("Input event manager stopped")
 
     def _on_sink_change(self, sink: DeviceState, is_online: bool) -> None:
         """Handle sink discovery/removal events."""
         if is_online:
-            # New sink or sink came online - connect to it
-            asyncio.create_task(self._connect_to_sink(sink))
-        else:
-            # Sink went offline - disconnect
-            asyncio.create_task(self._disconnect_from_sink(sink.id))
+            # New sink or sink came online - load its inputs
+            asyncio.create_task(self._load_inputs_for_sink(sink))
 
-    async def _connect_to_sink(self, sink: DeviceState) -> None:
-        """Establish a persistent connection to a sink for input events."""
-        sink_id = sink.id
+    async def _retry_load_inputs_loop(self) -> None:
+        """Periodically retry loading inputs for sinks that don't have them yet."""
+        while self._running:
+            await asyncio.sleep(5.0)  # Check every 5 seconds
 
-        async with self._lock:
-            # Already connected?
-            if sink_id in self._connections:
-                client = self._connections[sink_id]
-                if client.is_connected:
-                    return
-                # Clean up old connection
-                await self._disconnect_from_sink(sink_id)
-
-            if not sink.online:
-                return
-
-            try:
-                client = ControlClient(
-                    sink.host,
-                    sink.port,
-                    handler=lambda msg: self._handle_message(sink_id, msg),
+            for sink in self.controller.online_sinks:
+                sink_id = sink.id
+                # Check if this sink should have inputs but we don't have them
+                has_inputs_in_caps = (
+                    sink.capabilities and
+                    sink.capabilities.get("inputs") and
+                    len(sink.capabilities.get("inputs", [])) > 0
                 )
-                await client.connect()
-                self._connections[sink_id] = client
-                logger.info(f"Connected to sink {sink.name} for input events")
+                have_loaded_inputs = (
+                    sink_id in self._input_states and
+                    len(self._input_states[sink_id]) > 0
+                )
 
-                # Query initial input states from capability response
-                await self._query_initial_inputs(sink_id, client)
+                if has_inputs_in_caps and not have_loaded_inputs:
+                    logger.debug(f"Retrying input load for sink {sink.name}")
+                    await self._load_inputs_for_sink(sink)
 
-            except Exception as e:
-                logger.warning(f"Failed to connect to sink {sink.name} for input events: {e}")
-
-    async def _query_initial_inputs(self, sink_id: str, client: ControlClient) -> None:
-        """Query sink capabilities to get initial input states."""
+    async def _load_inputs_for_sink(self, sink: DeviceState) -> None:
+        """Load input states for a sink from cached capabilities or via query."""
+        sink_id = sink.id
         inputs = []
 
+        # Wait briefly for capabilities to be populated (they're fetched async on discovery)
+        for _ in range(5):
+            if sink.capabilities:
+                break
+            await asyncio.sleep(0.5)
+
         # First try to get inputs from the controller's cached capabilities
-        sink = self.controller.get_sink(sink_id)
-        if sink and sink.capabilities:
+        if sink.capabilities:
             inputs = sink.capabilities.get("inputs", [])
             if inputs:
                 logger.debug(f"Using {len(inputs)} cached inputs from controller for {sink_id}")
 
-        # If no cached inputs, query the sink directly
-        if not inputs:
-            try:
-                cap_req = capability_request(0)
-                cap_resp = await client.request(cap_req, timeout=5.0)
+        # If no cached inputs and pool is available, query the sink
+        if not inputs and self._pool:
+            # Wait briefly for pool connection
+            for _ in range(5):
+                if self._pool.is_connected(sink_id):
+                    break
+                await asyncio.sleep(0.5)
 
-                if "device" in cap_resp.data:
-                    device = cap_resp.data["device"]
-                    inputs = device.get("inputs", [])
-                    if inputs:
-                        logger.debug(f"Queried {len(inputs)} inputs from sink {sink_id}")
-                    else:
-                        logger.debug(f"Sink {sink_id} has no inputs in capability response")
+            if self._pool.is_connected(sink_id):
+                try:
+                    cap_req = capability_request(0)
+                    cap_resp = await self._pool.request(sink_id, cap_req, timeout=5.0)
 
-            except Exception as e:
-                logger.warning(f"Failed to query inputs from {sink_id}: {e}")
+                    if cap_resp and "device" in cap_resp.data:
+                        device = cap_resp.data["device"]
+                        inputs = device.get("inputs", [])
+                        if inputs:
+                            logger.debug(f"Queried {len(inputs)} inputs from sink {sink_id}")
+                        else:
+                            logger.debug(f"Sink {sink_id} has no inputs in capability response")
+
+                except Exception as e:
+                    logger.warning(f"Failed to query inputs from {sink_id}: {e}")
 
         if not inputs:
             return
@@ -200,35 +216,8 @@ class InputEventManager:
 
         logger.info(f"Loaded {len(inputs)} initial inputs for sink {sink_id}")
 
-    async def _disconnect_from_sink(self, sink_id: str) -> None:
-        """Disconnect from a sink."""
-        client = self._connections.pop(sink_id, None)
-        if client:
-            try:
-                await client.close()
-            except Exception:
-                pass
-            logger.info(f"Disconnected from sink {sink_id}")
-
-    async def _reconnect_loop(self) -> None:
-        """Periodically check and reconnect to disconnected sinks."""
-        while self._running:
-            await asyncio.sleep(10.0)  # Check every 10 seconds
-
-            for sink in self.controller.online_sinks:
-                sink_id = sink.id
-                if sink_id not in self._connections:
-                    await self._connect_to_sink(sink)
-                elif not self._connections[sink_id].is_connected:
-                    await self._connect_to_sink(sink)
-                # Also check if we have inputs for connected sinks that we might have missed
-                elif sink_id not in self._input_states or not self._input_states[sink_id]:
-                    # Try to load inputs from controller's cached capabilities
-                    if sink.capabilities and sink.capabilities.get("inputs"):
-                        await self._query_initial_inputs(sink_id, self._connections[sink_id])
-
     def _handle_message(self, sink_id: str, message: Message) -> None:
-        """Handle incoming messages from a sink."""
+        """Handle incoming messages from a sink (via pool)."""
         if message.type == MessageType.INPUT_EVENT:
             self._handle_input_event(sink_id, message)
 
@@ -274,7 +263,7 @@ class InputEventManager:
                 logger.error(f"Input event listener error: {e}")
 
     def is_connected_to_sink(self, sink_id: str) -> bool:
-        """Check if we have an active connection to a sink."""
-        if sink_id in self._connections:
-            return self._connections[sink_id].is_connected
+        """Check if we have an active connection to a sink (via pool)."""
+        if self._pool:
+            return self._pool.is_connected(sink_id)
         return False

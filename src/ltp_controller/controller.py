@@ -18,6 +18,12 @@ from libltp import (
 )
 from libltp.types import SERVICE_TYPE_SINK, SERVICE_TYPE_SOURCE
 
+# Avoid circular import
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ltp_controller.sink_connection_pool import SinkConnectionPool
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,6 +134,11 @@ class Controller:
 
         self._on_source_change: DeviceCallback | None = None
         self._on_sink_change: DeviceCallback | None = None
+        self._connection_pool: "SinkConnectionPool | None" = None
+
+    def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
+        """Set the connection pool for shared sink connections."""
+        self._connection_pool = pool
 
     @property
     def sources(self) -> list[DeviceState]:
@@ -229,14 +240,12 @@ class Controller:
     async def _fetch_device_info(self, state: DeviceState) -> None:
         """Fetch capabilities and controls from a device."""
         try:
-            client = ControlClient(state.host, state.port)
-            await client.connect()
-
-            try:
+            # Use connection pool if available (for sinks)
+            if self._connection_pool and state.device.is_sink:
                 # Request capabilities
                 cap_req = capability_request(0)
-                cap_resp = await client.request(cap_req, timeout=5.0)
-                if "device" in cap_resp.data:
+                cap_resp = await self._connection_pool.request(state.id, cap_req, timeout=5.0)
+                if cap_resp and "device" in cap_resp.data:
                     state.capabilities = cap_resp.data["device"]
                     if "controls" in cap_resp.data["device"]:
                         state.controls = cap_resp.data["device"]["controls"]
@@ -245,12 +254,34 @@ class Controller:
                 # Get control values
                 if state.controls:
                     ctrl_req = control_get(0)
-                    ctrl_resp = await client.request(ctrl_req, timeout=5.0)
-                    if "values" in ctrl_resp.data:
+                    ctrl_resp = await self._connection_pool.request(state.id, ctrl_req, timeout=5.0)
+                    if ctrl_resp and "values" in ctrl_resp.data:
                         state.control_values = ctrl_resp.data["values"]
                         logger.debug(f"Got control values from {state.name}")
-            finally:
-                await client.close()
+            else:
+                # Fallback to direct connection (for sources or when no pool)
+                client = ControlClient(state.host, state.port)
+                await client.connect()
+
+                try:
+                    # Request capabilities
+                    cap_req = capability_request(0)
+                    cap_resp = await client.request(cap_req, timeout=5.0)
+                    if "device" in cap_resp.data:
+                        state.capabilities = cap_resp.data["device"]
+                        if "controls" in cap_resp.data["device"]:
+                            state.controls = cap_resp.data["device"]["controls"]
+                        logger.debug(f"Got capabilities from {state.name}")
+
+                    # Get control values
+                    if state.controls:
+                        ctrl_req = control_get(0)
+                        ctrl_resp = await client.request(ctrl_req, timeout=5.0)
+                        if "values" in ctrl_resp.data:
+                            state.control_values = ctrl_resp.data["values"]
+                            logger.debug(f"Got control values from {state.name}")
+                finally:
+                    await client.close()
 
         except Exception as e:
             logger.warning(f"Failed to fetch info from {state.name}: {e}")
@@ -410,24 +441,32 @@ class Controller:
             return False
 
         try:
-            client = ControlClient(state.host, state.port)
-            await client.connect()
+            req = control_set(0, {control_id: value})
 
-            try:
-                req = control_set(0, {control_id: value})
-                resp = await client.request(req, timeout=5.0)
-
-                if resp.data.get("status") == "ok":
-                    state.control_values[control_id] = value
-                    logger.info(f"Set {control_id}={value} on {state.name}")
-                    return True
-                else:
-                    logger.warning(
-                        f"Failed to set control on {state.name}: {resp.data}"
-                    )
+            # Use connection pool if available (for sinks)
+            if self._connection_pool and state.device.is_sink:
+                resp = await self._connection_pool.request(state.id, req, timeout=5.0)
+                if resp is None:
+                    logger.warning(f"Failed to set control on {state.name}: no response")
                     return False
-            finally:
-                await client.close()
+            else:
+                # Fallback to direct connection (for sources or when no pool)
+                client = ControlClient(state.host, state.port)
+                await client.connect()
+                try:
+                    resp = await client.request(req, timeout=5.0)
+                finally:
+                    await client.close()
+
+            if resp.data.get("status") == "ok":
+                state.control_values[control_id] = value
+                logger.info(f"Set {control_id}={value} on {state.name}")
+                return True
+            else:
+                logger.warning(
+                    f"Failed to set control on {state.name}: {resp.data}"
+                )
+                return False
 
         except Exception as e:
             logger.error(f"Error setting control on {state.name}: {e}")
