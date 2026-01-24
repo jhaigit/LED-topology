@@ -53,9 +53,9 @@
 
 // Status LED patterns (period in ms)
 #define STATUS_WIFI_CONNECTING  250     // Fast blink
-#define STATUS_WIFI_CONNECTED   0       // Solid on
-#define STATUS_CLIENT_ACTIVE    100     // Very fast blink
-#define STATUS_ERROR            1000    // Slow blink
+#define STATUS_WIFI_CONNECTED   2000    // Slow heartbeat
+#define STATUS_CLIENT_ACTIVE    100     // Quick pulse
+#define STATUS_ERROR            1000    // Medium blink
 
 // ============================================================================
 // Network Configuration
