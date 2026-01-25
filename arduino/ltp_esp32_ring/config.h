@@ -14,16 +14,16 @@
 
 // APA102 Ring (main strip)
 #define RING_NUM_PIXELS     202
-#define RING_DATA_PIN       23      // VSPI MOSI
-#define RING_CLOCK_PIN      18      // VSPI CLK
+#define RING_DATA_PIN       23      // GPIO23 / VSPI MOSI (VSPID)
+#define RING_CLOCK_PIN      18      // GPIO18 / VSPI CLK (VSPICLK)
 #define RING_SPI_SPEED      8000000 // 8 MHz SPI clock
 
 // WS2812 Satellite LEDs (each on separate pin)
 #define WS2812_NUM_LEDS     4
-#define WS2812_PIN_0        16      // WS2812 LED 0
-#define WS2812_PIN_1        17      // WS2812 LED 1
-#define WS2812_PIN_2        25      // WS2812 LED 2
-#define WS2812_PIN_3        26      // WS2812 LED 3
+#define WS2812_PIN_0        16      // GPIO16 / RXD2 (UART2 RX)
+#define WS2812_PIN_1        17      // GPIO17 / TXD2 (UART2 TX)
+#define WS2812_PIN_2        25      // GPIO25 / DAC1 / ADC2_CH8
+#define WS2812_PIN_3        26      // GPIO26 / DAC2 / ADC2_CH9
 #define WS2812_DEFAULT_OFFSET 21    // Ring position offset for WS2812 mapping
 
 // LED color order
@@ -35,10 +35,10 @@
 // ============================================================================
 
 #define TOUCH_NUM_SENSORS   4
-#define TOUCH_PIN_0         4       // T0 - for WS2812 LED 0
-#define TOUCH_PIN_1         15      // T3 - for WS2812 LED 1
-#define TOUCH_PIN_2         13      // T4 - for WS2812 LED 2
-#define TOUCH_PIN_3         12      // T5 - for WS2812 LED 3
+#define TOUCH_PIN_0         4       // GPIO4  / Touch0 (T0) / ADC2_CH0 - for WS2812 LED 0
+#define TOUCH_PIN_1         15      // GPIO15 / Touch3 (T3) / ADC2_CH3 / HSPI CS - for WS2812 LED 1
+#define TOUCH_PIN_2         13      // GPIO13 / Touch4 (T4) / ADC2_CH4 / HSPI MOSI - for WS2812 LED 2
+#define TOUCH_PIN_3         12      // GPIO12 / Touch5 (T5) / ADC2_CH5 / HSPI MISO - for WS2812 LED 3
 
 // Touch detection parameters
 #define TOUCH_THRESHOLD_RATIO   0.6     // Trigger at 60% of baseline
@@ -49,7 +49,7 @@
 // Status LED Configuration
 // ============================================================================
 
-#define STATUS_LED_PIN      2       // Built-in LED on most ESP32 DevKits
+#define STATUS_LED_PIN      2       // GPIO2 / Touch2 (T2) / ADC2_CH2 - Built-in LED
 
 // Status LED patterns (period in ms)
 #define STATUS_WIFI_CONNECTING  250     // Fast blink
