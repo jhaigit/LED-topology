@@ -181,8 +181,10 @@ private:
     // Update WS2812 colors from corresponding ring positions
     void updateWS2812FromRing() {
         for (uint8_t i = 0; i < WS2812_NUM_LEDS; i++) {
-            // Calculate ring position for this WS2812
-            uint16_t ringPos = (ws2812Offset + i * WS2812_RING_SPACING) % RING_NUM_PIXELS;
+            // Calculate ring position for this WS2812 with proper rounding
+            // Formula: offset + round(i * RING_NUM_PIXELS / WS2812_NUM_LEDS)
+            uint16_t spacing = (i * RING_NUM_PIXELS + WS2812_NUM_LEDS / 2) / WS2812_NUM_LEDS;
+            uint16_t ringPos = (ws2812Offset + spacing) % RING_NUM_PIXELS;
 
             // Weighted average of nearby pixels
             uint16_t rSum = 0, gSum = 0, bSum = 0;

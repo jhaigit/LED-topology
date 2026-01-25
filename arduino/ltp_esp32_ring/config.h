@@ -132,8 +132,8 @@
 // ============================================================================
 
 // Each WS2812 samples pixels from the ring to mirror the ring color
-// Ring spacing: 202 / 4 = 50.5 pixels between each WS2812
-#define WS2812_RING_SPACING     50      // Approximate spacing
+// Position calculated as: offset + round(i * RING_NUM_PIXELS / WS2812_NUM_LEDS)
+// This ensures each LED is positioned as accurately as possible
 
 // Weighted average sampling for WS2812 colors
 // Sample 5 pixels centered on the ring position
