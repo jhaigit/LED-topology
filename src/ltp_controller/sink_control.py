@@ -67,14 +67,37 @@ class SinkController:
         self._streams: dict[str, SinkStream] = {}
         self._paint_buffers: dict[str, np.ndarray] = {}
         self._lock = asyncio.Lock()
+        # Track pool connection state to detect reconnects
+        self._pool_connection_ids: dict[str, int] = {}
 
     def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
         """Set the connection pool (for late binding)."""
         self._pool = pool
 
+    async def invalidate_stream(self, sink_id: str) -> None:
+        """Invalidate cached stream for a sink (e.g., after reconnection)."""
+        async with self._lock:
+            if sink_id in self._streams:
+                logger.info(f"Invalidating cached stream for {sink_id}")
+                await self._cleanup_stream(sink_id)
+
     async def _get_or_create_stream(self, sink: DeviceState) -> SinkStream:
         """Get existing stream or create new one to sink."""
         sink_id = sink.id
+
+        # Check if pool connection changed (indicates reconnection)
+        if self._pool:
+            conn = self._pool.get_connection(sink_id)
+            current_conn_id = id(conn) if conn else 0
+            cached_conn_id = self._pool_connection_ids.get(sink_id, 0)
+
+            if current_conn_id != cached_conn_id and cached_conn_id != 0:
+                # Connection changed, invalidate cached stream
+                logger.info(f"Pool connection changed for {sink_id}, invalidating stream")
+                if sink_id in self._streams:
+                    await self._cleanup_stream(sink_id)
+
+            self._pool_connection_ids[sink_id] = current_conn_id
 
         if sink_id in self._streams:
             stream = self._streams[sink_id]
@@ -83,14 +106,19 @@ class SinkController:
                 # Check if connection is still active via pool
                 if self._pool and not self._pool.is_connected(sink_id):
                     raise ConnectionError("Pool connection closed")
+                # Check if host changed (e.g., DHCP renewal)
+                if stream.sender._host != sink.host:
+                    logger.info(f"Host changed for {sink_id}: {stream.sender._host} -> {sink.host}, recreating stream")
+                    raise ConnectionError("Host changed")
                 # Check if pixel count changed (device might have reconnected with different config)
                 current_pixel_count = self._get_pixel_count(sink)
                 if stream.pixel_count != current_pixel_count:
                     logger.info(f"Pixel count changed for {sink_id}: {stream.pixel_count} -> {current_pixel_count}, recreating stream")
                     raise ConnectionError("Pixel count changed")
                 return stream
-            except Exception:
+            except Exception as e:
                 # Clean up old stream
+                logger.info(f"Stream validation failed for {sink_id}: {e}")
                 await self._cleanup_stream(sink_id)
 
         # Set up stream via pool
@@ -216,6 +244,7 @@ class SinkController:
 
                 # Send frame
                 stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                logger.debug(f"Sent {len(pixels)} pixels to {sink.name} UDP:{stream.udp_port}")
 
             logger.info(f"Filled sink {sink.name} with color {color}")
             return {"status": "ok", "pixels": stream.pixel_count}
@@ -443,6 +472,7 @@ class SinkController:
 
                 # Send the frame
                 stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                logger.debug(f"Paint: sent {pixel_count} pixels to {sink.name} UDP:{stream.udp_port}")
 
                 return {"status": "ok", "pixels_set": pixel_count}
 

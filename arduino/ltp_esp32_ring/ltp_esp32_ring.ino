@@ -607,6 +607,23 @@ void loop() {
                               pixelBuffer[i * 3 + 2]);
             }
             leds.show();
+
+            // Debug: print first few pixels every 100 packets
+            static uint32_t debugCounter = 0;
+            if (++debugCounter % 100 == 1) {
+                Serial.printf("UDP: %d px, first=[%d,%d,%d]\r\n",
+                    pixelsReceived, pixelBuffer[0], pixelBuffer[1], pixelBuffer[2]);
+            }
+        }
+    } else {
+        // Check if there's UDP data waiting but stream not active
+        static uint32_t lastStreamWarn = 0;
+        if (millis() - lastStreamWarn > 5000) {
+            int pending = udpReceiver.isRunning() ? 1 : 0;  // Just check if receiver running
+            if (pending && wifi.hasClient()) {
+                Serial.println("UDP: Stream not active, data may be waiting");
+                lastStreamWarn = millis();
+            }
         }
     }
 
