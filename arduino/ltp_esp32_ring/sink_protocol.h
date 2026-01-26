@@ -44,6 +44,9 @@ struct ControlValue {
     bool readonly;
 };
 
+// Callback for when local mode changes via protocol
+typedef void (*LocalModeCallback)(uint8_t mode);
+
 class SinkProtocol {
 public:
     SinkProtocol()
@@ -52,6 +55,7 @@ public:
         , udpPort(0)
         , streamActive(false)
         , lastSeq(0)
+        , onLocalModeChange(nullptr)
     {
         streamId[0] = '\0';
     }
@@ -60,6 +64,11 @@ public:
         config = cfg;
         leds = ledDriver;
         udpPort = dataPort;
+    }
+
+    // Set callback for local mode changes
+    void setLocalModeCallback(LocalModeCallback callback) {
+        onLocalModeChange = callback;
     }
 
     // Process a JSON message line, returns response (caller must free)
@@ -114,6 +123,7 @@ private:
     bool streamActive;
     char streamId[32];
     int lastSeq;
+    LocalModeCallback onLocalModeChange;
 
     String handleCapabilityRequest(int seq);
     String handleStreamSetup(int seq, JsonDocument& doc);
@@ -375,6 +385,9 @@ bool SinkProtocol::setControlValue(const char* id, float value) {
         if (mode < LOCAL_MODE_COUNT || mode == LOCAL_MODE_CYCLE) {
             config->localMode = mode;
             Serial.printf("Protocol: local_mode=%d\r\n", mode);
+            if (onLocalModeChange) {
+                onLocalModeChange(mode);
+            }
             return true;
         }
         return false;

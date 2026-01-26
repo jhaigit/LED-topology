@@ -542,6 +542,9 @@ void setup() {
 
     // Initialize protocol handler (UDP receiver started when WiFi connects)
     protocol.begin(&config, &leds, 5001);  // UDP port will be 5001
+    protocol.setLocalModeCallback([](uint8_t mode) {
+        localModes.start(mode);
+    });
 
     // Initialize USB terminal
     terminal.begin(&config, &wifi, &leds, &touch);
