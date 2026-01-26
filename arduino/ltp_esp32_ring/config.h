@@ -28,7 +28,7 @@
 
 // LED color order
 #define RING_COLOR_ORDER    BGR     // APA102 typical order
-#define WS2812_COLOR_ORDER  GRB     // WS2812 typical order
+#define WS2812_COLOR_ORDER  RGB     // Globe LEDs use RGB order
 
 // ============================================================================
 // Touch Sensor Configuration
