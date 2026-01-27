@@ -101,8 +101,9 @@
 #define LOCAL_MODE_FIRE         3       // Fire effect
 #define LOCAL_MODE_SPARKLE      4       // Random sparkles
 #define LOCAL_MODE_CHASE        5       // Color chase (seamless loop)
+#define LOCAL_MODE_MITOSIS      6       // Splitting/merging circlers
 #define LOCAL_MODE_CYCLE        255     // Cycle through all modes
-#define LOCAL_MODE_COUNT        6       // Number of actual modes (excluding cycle)
+#define LOCAL_MODE_COUNT        7       // Number of actual modes (excluding cycle)
 
 #define LOCAL_MODE_CYCLE_TIME   10000   // Time per mode in cycle (ms)
 

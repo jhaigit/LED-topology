@@ -45,6 +45,11 @@ public:
             } else {
                 displayMode = mode;
             }
+
+            // Initialize mitosis mode
+            if (displayMode == LOCAL_MODE_MITOSIS) {
+                initMitosis();
+            }
         }
     }
 
@@ -84,6 +89,7 @@ public:
             case LOCAL_MODE_FIRE:    interval = 30; break;
             case LOCAL_MODE_SPARKLE: interval = 30; break;
             case LOCAL_MODE_CHASE:   interval = 40; break;
+            case LOCAL_MODE_MITOSIS: interval = 25; break;
             default: interval = 50; break;
         }
 
@@ -110,6 +116,7 @@ public:
             case LOCAL_MODE_FIRE:    updateFire(); break;
             case LOCAL_MODE_SPARKLE: updateSparkle(); break;
             case LOCAL_MODE_CHASE:   updateChase(); break;
+            case LOCAL_MODE_MITOSIS: updateMitosis(); break;
         }
 
         leds.show();
@@ -130,6 +137,20 @@ private:
 
     // Fire effect heat map
     uint8_t heat[RING_NUM_PIXELS];
+
+    // Mitosis mode data
+    static const uint8_t MAX_CIRCLERS = 16;
+    struct Circler {
+        float position;      // 0 to RING_NUM_PIXELS
+        float speed;         // pixels per update, can be negative
+        uint8_t hue;         // current color hue
+        int8_t hueSpeed;     // hue change rate
+        bool active;         // is this circler in use
+    };
+    Circler circlers[MAX_CIRCLERS];
+    uint8_t circlerCount;
+    uint32_t nextSplitTime;
+    bool splitting;          // true = splitting phase, false = merging phase
 
     // Cylon: scanning eye that wraps around the ring seamlessly
     void updateCylon() {
@@ -266,6 +287,190 @@ private:
             return CRGB(255, heatRamp, 0);
         } else {
             return CRGB(255, 255, heatRamp);
+        }
+    }
+
+    // Initialize mitosis mode with a single circler
+    void initMitosis() {
+        // Clear all circlers
+        for (uint8_t i = 0; i < MAX_CIRCLERS; i++) {
+            circlers[i].active = false;
+        }
+
+        // Start with one circler
+        circlers[0].active = true;
+        circlers[0].position = 0;
+        circlers[0].speed = 0.8f + random8() * 0.01f;  // 0.8 to ~3.3 pixels/update
+        circlers[0].hue = random8();
+        circlers[0].hueSpeed = random8(1, 4);
+        circlerCount = 1;
+
+        // Schedule first split
+        nextSplitTime = millis() + random16(2000, 5000);
+        splitting = true;
+    }
+
+    // Mitosis: splitting and merging circlers
+    void updateMitosis() {
+        const uint8_t eyeSize = 5;
+        const uint8_t fadeAmount = 40;
+        const uint8_t mergeChance = 60;  // % chance to merge on overlap
+
+        CRGB* ring = leds.getRingLeds();
+        uint32_t now = millis();
+
+        // Fade all pixels
+        for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
+            ring[i].fadeToBlackBy(fadeAmount);
+        }
+
+        // Update and draw each active circler
+        for (uint8_t c = 0; c < MAX_CIRCLERS; c++) {
+            if (!circlers[c].active) continue;
+
+            // Update position (wrap around)
+            circlers[c].position += circlers[c].speed;
+            if (circlers[c].position >= RING_NUM_PIXELS) {
+                circlers[c].position -= RING_NUM_PIXELS;
+            } else if (circlers[c].position < 0) {
+                circlers[c].position += RING_NUM_PIXELS;
+            }
+
+            // Update hue
+            circlers[c].hue += circlers[c].hueSpeed;
+
+            // Draw the circler (cylon-like eye)
+            int16_t centerPos = (int16_t)circlers[c].position;
+            for (int8_t i = -eyeSize/2; i <= eyeSize/2; i++) {
+                uint16_t pos = (centerPos + i + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+                uint8_t brightness = 255 - abs(i) * 45;
+                // Blend with existing color for overlapping circlers
+                CRGB newColor = CHSV(circlers[c].hue, 255, brightness);
+                ring[pos] = blend(ring[pos], newColor, 180);
+            }
+        }
+
+        // Handle splitting phase
+        if (splitting && circlerCount < MAX_CIRCLERS) {
+            if (now >= nextSplitTime) {
+                splitRandomCircler();
+                // Schedule next split with increasing delay as count grows
+                uint32_t baseDelay = 2000 + circlerCount * 500;
+                nextSplitTime = now + random16(baseDelay, baseDelay + 3000);
+
+                // Switch to merging when we have enough
+                if (circlerCount >= MAX_CIRCLERS) {
+                    splitting = false;
+                }
+            }
+        }
+
+        // Handle merging phase (check for overlaps)
+        if (!splitting && circlerCount > 1) {
+            checkAndMergeCirclers(mergeChance);
+
+            // Switch back to splitting when down to one
+            if (circlerCount <= 1) {
+                splitting = true;
+                nextSplitTime = now + random16(2000, 4000);
+            }
+        }
+
+        // Also allow some merging during split phase if crowded
+        if (splitting && circlerCount > 8) {
+            checkAndMergeCirclers(mergeChance / 2);
+        }
+    }
+
+    // Split a random active circler into two
+    void splitRandomCircler() {
+        // Find a random active circler to split
+        uint8_t activeIndices[MAX_CIRCLERS];
+        uint8_t activeCount = 0;
+        for (uint8_t i = 0; i < MAX_CIRCLERS; i++) {
+            if (circlers[i].active) {
+                activeIndices[activeCount++] = i;
+            }
+        }
+        if (activeCount == 0) return;
+
+        uint8_t parentIdx = activeIndices[random8(activeCount)];
+
+        // Find an inactive slot for the new circler
+        int8_t newIdx = -1;
+        for (uint8_t i = 0; i < MAX_CIRCLERS; i++) {
+            if (!circlers[i].active) {
+                newIdx = i;
+                break;
+            }
+        }
+        if (newIdx < 0) return;  // No room
+
+        Circler& parent = circlers[parentIdx];
+        Circler& child = circlers[newIdx];
+
+        // Create child at same position
+        child.active = true;
+        child.position = parent.position;
+
+        // Random speeds, opposite directions, not always same magnitude
+        float baseSpeed = 0.5f + random8() * 0.015f;
+        float speedVariation = random8() * 0.01f;
+
+        if (random8() > 127) {
+            parent.speed = baseSpeed + speedVariation;
+            child.speed = -(baseSpeed - speedVariation * 0.5f);
+        } else {
+            parent.speed = -(baseSpeed + speedVariation);
+            child.speed = baseSpeed - speedVariation * 0.5f;
+        }
+
+        // Independent colors
+        child.hue = parent.hue + 30 + random8(60);
+        child.hueSpeed = random8(1, 4);
+        parent.hueSpeed = random8(1, 4);
+
+        circlerCount++;
+    }
+
+    // Check for overlapping circlers and potentially merge them
+    void checkAndMergeCirclers(uint8_t chance) {
+        const float overlapThreshold = 6.0f;  // pixels apart to count as overlap
+
+        for (uint8_t i = 0; i < MAX_CIRCLERS; i++) {
+            if (!circlers[i].active) continue;
+
+            for (uint8_t j = i + 1; j < MAX_CIRCLERS; j++) {
+                if (!circlers[j].active) continue;
+
+                // Calculate distance (accounting for wrap-around)
+                float dist = abs(circlers[i].position - circlers[j].position);
+                if (dist > RING_NUM_PIXELS / 2) {
+                    dist = RING_NUM_PIXELS - dist;
+                }
+
+                if (dist < overlapThreshold) {
+                    // Chance to merge
+                    if (random8(100) < chance) {
+                        // Merge j into i
+                        circlers[i].speed = (circlers[i].speed + circlers[j].speed) / 2.0f;
+
+                        // If resulting speed is too slow, give it a nudge
+                        if (abs(circlers[i].speed) < 0.3f) {
+                            circlers[i].speed = (random8() > 127) ? 0.5f : -0.5f;
+                        }
+
+                        // Keep blended hue
+                        circlers[i].hue = (circlers[i].hue + circlers[j].hue) / 2;
+
+                        // Deactivate j
+                        circlers[j].active = false;
+                        circlerCount--;
+
+                        return;  // One merge per update to avoid cascading
+                    }
+                }
+            }
         }
     }
 };
