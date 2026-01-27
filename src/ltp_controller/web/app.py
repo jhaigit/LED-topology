@@ -191,10 +191,15 @@ def create_app(
 
         results = {}
         for control_id, value in values.items():
-            success = run_async(controller.set_device_control(sink, control_id, value))
-            results[control_id] = "ok" if success else "error"
+            try:
+                success = run_async(controller.set_device_control(sink, control_id, value))
+                results[control_id] = "ok" if success else "error"
+            except (TimeoutError, Exception) as e:
+                results[control_id] = "timeout" if isinstance(e, TimeoutError) else "error"
 
-        return jsonify({"status": "ok", "results": results})
+        has_errors = any(v != "ok" for v in results.values())
+        status_code = 504 if all(v == "timeout" for v in results.values()) else 200
+        return jsonify({"status": "partial" if has_errors else "ok", "results": results}), status_code
 
     @app.route("/api/sinks/<sink_id>/refresh", methods=["POST"])
     def api_sink_refresh(sink_id: str) -> Any:
@@ -203,8 +208,11 @@ def create_app(
         if not sink:
             return jsonify({"error": "Sink not found"}), 404
 
-        run_async(controller.refresh_device(sink))
-        return jsonify({"status": "ok"})
+        try:
+            run_async(controller.refresh_device(sink))
+            return jsonify({"status": "ok"})
+        except TimeoutError:
+            return jsonify({"error": "Device did not respond in time"}), 504
 
     # ==================== API: Sink Fill ====================
 

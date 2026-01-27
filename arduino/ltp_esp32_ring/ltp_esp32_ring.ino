@@ -88,6 +88,11 @@ void loadConfig() {
     config.localMode = preferences.getUChar("localMode", LOCAL_MODE_RAINBOW);
     config.ws2812Offset = preferences.getUChar("ws2812Offset", WS2812_DEFAULT_OFFSET);
     config.inputEventsEnabled = preferences.getBool("inputEvents", true);
+    config.touchSensitivity = preferences.getFloat("touchSens", TOUCH_THRESHOLD_RATIO);
+    preferences.getString("timezone", config.timezone, sizeof(config.timezone));
+    if (strlen(config.timezone) == 0) {
+        strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
+    }
 
     preferences.end();
 
@@ -111,6 +116,8 @@ void saveConfig() {
     preferences.putUChar("localMode", config.localMode);
     preferences.putUChar("ws2812Offset", config.ws2812Offset);
     preferences.putBool("inputEvents", config.inputEventsEnabled);
+    preferences.putFloat("touchSens", config.touchSensitivity);
+    preferences.putString("timezone", config.timezone);
 
     preferences.end();
     Serial.println("Config saved to NVS");
@@ -128,6 +135,8 @@ void resetConfig() {
     config.localMode = LOCAL_MODE_RAINBOW;
     config.ws2812Offset = WS2812_DEFAULT_OFFSET;
     config.inputEventsEnabled = true;
+    config.touchSensitivity = TOUCH_THRESHOLD_RATIO;
+    strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
 
     saveConfig();
     Serial.println("Config reset to defaults");
@@ -154,8 +163,7 @@ void resetActivityTimer() {
     lastActivityTime = millis();
     if (isIdle) {
         isIdle = false;
-        // Stop local mode when activity resumes
-        localModes.stop();
+        Serial.println("Activity: waking from idle");
     }
 }
 
@@ -165,13 +173,11 @@ void checkIdleTimeout() {
     uint32_t elapsed = (millis() - lastActivityTime) / 1000;
     if (!isIdle && elapsed >= config.idleTimeout) {
         isIdle = true;
-        // Start local mode when idle
-        if (config.localMode != LOCAL_MODE_BLANK) {
-            localModes.start(config.localMode);
-        } else {
-            leds.clear();
-            leds.show();
-        }
+        // Go dark when idle
+        localModes.stop();
+        leds.clear();
+        leds.show();
+        Serial.println("Idle timeout: LEDs off");
     }
 }
 
@@ -183,6 +189,9 @@ void checkIdleTimeout() {
 void onTouchPress(uint8_t touchIdx) {
     Serial.printf("Touch %d pressed\r\n", touchIdx);
 
+    // Reset idle timer on any touch
+    resetActivityTimer();
+
     // In touch-reactive mode, don't switch modes or flash (touch is used for the effect)
     if (localModes.isActive() && localModes.getCurrentMode() == LOCAL_MODE_TOUCH) {
         return;
@@ -193,7 +202,7 @@ void onTouchPress(uint8_t touchIdx) {
 
     // Handle local mode switching
     if (!localModes.isActive()) {
-        // Enter local mode with cycling
+        // Wake from idle or start: enter cycle mode
         localModes.start(LOCAL_MODE_CYCLE);
         config.localMode = LOCAL_MODE_CYCLE;
     } else {
@@ -295,6 +304,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdTouch();
     } else if (strcmp(cmd, "sensitivity") == 0) {
         cmdSensitivity(args);
+    } else if (strcmp(cmd, "timezone") == 0 || strcmp(cmd, "tz") == 0) {
+        cmdTimezone(args);
     } else if (strcmp(cmd, "test") == 0) {
         cmdTest();
     } else {
@@ -313,6 +324,7 @@ void UsbTerminal::cmdHelp() {
     Serial.println("  status                  - Show current status");
     Serial.println("  touch                   - Show touch sensor values");
     Serial.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
+    Serial.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
     Serial.println("  test                    - Run LED test pattern");
     Serial.println("  save                    - Save config to NVS");
     Serial.println("  reset                   - Factory reset");
@@ -353,6 +365,15 @@ void UsbTerminal::cmdStatus() {
     Serial.printf("Input Events: %s\r\n", config->inputEventsEnabled ? "enabled" : "disabled");
     if (touch) {
         Serial.printf("Touch Sensitivity: %.2f\r\n", touch->getSensitivity());
+    }
+    Serial.printf("Timezone: %s\r\n", config->timezone);
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo, 0)) {
+        char timeBuf[32];
+        strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+        Serial.printf("Current Time: %s\r\n", timeBuf);
+    } else {
+        Serial.println("Current Time: not synced");
     }
     Serial.println("--- Stats ---");
     Serial.printf("UDP Packets: %lu received, %lu dropped\r\n",
@@ -492,10 +513,43 @@ void UsbTerminal::cmdSensitivity(const char* args) {
     }
 
     touch->setSensitivity(sens);
+    config->touchSensitivity = sens;
     // Update threshold display
     for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
         Serial.printf("  Touch %d: new threshold=%d\r\n", i, touch->getThreshold(i));
     }
+}
+
+void UsbTerminal::cmdTimezone(const char* args) {
+    if (strlen(args) == 0) {
+        Serial.printf("Current timezone: %s\r\n", config->timezone);
+        Serial.println("Usage: timezone <POSIX_TZ_string>");
+        Serial.println("Examples:");
+        Serial.println("  PST8PDT,M3.2.0,M11.1.0    (US Pacific)");
+        Serial.println("  EST5EDT,M3.2.0,M11.1.0     (US Eastern)");
+        Serial.println("  CST6CDT,M3.2.0,M11.1.0     (US Central)");
+        Serial.println("  MST7MDT,M3.2.0,M11.1.0     (US Mountain)");
+        Serial.println("  UTC0                        (UTC)");
+
+        // Show current time if available
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo, 0)) {
+            char timeBuf[32];
+            strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+            Serial.printf("Current time: %s\r\n", timeBuf);
+        } else {
+            Serial.println("Time not yet synced (NTP pending)");
+        }
+        return;
+    }
+
+    strncpy(config->timezone, args, sizeof(config->timezone) - 1);
+    config->timezone[sizeof(config->timezone) - 1] = '\0';
+
+    // Apply immediately
+    configTzTime(config->timezone, CLOCK_NTP_SERVER);
+    Serial.printf("Timezone set to: %s\r\n", config->timezone);
+    Serial.println("Use 'save' to persist");
 }
 
 void UsbTerminal::cmdTest() {
@@ -568,6 +622,7 @@ void setup() {
 
     // Initialize touch sensors
     touch.begin();
+    touch.setSensitivity(config.touchSensitivity);
     touch.setOnTouch(onTouchPress);
     touch.setOnTouchState(onTouchStateChange);
 
@@ -617,6 +672,11 @@ void loop() {
 
         // Start mDNS advertisement
         wifi.startMdns(deviceId, config.deviceName, RING_NUM_PIXELS, "rgb", 60);
+
+        // Start NTP time sync
+        configTzTime(config.timezone, CLOCK_NTP_SERVER);
+        Serial.printf("NTP: Syncing with TZ=%s\r\n", config.timezone);
+
         networkStarted = true;
     }
 

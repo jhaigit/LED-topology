@@ -106,10 +106,19 @@
 #define LOCAL_MODE_SINWAVE      8       // Red sin wave pattern with throb
 #define LOCAL_MODE_SINWAVE_RGB  9       // RGB sin waves, same speed
 #define LOCAL_MODE_SINWAVE_RGB2 10      // RGB sin waves, different speeds
+#define LOCAL_MODE_CLOCK        11      // Analog clock (requires NTP)
 #define LOCAL_MODE_CYCLE        255     // Cycle through all modes
-#define LOCAL_MODE_COUNT        11      // Number of actual modes (excluding cycle)
+#define LOCAL_MODE_COUNT        12      // Number of actual modes (excluding cycle)
 
 #define LOCAL_MODE_CYCLE_TIME   10000   // Time per mode in cycle (ms)
+
+// Clock mode parameters
+#define CLOCK_HAND_HOUR_SIZE    11      // Hour hand width in pixels
+#define CLOCK_HAND_MIN_SIZE     7       // Minute hand width in pixels
+#define CLOCK_HAND_SEC_SIZE     3       // Second hand width in pixels
+#define CLOCK_NTP_SERVER        "pool.ntp.org"
+#define CLOCK_NTP_SYNC_INTERVAL 3600    // Re-sync every hour (seconds)
+#define CLOCK_DEFAULT_TZ        "PST8PDT,M3.2.0,M11.1.0"  // US Pacific with DST
 
 // ============================================================================
 // Configuration Storage (NVS)
@@ -190,6 +199,8 @@ struct DeviceConfig {
     uint8_t localMode;
     uint8_t ws2812Offset;
     bool inputEventsEnabled;
+    float touchSensitivity;     // Touch threshold ratio (0.1-0.95, higher=more sensitive)
+    char timezone[48];          // POSIX TZ string (e.g. "PST8PDT,M3.2.0,M11.1.0")
 };
 
 #endif // ESP32_RING_CONFIG_H

@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include <FastLED.h>
+#include <time.h>
 #include "config.h"
 #include "ring_driver.h"
 #include "touch_handler.h"
@@ -63,6 +64,12 @@ public:
                 initTouch();
             }
 
+            // Initialize clock mode
+            if (displayMode == LOCAL_MODE_CLOCK) {
+                lastClockSec = 255;  // Force first-second detection
+                secChangeMillis = millis();
+            }
+
             // Initialize sin wave modes
             if (displayMode == LOCAL_MODE_SINWAVE ||
                 displayMode == LOCAL_MODE_SINWAVE_RGB ||
@@ -81,12 +88,15 @@ public:
     }
 
     // Advance to next mode (for touch cycling)
+    // Skips touch mode — it can only be entered via the control variable
     void nextMode() {
         uint8_t next;
         if (currentMode == LOCAL_MODE_CYCLE || currentMode == LOCAL_MODE_BLANK) {
             next = LOCAL_MODE_CYLON;
         } else {
             next = currentMode + 1;
+            // Skip touch and clock modes (control-variable only)
+            while (next == LOCAL_MODE_TOUCH || next == LOCAL_MODE_CLOCK) next++;
             if (next >= LOCAL_MODE_COUNT) {
                 next = LOCAL_MODE_CYLON;
             }
@@ -113,6 +123,7 @@ public:
             case LOCAL_MODE_SINWAVE:    interval = 20; break;
             case LOCAL_MODE_SINWAVE_RGB:  interval = 20; break;
             case LOCAL_MODE_SINWAVE_RGB2: interval = 20; break;
+            case LOCAL_MODE_CLOCK:        interval = 100; break;  // 10 FPS is plenty
             default: interval = 50; break;
         }
 
@@ -124,8 +135,8 @@ public:
             if (now - modeStartTime >= LOCAL_MODE_CYCLE_TIME) {
                 modeStartTime = now;
                 displayMode++;
-                // Skip touch mode in cycle (it needs touch input)
-                if (displayMode == LOCAL_MODE_TOUCH) {
+                // Skip touch and clock modes in cycle
+                while (displayMode == LOCAL_MODE_TOUCH || displayMode == LOCAL_MODE_CLOCK) {
                     displayMode++;
                 }
                 if (displayMode >= LOCAL_MODE_COUNT) {
@@ -157,6 +168,7 @@ public:
             case LOCAL_MODE_SINWAVE:    updateSinWave(); break;
             case LOCAL_MODE_SINWAVE_RGB:  updateSinWaveRGB(false); break;
             case LOCAL_MODE_SINWAVE_RGB2: updateSinWaveRGB(true); break;
+            case LOCAL_MODE_CLOCK:        updateClock(); break;
         }
 
         leds.show();
@@ -204,6 +216,10 @@ private:
     };
     TouchRipple ripples[MAX_RIPPLES];
     uint8_t nextRippleHue[4];   // Next hue for each globe
+
+    // Clock mode data
+    uint8_t lastClockSec;       // Track second changes
+    uint32_t secChangeMillis;   // millis() when second last changed
 
     // Sin wave mode data
     float sinPhaseOffset;       // Rotation phase for the wave pattern
@@ -706,9 +722,11 @@ private:
     void updateSinWave() {
         CRGB* ring = leds.getRingLeds();
 
-        // Update phases
+        // Update phases (wrap to prevent float precision loss)
         sinPhaseOffset += 0.02f;  // Wave rotation speed
         sinTimePhase += 0.03f;    // Throb speed
+        if (sinPhaseOffset > 2.0f * PI) sinPhaseOffset -= 2.0f * PI;
+        if (sinTimePhase > 2.0f * PI) sinTimePhase -= 2.0f * PI;
 
         // Calculate overall brightness multiplier (throb effect)
         // Goes from near-zero to full brightness
@@ -734,9 +752,11 @@ private:
     void updateSinWaveRGB(bool differentSpeeds) {
         CRGB* ring = leds.getRingLeds();
 
-        // Update phases
+        // Update phases (wrap to prevent float precision loss)
         sinPhaseOffset += 0.015f;  // Base rotation (for visual interest)
         sinTimePhase += 0.02f;     // Subtle overall modulation
+        if (sinPhaseOffset > 2.0f * PI) sinPhaseOffset -= 2.0f * PI;
+        if (sinTimePhase > 2.0f * PI) sinTimePhase -= 2.0f * PI;
 
         // Update color offsets
         for (uint8_t c = 0; c < 3; c++) {
@@ -766,6 +786,84 @@ private:
             b = (uint8_t)(sinB * 255.0f * throb);
 
             ring[i] = CRGB(r, g, b);
+        }
+    }
+
+    // Get the 12-o'clock pixel position (halfway between globes 1 and 2)
+    uint16_t getClock12Position() {
+        uint8_t offset = leds.getWS2812Offset();
+        // Globe 1 pos: offset + round(1 * 202 / 4) = offset + 50 (with rounding)
+        // Globe 2 pos: offset + round(2 * 202 / 4) = offset + 101
+        // Midpoint: offset + 75 (rounding of (50+101)/2)
+        uint16_t globe1 = (offset + (1 * RING_NUM_PIXELS + WS2812_NUM_LEDS / 2) / WS2812_NUM_LEDS) % RING_NUM_PIXELS;
+        uint16_t globe2 = (offset + (2 * RING_NUM_PIXELS + WS2812_NUM_LEDS / 2) / WS2812_NUM_LEDS) % RING_NUM_PIXELS;
+        // Handle wrap-around for midpoint
+        if (globe2 < globe1) globe2 += RING_NUM_PIXELS;
+        return ((globe1 + globe2) / 2) % RING_NUM_PIXELS;
+    }
+
+    // Draw a clock hand centered at a pixel position with soft Gaussian-like falloff
+    void drawClockHand(CRGB* ring, uint16_t centerPixel, uint8_t handSize, CRGB color) {
+        int8_t halfSize = handSize / 2;
+        for (int8_t i = -halfSize; i <= halfSize; i++) {
+            uint16_t pos = (centerPixel + i + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+            // Gaussian-like falloff: exp(-k * x^2) approximated with quadratic
+            float normalized = (float)abs(i) / (float)(halfSize + 1);  // 0 at center, ~1 at edge
+            float falloff = 1.0f - normalized * normalized;            // Quadratic: soft edges
+            uint8_t brightness = (uint8_t)(falloff * falloff * 255);   // Square again for extra softness
+            CRGB pixelColor = color;
+            pixelColor.nscale8(brightness);
+            ring[pos] = blend(ring[pos], pixelColor, 200);
+        }
+    }
+
+    // Analog clock mode: hour/minute/second hands on the ring
+    void updateClock() {
+        struct tm timeinfo;
+        if (!getLocalTime(&timeinfo, 0)) {
+            // No time yet — show dim rotating dot as "waiting for NTP"
+            CRGB* ring = leds.getRingLeds();
+            for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
+                ring[i].fadeToBlackBy(40);
+            }
+            uint16_t pos = (millis() / 20) % RING_NUM_PIXELS;
+            ring[pos] = CRGB(40, 40, 40);
+            return;
+        }
+
+        CRGB* ring = leds.getRingLeds();
+        fill_solid(ring, RING_NUM_PIXELS, CRGB::Black);
+
+        uint16_t top = getClock12Position();
+
+        // Track second transitions for smooth sub-second interpolation
+        if (timeinfo.tm_sec != lastClockSec) {
+            lastClockSec = timeinfo.tm_sec;
+            secChangeMillis = millis();
+        }
+        // Sub-second offset: millis since the second changed, clamped to 999
+        float subSec = min((uint32_t)999, millis() - secChangeMillis) / 1000.0f;
+
+        // Calculate hand positions (subtract: strip runs counter-clockwise)
+        float secFrac = (timeinfo.tm_sec + subSec) / 60.0f;
+        float minFrac = (timeinfo.tm_min + timeinfo.tm_sec / 60.0f) / 60.0f;
+        float hourFrac = ((timeinfo.tm_hour % 12) + timeinfo.tm_min / 60.0f) / 12.0f;
+
+        // Subtract fraction from 1.0 to reverse direction, then map to pixels
+        uint16_t secPixel  = (top + (uint16_t)((1.0f - secFrac)  * RING_NUM_PIXELS)) % RING_NUM_PIXELS;
+        uint16_t minPixel  = (top + (uint16_t)((1.0f - minFrac)  * RING_NUM_PIXELS)) % RING_NUM_PIXELS;
+        uint16_t hourPixel = (top + (uint16_t)((1.0f - hourFrac) * RING_NUM_PIXELS)) % RING_NUM_PIXELS;
+
+        // Draw hands (hour first so minute and second draw on top)
+        drawClockHand(ring, hourPixel, CLOCK_HAND_HOUR_SIZE, CRGB(0, 200, 0));   // Green hour
+        drawClockHand(ring, minPixel,  CLOCK_HAND_MIN_SIZE,  CRGB(200, 0, 0));   // Red minute
+        drawClockHand(ring, secPixel,  CLOCK_HAND_SEC_SIZE,  CRGB(0, 80, 255));  // Blue second
+
+        // Draw subtle tick marks at 12, 3, 6, 9 positions
+        for (uint8_t h = 0; h < 12; h++) {
+            uint16_t tickPos = (top + RING_NUM_PIXELS - (h * RING_NUM_PIXELS) / 12) % RING_NUM_PIXELS;
+            CRGB tickColor = (h % 3 == 0) ? CRGB(30, 30, 30) : CRGB(10, 10, 10);
+            ring[tickPos] = blend(ring[tickPos], tickColor, 128);
         }
     }
 };
