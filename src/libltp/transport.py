@@ -248,8 +248,11 @@ class ControlClient:
         if message.seq is not None and message.seq in self._pending:
             future = self._pending.pop(message.seq)
             future.set_result(message)
-        elif self.handler:
-            self.handler(message)
+        else:
+            logger.debug(f"Unsolicited/unmatched message: type={message.type.value} seq={message.seq} "
+                         f"pending_seqs={list(self._pending.keys())}")
+            if self.handler:
+                self.handler(message)
 
     async def request(self, message: Message, timeout: float = 5.0) -> Message:
         """Send a request and wait for response."""

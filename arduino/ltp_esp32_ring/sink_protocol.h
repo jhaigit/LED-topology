@@ -77,7 +77,7 @@ public:
         DeserializationError error = deserializeJson(doc, jsonLine);
 
         if (error) {
-            Serial.printf("JSON parse error: %s\r\n", error.c_str());
+            dualOut.printf("JSON parse error: %s\r\n", error.c_str());
             return buildError(0, 1, "INVALID_FORMAT", "JSON parse error");
         }
 
@@ -256,13 +256,13 @@ String SinkProtocol::handleStreamControl(int seq, JsonDocument& doc) {
     if (action) {
         if (strcmp(action, ACTION_START) == 0) {
             streamActive = true;
-            Serial.println("Stream started");
+            dualOut.println("Stream started");
         } else if (strcmp(action, ACTION_STOP) == 0) {
             streamActive = false;
-            Serial.println("Stream stopped");
+            dualOut.println("Stream stopped");
         } else if (strcmp(action, ACTION_PAUSE) == 0) {
             streamActive = false;
-            Serial.println("Stream paused");
+            dualOut.println("Stream paused");
         }
     }
 
@@ -372,19 +372,19 @@ bool SinkProtocol::setControlValue(const char* id, float value) {
     if (strcmp(id, "brightness") == 0) {
         config->brightness = constrain((int)value, 0, 255);
         if (leds) leds->setBrightness(config->brightness);
-        Serial.printf("Protocol: brightness=%d\r\n", config->brightness);
+        dualOut.printf("Protocol: brightness=%d\r\n", config->brightness);
         return true;
     }
     if (strcmp(id, "gamma") == 0) {
         config->gamma = constrain((int)(value * 10), 10, 30);
-        Serial.printf("Protocol: gamma=%.1f\r\n", config->gamma / 10.0);
+        dualOut.printf("Protocol: gamma=%.1f\r\n", config->gamma / 10.0);
         return true;
     }
     if (strcmp(id, "local_mode") == 0) {
         int mode = (int)value;
         if (mode < LOCAL_MODE_COUNT || mode == LOCAL_MODE_CYCLE) {
             config->localMode = mode;
-            Serial.printf("Protocol: local_mode=%d\r\n", mode);
+            dualOut.printf("Protocol: local_mode=%d\r\n", mode);
             if (onLocalModeChange) {
                 onLocalModeChange(mode);
             }

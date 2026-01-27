@@ -57,11 +57,11 @@ public:
         if (udp.begin(listenPort)) {
             port = listenPort;
             running = true;
-            Serial.printf("UDP receiver started on port %d\r\n", port);
+            dualOut.printf("UDP receiver started on port %d\r\n", port);
             return true;
         }
 
-        Serial.println("UDP receiver failed to start");
+        dualOut.println("UDP receiver failed to start");
         return false;
     }
 
@@ -69,7 +69,7 @@ public:
         if (running) {
             udp.stop();
             running = false;
-            Serial.println("UDP receiver stopped");
+            dualOut.println("UDP receiver stopped");
         }
     }
 
@@ -89,14 +89,14 @@ public:
         int len = udp.read(packet, min(packetSize, (int)MAX_UDP_PACKET));
 
         if (len < PACKET_HEADER_SIZE + FRAME_HEADER_SIZE) {
-            Serial.println("UDP: Packet too small");
+            dualOut.println("UDP: Packet too small");
             return 0;
         }
 
         // Parse packet header (big-endian)
         uint16_t magic = (packet[0] << 8) | packet[1];
         if (magic != PACKET_MAGIC) {
-            Serial.printf("UDP: Invalid magic 0x%04X\r\n", magic);
+            dualOut.printf("UDP: Invalid magic 0x%04X\r\n", magic);
             return 0;
         }
 
@@ -108,9 +108,12 @@ public:
                            packet[7];
 
         // Check for dropped packets
-        if (lastSequence > 0 && sequence != lastSequence + 1) {
-            uint32_t dropped = sequence - lastSequence - 1;
-            packetsDropped += dropped;
+        if (lastSequence > 0 && sequence > lastSequence + 1) {
+            packetsDropped += sequence - lastSequence - 1;
+        } else if (lastSequence > 0 && sequence <= lastSequence) {
+            // Sequence went backward — new stream, reset stats
+            packetsDropped = 0;
+            packetsReceived = 0;
         }
         lastSequence = sequence;
 
@@ -122,12 +125,12 @@ public:
 
         // Only support RGB raw for now
         if (colorFormat != COLOR_FMT_RGB) {
-            Serial.printf("UDP: Unsupported color format %d\r\n", colorFormat);
+            dualOut.printf("UDP: Unsupported color format %d\r\n", colorFormat);
             return 0;
         }
 
         if (encoding != ENCODING_RAW) {
-            Serial.printf("UDP: Unsupported encoding %d\r\n", encoding);
+            dualOut.printf("UDP: Unsupported encoding %d\r\n", encoding);
             return 0;
         }
 
@@ -137,7 +140,7 @@ public:
         uint16_t dataOffset = PACKET_HEADER_SIZE + FRAME_HEADER_SIZE;
 
         if (len < dataOffset + expectedDataSize) {
-            Serial.printf("UDP: Insufficient data: got %d, need %d\r\n",
+            dualOut.printf("UDP: Insufficient data: got %d, need %d\r\n",
                           len - dataOffset, expectedDataSize);
             return 0;
         }

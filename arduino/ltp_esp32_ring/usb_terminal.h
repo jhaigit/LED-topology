@@ -75,6 +75,9 @@ public:
         }
     }
 
+    // Public so telnet can also invoke commands
+    void processCommand(const char* line);
+
 private:
     char lineBuffer[TERMINAL_LINE_MAX];
     uint8_t linePos;
@@ -85,8 +88,6 @@ private:
     TouchHandler* touch;
     SaveConfigCallback saveCallback;
     ResetConfigCallback resetCallback;
-
-    void processCommand(const char* line);
     void cmdHelp();
     void cmdStatus();
     void cmdWifi(const char* args);

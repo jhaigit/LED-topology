@@ -17,6 +17,7 @@
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include "config.h"
+#include "telnet_server.h"
 #include "ring_driver.h"
 #include "touch_handler.h"
 #include "local_modes.h"
@@ -24,6 +25,9 @@
 #include "udp_receiver.h"
 #include "sink_protocol.h"
 #include "usb_terminal.h"
+
+// Global dual output (Serial + telnet)
+DualPrint dualOut;
 
 // ============================================================================
 // Configuration (defined in config.h, stored in NVS)
@@ -43,6 +47,7 @@ WiFiTransport wifi;
 UdpReceiver udpReceiver;
 SinkProtocol protocol;
 UsbTerminal terminal;
+TelnetServer telnet;
 
 // Device ID (generated from MAC)
 char deviceId[48];
@@ -120,7 +125,7 @@ void saveConfig() {
     preferences.putString("timezone", config.timezone);
 
     preferences.end();
-    Serial.println("Config saved to NVS");
+    dualOut.println("Config saved to NVS");
 }
 
 void resetConfig() {
@@ -139,7 +144,7 @@ void resetConfig() {
     strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
 
     saveConfig();
-    Serial.println("Config reset to defaults");
+    dualOut.println("Config reset to defaults");
 }
 
 // ============================================================================
@@ -163,7 +168,7 @@ void resetActivityTimer() {
     lastActivityTime = millis();
     if (isIdle) {
         isIdle = false;
-        Serial.println("Activity: waking from idle");
+        dualOut.println("Activity: waking from idle");
     }
 }
 
@@ -177,7 +182,7 @@ void checkIdleTimeout() {
         localModes.stop();
         leds.clear();
         leds.show();
-        Serial.println("Idle timeout: LEDs off");
+        dualOut.println("Idle timeout: LEDs off");
     }
 }
 
@@ -187,7 +192,7 @@ void checkIdleTimeout() {
 
 // Called on touch press only - handles flash and mode switching
 void onTouchPress(uint8_t touchIdx) {
-    Serial.printf("Touch %d pressed\r\n", touchIdx);
+    dualOut.printf("Touch %d pressed\r\n", touchIdx);
 
     // Reset idle timer on any touch
     resetActivityTimer();
@@ -214,7 +219,7 @@ void onTouchPress(uint8_t touchIdx) {
 
 // Called on both press and release - sends input events to controller
 void onTouchStateChange(uint8_t touchIdx, bool pressed) {
-    Serial.printf("Touch %d %s\r\n", touchIdx, pressed ? "pressed" : "released");
+    dualOut.printf("Touch %d %s\r\n", touchIdx, pressed ? "pressed" : "released");
 
     // Send input event if enabled and connected
     if (config.inputEventsEnabled && wifi.hasClient()) {
@@ -264,7 +269,7 @@ void updateStatusLed() {
 // ============================================================================
 
 void UsbTerminal::processCommand(const char* line) {
-    Serial.println();
+    dualOut.println();
 
     char cmd[32];
     const char* args = "";
@@ -309,33 +314,33 @@ void UsbTerminal::processCommand(const char* line) {
     } else if (strcmp(cmd, "test") == 0) {
         cmdTest();
     } else {
-        Serial.printf("Unknown command: %s\r\n", cmd);
-        Serial.println("Type 'help' for available commands");
+        dualOut.printf("Unknown command: %s\r\n", cmd);
+        dualOut.println("Type 'help' for available commands");
     }
 }
 
 void UsbTerminal::cmdHelp() {
-    Serial.println("Available commands:");
-    Serial.println("  wifi <ssid> <password>  - Set WiFi credentials");
-    Serial.println("  name <device_name>      - Set device name (max 16 chars)");
-    Serial.println("  offset <0-201>          - Set WS2812 rotational offset");
-    Serial.println("  brightness <0-255>      - Set global brightness");
-    Serial.println("  mode <0-5|255>          - Set local mode (255=cycle)");
-    Serial.println("  status                  - Show current status");
-    Serial.println("  touch                   - Show touch sensor values");
-    Serial.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
-    Serial.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
-    Serial.println("  test                    - Run LED test pattern");
-    Serial.println("  save                    - Save config to NVS");
-    Serial.println("  reset                   - Factory reset");
-    Serial.println("  help                    - Show this help");
+    dualOut.println("Available commands:");
+    dualOut.println("  wifi <ssid> <password>  - Set WiFi credentials");
+    dualOut.println("  name <device_name>      - Set device name (max 16 chars)");
+    dualOut.println("  offset <0-201>          - Set WS2812 rotational offset");
+    dualOut.println("  brightness <0-255>      - Set global brightness");
+    dualOut.println("  mode <0-5|255>          - Set local mode (255=cycle)");
+    dualOut.println("  status                  - Show current status");
+    dualOut.println("  touch                   - Show touch sensor values");
+    dualOut.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
+    dualOut.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
+    dualOut.println("  test                    - Run LED test pattern");
+    dualOut.println("  save                    - Save config to NVS");
+    dualOut.println("  reset                   - Factory reset");
+    dualOut.println("  help                    - Show this help");
 }
 
 void UsbTerminal::cmdStatus() {
-    Serial.println("=== Device Status ===");
-    Serial.printf("Name: %s\r\n", config->deviceName);
-    Serial.printf("Device ID: %s\r\n", deviceId);
-    Serial.printf("WiFi SSID: %s\r\n", config->wifiSsid);
+    dualOut.println("=== Device Status ===");
+    dualOut.printf("Name: %s\r\n", config->deviceName);
+    dualOut.printf("Device ID: %s\r\n", deviceId);
+    dualOut.printf("WiFi SSID: %s\r\n", config->wifiSsid);
 
     if (transport) {
         const char* stateStr;
@@ -346,44 +351,44 @@ void UsbTerminal::cmdStatus() {
             case WifiState::CLIENT_ACTIVE: stateStr = "Client Active"; break;
             default: stateStr = "Unknown"; break;
         }
-        Serial.printf("WiFi State: %s\r\n", stateStr);
+        dualOut.printf("WiFi State: %s\r\n", stateStr);
 
         if (transport->isWifiConnected()) {
-            Serial.printf("IP Address: %s\r\n", transport->getIP().toString().c_str());
-            Serial.printf("Signal: %d dBm\r\n", transport->getRSSI());
-            Serial.printf("Control Port: %d (TCP)\r\n", transport->getPort());
+            dualOut.printf("IP Address: %s\r\n", transport->getIP().toString().c_str());
+            dualOut.printf("Signal: %d dBm\r\n", transport->getRSSI());
+            dualOut.printf("Control Port: %d (TCP)\r\n", transport->getPort());
         }
     }
 
-    Serial.printf("UDP Data Port: %d\r\n", udpReceiver.getPort());
-    Serial.println("--- Controls ---");
-    Serial.printf("Brightness: %d\r\n", config->brightness);
-    Serial.printf("Gamma: %.1f\r\n", config->gamma / 10.0);
-    Serial.printf("Local Mode: %d\r\n", config->localMode);
-    Serial.printf("WS2812 Offset: %d\r\n", config->ws2812Offset);
-    Serial.printf("Idle Timeout: %d sec\r\n", config->idleTimeout);
-    Serial.printf("Input Events: %s\r\n", config->inputEventsEnabled ? "enabled" : "disabled");
+    dualOut.printf("UDP Data Port: %d\r\n", udpReceiver.getPort());
+    dualOut.println("--- Controls ---");
+    dualOut.printf("Brightness: %d\r\n", config->brightness);
+    dualOut.printf("Gamma: %.1f\r\n", config->gamma / 10.0);
+    dualOut.printf("Local Mode: %d\r\n", config->localMode);
+    dualOut.printf("WS2812 Offset: %d\r\n", config->ws2812Offset);
+    dualOut.printf("Idle Timeout: %d sec\r\n", config->idleTimeout);
+    dualOut.printf("Input Events: %s\r\n", config->inputEventsEnabled ? "enabled" : "disabled");
     if (touch) {
-        Serial.printf("Touch Sensitivity: %.2f\r\n", touch->getSensitivity());
+        dualOut.printf("Touch Sensitivity: %.2f\r\n", touch->getSensitivity());
     }
-    Serial.printf("Timezone: %s\r\n", config->timezone);
+    dualOut.printf("Timezone: %s\r\n", config->timezone);
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 0)) {
         char timeBuf[32];
         strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-        Serial.printf("Current Time: %s\r\n", timeBuf);
+        dualOut.printf("Current Time: %s\r\n", timeBuf);
     } else {
-        Serial.println("Current Time: not synced");
+        dualOut.println("Current Time: not synced");
     }
-    Serial.println("--- Stats ---");
-    Serial.printf("UDP Packets: %lu received, %lu dropped\r\n",
+    dualOut.println("--- Stats ---");
+    dualOut.printf("UDP Packets: %lu received, %lu dropped\r\n",
                   udpReceiver.getPacketsReceived(), udpReceiver.getPacketsDropped());
 }
 
 void UsbTerminal::cmdWifi(const char* args) {
     if (strlen(args) == 0) {
-        Serial.println("Usage: wifi <ssid> <password>");
-        Serial.printf("Current SSID: %s\r\n", config->wifiSsid);
+        dualOut.println("Usage: wifi <ssid> <password>");
+        dualOut.printf("Current SSID: %s\r\n", config->wifiSsid);
         return;
     }
 
@@ -405,71 +410,71 @@ void UsbTerminal::cmdWifi(const char* args) {
     strncpy(config->wifiSsid, ssid, sizeof(config->wifiSsid));
     strncpy(config->wifiPassword, password, sizeof(config->wifiPassword));
 
-    Serial.printf("WiFi credentials set: %s\r\n", ssid);
-    Serial.println("Use 'save' to persist, then restart to connect");
+    dualOut.printf("WiFi credentials set: %s\r\n", ssid);
+    dualOut.println("Use 'save' to persist, then restart to connect");
 }
 
 void UsbTerminal::cmdName(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current name: %s\r\n", config->deviceName);
+        dualOut.printf("Current name: %s\r\n", config->deviceName);
         return;
     }
 
     strncpy(config->deviceName, args, DEVICE_NAME_MAX_LEN);
     config->deviceName[DEVICE_NAME_MAX_LEN] = '\0';
-    Serial.printf("Device name set to: %s\r\n", config->deviceName);
+    dualOut.printf("Device name set to: %s\r\n", config->deviceName);
 }
 
 void UsbTerminal::cmdOffset(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current WS2812 offset: %d\r\n", config->ws2812Offset);
+        dualOut.printf("Current WS2812 offset: %d\r\n", config->ws2812Offset);
         return;
     }
 
     int offset = atoi(args);
     if (offset < 0 || offset >= RING_NUM_PIXELS) {
-        Serial.printf("Offset must be 0-%d\r\n", RING_NUM_PIXELS - 1);
+        dualOut.printf("Offset must be 0-%d\r\n", RING_NUM_PIXELS - 1);
         return;
     }
 
     config->ws2812Offset = offset;
     if (leds) leds->setWS2812Offset(offset);
-    Serial.printf("WS2812 offset set to: %d\r\n", offset);
+    dualOut.printf("WS2812 offset set to: %d\r\n", offset);
 }
 
 void UsbTerminal::cmdBrightness(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current brightness: %d\r\n", config->brightness);
+        dualOut.printf("Current brightness: %d\r\n", config->brightness);
         return;
     }
 
     int bright = atoi(args);
     if (bright < 0 || bright > 255) {
-        Serial.println("Brightness must be 0-255");
+        dualOut.println("Brightness must be 0-255");
         return;
     }
 
     config->brightness = bright;
     if (leds) leds->setBrightness(bright);
-    Serial.printf("Brightness set to: %d\r\n", bright);
+    dualOut.printf("Brightness set to: %d\r\n", bright);
 }
 
 void UsbTerminal::cmdMode(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current mode: %d\r\n", config->localMode);
-        Serial.println("Modes: 0=blank, 1=cylon, 2=rainbow, 3=fire, 4=sparkle, 5=chase, 255=cycle");
+        dualOut.printf("Current mode: %d\r\n", config->localMode);
+        dualOut.println("Modes: 0=blank, 1=cylon, 2=rainbow, 3=fire, 4=sparkle, 5=chase, 255=cycle");
         return;
     }
 
     int mode = atoi(args);
     if (mode < 0 || (mode >= LOCAL_MODE_COUNT && mode != LOCAL_MODE_CYCLE)) {
-        Serial.println("Invalid mode");
+        dualOut.println("Invalid mode");
         return;
     }
 
     config->localMode = mode;
     localModes.start(mode);
-    Serial.printf("Local mode set to: %d\r\n", mode);
+    dualOut.printf("Local mode set to: %d\r\n", mode);
 }
 
 void UsbTerminal::cmdSave() {
@@ -477,16 +482,16 @@ void UsbTerminal::cmdSave() {
 }
 
 void UsbTerminal::cmdReset() {
-    Serial.println("Resetting to factory defaults...");
+    dualOut.println("Resetting to factory defaults...");
     if (resetCallback) resetCallback();
 }
 
 void UsbTerminal::cmdTouch() {
-    Serial.println("Touch sensor values:");
+    dualOut.println("Touch sensor values:");
     if (touch) {
-        Serial.printf("Sensitivity: %.2f\r\n", touch->getSensitivity());
+        dualOut.printf("Sensitivity: %.2f\r\n", touch->getSensitivity());
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
-            Serial.printf("  Touch %d: value=%d, baseline=%d, threshold=%d, touched=%s\r\n",
+            dualOut.printf("  Touch %d: value=%d, baseline=%d, threshold=%d, touched=%s\r\n",
                           i, touch->getRawValue(i), touch->getBaseline(i),
                           touch->getThreshold(i), touch->isTouched(i) ? "YES" : "no");
         }
@@ -495,20 +500,20 @@ void UsbTerminal::cmdTouch() {
 
 void UsbTerminal::cmdSensitivity(const char* args) {
     if (!touch) {
-        Serial.println("Touch handler not available");
+        dualOut.println("Touch handler not available");
         return;
     }
 
     if (strlen(args) == 0) {
-        Serial.printf("Current sensitivity: %.2f (higher = more sensitive)\r\n",
+        dualOut.printf("Current sensitivity: %.2f (higher = more sensitive)\r\n",
                       touch->getSensitivity());
-        Serial.println("Usage: sensitivity <0.1-0.95>");
+        dualOut.println("Usage: sensitivity <0.1-0.95>");
         return;
     }
 
     float sens = atof(args);
     if (sens < 0.1 || sens > 0.95) {
-        Serial.println("Sensitivity must be 0.1-0.95");
+        dualOut.println("Sensitivity must be 0.1-0.95");
         return;
     }
 
@@ -516,29 +521,29 @@ void UsbTerminal::cmdSensitivity(const char* args) {
     config->touchSensitivity = sens;
     // Update threshold display
     for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
-        Serial.printf("  Touch %d: new threshold=%d\r\n", i, touch->getThreshold(i));
+        dualOut.printf("  Touch %d: new threshold=%d\r\n", i, touch->getThreshold(i));
     }
 }
 
 void UsbTerminal::cmdTimezone(const char* args) {
     if (strlen(args) == 0) {
-        Serial.printf("Current timezone: %s\r\n", config->timezone);
-        Serial.println("Usage: timezone <POSIX_TZ_string>");
-        Serial.println("Examples:");
-        Serial.println("  PST8PDT,M3.2.0,M11.1.0    (US Pacific)");
-        Serial.println("  EST5EDT,M3.2.0,M11.1.0     (US Eastern)");
-        Serial.println("  CST6CDT,M3.2.0,M11.1.0     (US Central)");
-        Serial.println("  MST7MDT,M3.2.0,M11.1.0     (US Mountain)");
-        Serial.println("  UTC0                        (UTC)");
+        dualOut.printf("Current timezone: %s\r\n", config->timezone);
+        dualOut.println("Usage: timezone <POSIX_TZ_string>");
+        dualOut.println("Examples:");
+        dualOut.println("  PST8PDT,M3.2.0,M11.1.0    (US Pacific)");
+        dualOut.println("  EST5EDT,M3.2.0,M11.1.0     (US Eastern)");
+        dualOut.println("  CST6CDT,M3.2.0,M11.1.0     (US Central)");
+        dualOut.println("  MST7MDT,M3.2.0,M11.1.0     (US Mountain)");
+        dualOut.println("  UTC0                        (UTC)");
 
         // Show current time if available
         struct tm timeinfo;
         if (getLocalTime(&timeinfo, 0)) {
             char timeBuf[32];
             strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-            Serial.printf("Current time: %s\r\n", timeBuf);
+            dualOut.printf("Current time: %s\r\n", timeBuf);
         } else {
-            Serial.println("Time not yet synced (NTP pending)");
+            dualOut.println("Time not yet synced (NTP pending)");
         }
         return;
     }
@@ -548,12 +553,12 @@ void UsbTerminal::cmdTimezone(const char* args) {
 
     // Apply immediately
     configTzTime(config->timezone, CLOCK_NTP_SERVER);
-    Serial.printf("Timezone set to: %s\r\n", config->timezone);
-    Serial.println("Use 'save' to persist");
+    dualOut.printf("Timezone set to: %s\r\n", config->timezone);
+    dualOut.println("Use 'save' to persist");
 }
 
 void UsbTerminal::cmdTest() {
-    Serial.println("Running LED test pattern...");
+    dualOut.println("Running LED test pattern...");
     localModes.stop();
 
     for (int i = 0; i < RING_NUM_PIXELS; i++) {
@@ -590,7 +595,7 @@ void UsbTerminal::cmdTest() {
     leds->clear();
     leds->show();
     localModes.start(config->localMode);
-    Serial.println("Test complete");
+    dualOut.println("Test complete");
 }
 
 // ============================================================================
@@ -601,8 +606,8 @@ void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(100);
 
-    Serial.println();
-    Serial.println("LTP ESP32 Ring Controller (Sink Interface) starting...");
+    dualOut.println();
+    dualOut.println("LTP ESP32 Ring Controller (Sink Interface) starting...");
 
     // Status LED
     pinMode(STATUS_LED_PIN, OUTPUT);
@@ -613,7 +618,7 @@ void setup() {
 
     // Generate device ID from MAC
     generateDeviceId();
-    Serial.printf("Device ID: %s\r\n", deviceId);
+    dualOut.printf("Device ID: %s\r\n", deviceId);
 
     // Initialize LED driver
     leds.begin();
@@ -638,7 +643,7 @@ void setup() {
     if (strlen(config.wifiSsid) > 0) {
         wifi.begin(config.wifiSsid, config.wifiPassword, config.deviceName);
     } else {
-        Serial.println("WiFi: No credentials configured. Use terminal to set.");
+        dualOut.println("WiFi: No credentials configured. Use terminal to set.");
         // Still need to init WiFi stack for UDP to work later
         WiFi.mode(WIFI_STA);
     }
@@ -656,8 +661,8 @@ void setup() {
 
     lastActivityTime = millis();
 
-    Serial.println("Initialization complete!");
-    Serial.printf("Ring: %d pixels, WS2812: %d satellites\r\n", RING_NUM_PIXELS, WS2812_NUM_LEDS);
+    dualOut.println("Initialization complete!");
+    dualOut.printf("Ring: %d pixels, WS2812: %d satellites\r\n", RING_NUM_PIXELS, WS2812_NUM_LEDS);
 }
 
 void loop() {
@@ -673,9 +678,12 @@ void loop() {
         // Start mDNS advertisement
         wifi.startMdns(deviceId, config.deviceName, RING_NUM_PIXELS, "rgb", 60);
 
+        // Start telnet server
+        telnet.begin();
+
         // Start NTP time sync
         configTzTime(config.timezone, CLOCK_NTP_SERVER);
-        Serial.printf("NTP: Syncing with TZ=%s\r\n", config.timezone);
+        dualOut.printf("NTP: Syncing with TZ=%s\r\n", config.timezone);
 
         networkStarted = true;
     }
@@ -685,7 +693,7 @@ void loop() {
     if (hadClient && !hasClient) {
         // Client disconnected - stop stream
         protocol.stopStream();
-        Serial.println("Client disconnected, stream stopped");
+        dualOut.println("Client disconnected, stream stopped");
     }
     hadClient = hasClient;
 
@@ -693,8 +701,10 @@ void loop() {
     if (hasClient) {
         String line = wifi.readLine();
         if (line.length() > 0) {
+            dualOut.printf("TCP rx[%d]: %d bytes\r\n", wifi.getActiveClient(), line.length());
             String response = protocol.processMessage(line);
             if (response.length() > 0) {
+                dualOut.printf("TCP tx[%d]: %d bytes\r\n", wifi.getActiveClient(), response.length());
                 wifi.send(response);
             }
         }
@@ -719,7 +729,7 @@ void loop() {
             // Debug: print first few pixels every 100 packets
             static uint32_t debugCounter = 0;
             if (++debugCounter % 100 == 1) {
-                Serial.printf("UDP: %d px, first=[%d,%d,%d]\r\n",
+                dualOut.printf("UDP: %d px, first=[%d,%d,%d]\r\n",
                     pixelsReceived, pixelBuffer[0], pixelBuffer[1], pixelBuffer[2]);
             }
         }
@@ -729,7 +739,7 @@ void loop() {
         if (millis() - lastStreamWarn > 5000) {
             int pending = udpReceiver.isRunning() ? 1 : 0;  // Just check if receiver running
             if (pending && wifi.hasClient()) {
-                Serial.println("UDP: Stream not active, data may be waiting");
+                dualOut.println("UDP: Stream not active, data may be waiting");
                 lastStreamWarn = millis();
             }
         }
@@ -752,4 +762,9 @@ void loop() {
 
     // Update USB terminal
     terminal.update();
+
+    // Update telnet server and process commands
+    if (telnet.update()) {
+        terminal.processCommand(telnet.getLine());
+    }
 }

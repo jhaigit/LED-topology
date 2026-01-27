@@ -83,7 +83,7 @@ public:
     // Initialize WiFi connection
     bool begin(const char* ssid, const char* password, const char* hostname) {
         if (strlen(ssid) == 0) {
-            Serial.println("WiFi: No SSID configured");
+            dualOut.println("WiFi: No SSID configured");
             return false;
         }
 
@@ -97,7 +97,7 @@ public:
         state = WifiState::CONNECTING;
         connectStartTime = millis();
 
-        Serial.printf("WiFi: Connecting to %s...\r\n", ssid);
+        dualOut.printf("WiFi: Connecting to %s...\r\n", ssid);
         return true;
     }
 
@@ -117,7 +117,7 @@ public:
                 // Try to reconnect periodically
                 if (millis() - lastReconnectAttempt >= WIFI_RECONNECT_DELAY) {
                     if (WiFi.SSID().length() > 0) {
-                        Serial.println("WiFi: Attempting reconnection...");
+                        dualOut.println("WiFi: Attempting reconnection...");
                         WiFi.reconnect();
                         state = WifiState::CONNECTING;
                         connectStartTime = millis();
@@ -134,7 +134,7 @@ public:
         if (mdnsStarted) return;
 
         if (!MDNS.begin(hostname)) {
-            Serial.println("mDNS: Failed to start");
+            dualOut.println("mDNS: Failed to start");
             return;
         }
 
@@ -157,7 +157,7 @@ public:
         txt.apply();
 
         mdnsStarted = true;
-        Serial.printf("mDNS: Started as %s.local, service _ltp-sink._tcp\r\n", hostname);
+        dualOut.printf("mDNS: Started as %s.local, service _ltp-sink._tcp\r\n", hostname);
     }
 
     // Check if any client is connected
@@ -201,6 +201,9 @@ public:
 
     // Get TCP server port
     uint16_t getPort() const { return serverPort; }
+
+    // Get active client index (for debugging)
+    int getActiveClient() const { return activeClientIdx; }
 
     // Read a line from any client (returns empty string if no complete line)
     // Sets activeClientIdx to the client that sent the message
@@ -275,13 +278,13 @@ private:
     void handleConnecting() {
         if (WiFi.status() == WL_CONNECTED) {
             state = WifiState::CONNECTED;
-            Serial.printf("WiFi: Connected! IP: %s\r\n", WiFi.localIP().toString().c_str());
+            dualOut.printf("WiFi: Connected! IP: %s\r\n", WiFi.localIP().toString().c_str());
 
             // Start TCP server
             server.begin();
-            Serial.printf("WiFi: TCP server started on port %d\r\n", serverPort);
+            dualOut.printf("WiFi: TCP server started on port %d\r\n", serverPort);
         } else if (millis() - connectStartTime >= WIFI_CONNECT_TIMEOUT) {
-            Serial.println("WiFi: Connection timeout");
+            dualOut.println("WiFi: Connection timeout");
             state = WifiState::DISCONNECTED;
             lastReconnectAttempt = millis();
         }
@@ -290,7 +293,7 @@ private:
     void handleConnected() {
         // Check if WiFi is still connected
         if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("WiFi: Disconnected");
+            dualOut.println("WiFi: Disconnected");
             state = WifiState::DISCONNECTED;
             disconnectAllClients();
             return;
@@ -312,11 +315,11 @@ private:
                 clients[slot] = newClient;
                 linePos[slot] = 0;
                 state = WifiState::CLIENT_ACTIVE;
-                Serial.printf("WiFi: Client %d connected from %s (%d total)\r\n",
+                dualOut.printf("WiFi: Client %d connected from %s (%d total)\r\n",
                               slot, newClient.remoteIP().toString().c_str(), clientCount());
             } else {
                 // No slots available, reject connection
-                Serial.println("WiFi: Max clients reached, rejecting connection");
+                dualOut.println("WiFi: Max clients reached, rejecting connection");
                 newClient.stop();
             }
         }
@@ -327,13 +330,13 @@ private:
             state = WifiState::CLIENT_ACTIVE;
         } else if (count == 0 && state == WifiState::CLIENT_ACTIVE) {
             state = WifiState::CONNECTED;
-            Serial.println("WiFi: All clients disconnected");
+            dualOut.println("WiFi: All clients disconnected");
         }
 
         // Clean up disconnected clients
         for (int i = 0; i < MAX_TCP_CLIENTS; i++) {
             if (clients[i] && !clients[i].connected()) {
-                Serial.printf("WiFi: Client %d disconnected\r\n", i);
+                dualOut.printf("WiFi: Client %d disconnected\r\n", i);
                 clients[i].stop();
                 linePos[i] = 0;
             }

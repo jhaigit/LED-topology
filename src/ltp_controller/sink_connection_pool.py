@@ -230,9 +230,13 @@ class SinkConnectionPool:
 
         async with conn.lock:
             try:
-                return await conn.client.request(message, timeout=timeout)
+                logger.debug(f"Pool: Sending {message.type.value} seq={message.seq} to {sink_id} "
+                             f"(connected={conn.connected}, is_connected={conn.client.is_connected})")
+                result = await conn.client.request(message, timeout=timeout)
+                logger.debug(f"Pool: Got response for {sink_id}: {result.type.value if result else 'None'}")
+                return result
             except Exception as e:
-                logger.warning(f"Pool: Request to {sink_id} failed: {e}")
+                logger.warning(f"Pool: Request to {sink_id} failed: {type(e).__name__}: {e!r}")
                 conn.connected = False
                 return None
 

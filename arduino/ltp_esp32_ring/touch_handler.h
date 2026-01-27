@@ -44,7 +44,7 @@ public:
 
     // Calibrate touch sensors (sample baseline values)
     void calibrate() {
-        Serial.println("Calibrating touch sensors...");
+        dualOut.println("Calibrating touch sensors...");
 
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
             uint32_t sum = 0;
@@ -58,12 +58,12 @@ public:
             baselines[i] = sum / TOUCH_CALIBRATION_SAMPLES;
             thresholds[i] = (uint16_t)(baselines[i] * sensitivity);
 
-            Serial.printf("  Touch %d: baseline=%d, threshold=%d\r\n",
+            dualOut.printf("  Touch %d: baseline=%d, threshold=%d\r\n",
                           i, baselines[i], thresholds[i]);
         }
 
         calibrated = true;
-        Serial.println("Touch calibration complete.");
+        dualOut.println("Touch calibration complete.");
     }
 
     // Update touch states (call from loop)
@@ -113,7 +113,7 @@ public:
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
             thresholds[i] = (uint16_t)(baselines[i] * sensitivity);
         }
-        Serial.printf("Touch sensitivity set to %.2f\r\n", sensitivity);
+        dualOut.printf("Touch sensitivity set to %.2f\r\n", sensitivity);
     }
 
     float getSensitivity() const { return sensitivity; }
