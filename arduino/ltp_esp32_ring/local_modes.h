@@ -124,11 +124,24 @@ public:
             if (now - modeStartTime >= LOCAL_MODE_CYCLE_TIME) {
                 modeStartTime = now;
                 displayMode++;
+                // Skip touch mode in cycle (it needs touch input)
+                if (displayMode == LOCAL_MODE_TOUCH) {
+                    displayMode++;
+                }
                 if (displayMode >= LOCAL_MODE_COUNT) {
                     displayMode = LOCAL_MODE_CYLON;
                 }
                 position = 0;
                 leds.clear();
+
+                // Initialize modes that need it
+                if (displayMode == LOCAL_MODE_MITOSIS) {
+                    initMitosis();
+                } else if (displayMode == LOCAL_MODE_SINWAVE ||
+                           displayMode == LOCAL_MODE_SINWAVE_RGB ||
+                           displayMode == LOCAL_MODE_SINWAVE_RGB2) {
+                    initSinWave(displayMode == LOCAL_MODE_SINWAVE_RGB2);
+                }
             }
         }
 
@@ -698,8 +711,9 @@ private:
         sinTimePhase += 0.03f;    // Throb speed
 
         // Calculate overall brightness multiplier (throb effect)
+        // Goes from near-zero to full brightness
         float throb = 0.5f + 0.5f * sin(sinTimePhase);
-        uint8_t maxBrightness = 64 + (uint8_t)(throb * 191);  // 64-255
+        uint8_t maxBrightness = (uint8_t)(throb * throb * 255);  // 0-255, squared for dramatic fade
 
         for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
             // Calculate angle for this pixel (0 to 2*PI around the ring)
@@ -732,8 +746,9 @@ private:
             }
         }
 
-        // Subtle overall brightness variation
-        float throb = 0.85f + 0.15f * sin(sinTimePhase);
+        // Overall brightness variation - goes low to high
+        float throbRaw = 0.5f + 0.5f * sin(sinTimePhase);
+        float throb = throbRaw * throbRaw;  // Square for more dramatic low end (0-1)
 
         for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
             // Calculate base angle for this pixel
