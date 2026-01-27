@@ -346,6 +346,9 @@ void UsbTerminal::cmdStatus() {
     Serial.printf("WS2812 Offset: %d\r\n", config->ws2812Offset);
     Serial.printf("Idle Timeout: %d sec\r\n", config->idleTimeout);
     Serial.printf("Input Events: %s\r\n", config->inputEventsEnabled ? "enabled" : "disabled");
+    if (touch) {
+        Serial.printf("Touch Sensitivity: %.2f\r\n", touch->getSensitivity());
+    }
     Serial.println("--- Stats ---");
     Serial.printf("UDP Packets: %lu received, %lu dropped\r\n",
                   udpReceiver.getPacketsReceived(), udpReceiver.getPacketsDropped());
