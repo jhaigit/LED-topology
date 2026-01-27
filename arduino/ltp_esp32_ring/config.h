@@ -103,8 +103,11 @@
 #define LOCAL_MODE_CHASE        5       // Color chase (seamless loop)
 #define LOCAL_MODE_MITOSIS      6       // Splitting/merging circlers
 #define LOCAL_MODE_TOUCH        7       // Touch-reactive ripples from globes
+#define LOCAL_MODE_SINWAVE      8       // Red sin wave pattern with throb
+#define LOCAL_MODE_SINWAVE_RGB  9       // RGB sin waves, same speed
+#define LOCAL_MODE_SINWAVE_RGB2 10      // RGB sin waves, different speeds
 #define LOCAL_MODE_CYCLE        255     // Cycle through all modes
-#define LOCAL_MODE_COUNT        8       // Number of actual modes (excluding cycle)
+#define LOCAL_MODE_COUNT        11      // Number of actual modes (excluding cycle)
 
 #define LOCAL_MODE_CYCLE_TIME   10000   // Time per mode in cycle (ms)
 

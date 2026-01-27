@@ -183,6 +183,11 @@ void checkIdleTimeout() {
 void onTouchPress(uint8_t touchIdx) {
     Serial.printf("Touch %d pressed\r\n", touchIdx);
 
+    // In touch-reactive mode, don't switch modes or flash (touch is used for the effect)
+    if (localModes.isActive() && localModes.getCurrentMode() == LOCAL_MODE_TOUCH) {
+        return;
+    }
+
     // Flash corresponding WS2812
     leds.flashWS2812(touchIdx);
 

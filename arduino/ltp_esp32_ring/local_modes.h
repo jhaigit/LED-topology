@@ -62,6 +62,13 @@ public:
             if (displayMode == LOCAL_MODE_TOUCH) {
                 initTouch();
             }
+
+            // Initialize sin wave modes
+            if (displayMode == LOCAL_MODE_SINWAVE ||
+                displayMode == LOCAL_MODE_SINWAVE_RGB ||
+                displayMode == LOCAL_MODE_SINWAVE_RGB2) {
+                initSinWave(displayMode == LOCAL_MODE_SINWAVE_RGB2);
+            }
         }
     }
 
@@ -96,13 +103,16 @@ public:
         // Get update interval for current mode
         uint32_t interval;
         switch (displayMode) {
-            case LOCAL_MODE_CYLON:   interval = 15; break;
-            case LOCAL_MODE_RAINBOW: interval = 20; break;
-            case LOCAL_MODE_FIRE:    interval = 30; break;
-            case LOCAL_MODE_SPARKLE: interval = 30; break;
-            case LOCAL_MODE_CHASE:   interval = 40; break;
-            case LOCAL_MODE_MITOSIS: interval = 25; break;
-            case LOCAL_MODE_TOUCH:   interval = 20; break;
+            case LOCAL_MODE_CYLON:      interval = 15; break;
+            case LOCAL_MODE_RAINBOW:    interval = 20; break;
+            case LOCAL_MODE_FIRE:       interval = 30; break;
+            case LOCAL_MODE_SPARKLE:    interval = 30; break;
+            case LOCAL_MODE_CHASE:      interval = 40; break;
+            case LOCAL_MODE_MITOSIS:    interval = 25; break;
+            case LOCAL_MODE_TOUCH:      interval = 20; break;
+            case LOCAL_MODE_SINWAVE:    interval = 20; break;
+            case LOCAL_MODE_SINWAVE_RGB:  interval = 20; break;
+            case LOCAL_MODE_SINWAVE_RGB2: interval = 20; break;
             default: interval = 50; break;
         }
 
@@ -124,13 +134,16 @@ public:
 
         // Run the current animation
         switch (displayMode) {
-            case LOCAL_MODE_CYLON:   updateCylon(); break;
-            case LOCAL_MODE_RAINBOW: updateRainbow(); break;
-            case LOCAL_MODE_FIRE:    updateFire(); break;
-            case LOCAL_MODE_SPARKLE: updateSparkle(); break;
-            case LOCAL_MODE_CHASE:   updateChase(); break;
-            case LOCAL_MODE_MITOSIS: updateMitosis(); break;
-            case LOCAL_MODE_TOUCH:   updateTouch(); break;
+            case LOCAL_MODE_CYLON:      updateCylon(); break;
+            case LOCAL_MODE_RAINBOW:    updateRainbow(); break;
+            case LOCAL_MODE_FIRE:       updateFire(); break;
+            case LOCAL_MODE_SPARKLE:    updateSparkle(); break;
+            case LOCAL_MODE_CHASE:      updateChase(); break;
+            case LOCAL_MODE_MITOSIS:    updateMitosis(); break;
+            case LOCAL_MODE_TOUCH:      updateTouch(); break;
+            case LOCAL_MODE_SINWAVE:    updateSinWave(); break;
+            case LOCAL_MODE_SINWAVE_RGB:  updateSinWaveRGB(false); break;
+            case LOCAL_MODE_SINWAVE_RGB2: updateSinWaveRGB(true); break;
         }
 
         leds.show();
@@ -178,6 +191,12 @@ private:
     };
     TouchRipple ripples[MAX_RIPPLES];
     uint8_t nextRippleHue[4];   // Next hue for each globe
+
+    // Sin wave mode data
+    float sinPhaseOffset;       // Rotation phase for the wave pattern
+    float sinTimePhase;         // Phase for overall brightness throb
+    float sinColorOffsets[3];   // Phase offsets for R, G, B channels
+    float sinColorSpeeds[3];    // Rotation speeds for each color (mode 10)
 
     // Cylon: scanning eye that wraps around the ring seamlessly
     void updateCylon() {
@@ -643,6 +662,96 @@ private:
         ripples[0].radius = 0;
         ripples[0].hue = hue;
         ripples[0].brightness = brightness;
+    }
+
+    // Initialize sin wave modes
+    void initSinWave(bool differentSpeeds) {
+        sinPhaseOffset = 0;
+        sinTimePhase = 0;
+
+        // Random starting offsets for each color channel
+        for (uint8_t i = 0; i < 3; i++) {
+            sinColorOffsets[i] = random8() * (2.0f * PI / 256.0f);
+        }
+
+        // Set rotation speeds
+        if (differentSpeeds) {
+            // Different speeds for each color (mode 10)
+            sinColorSpeeds[0] = 0.02f + random8() * 0.0002f;  // R
+            sinColorSpeeds[1] = 0.025f + random8() * 0.0002f; // G
+            sinColorSpeeds[2] = 0.03f + random8() * 0.0002f;  // B
+        } else {
+            // Same speed for all colors (mode 9)
+            float speed = 0.025f;
+            sinColorSpeeds[0] = speed;
+            sinColorSpeeds[1] = speed;
+            sinColorSpeeds[2] = speed;
+        }
+    }
+
+    // Sin wave mode 8: Red only with 8 waves, rotating and throbbing
+    void updateSinWave() {
+        CRGB* ring = leds.getRingLeds();
+
+        // Update phases
+        sinPhaseOffset += 0.02f;  // Wave rotation speed
+        sinTimePhase += 0.03f;    // Throb speed
+
+        // Calculate overall brightness multiplier (throb effect)
+        float throb = 0.5f + 0.5f * sin(sinTimePhase);
+        uint8_t maxBrightness = 64 + (uint8_t)(throb * 191);  // 64-255
+
+        for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
+            // Calculate angle for this pixel (0 to 2*PI around the ring)
+            float angle = (float)i * 2.0f * PI / RING_NUM_PIXELS;
+
+            // Apply 8x frequency and add rotation offset
+            float sinAngle = 8.0f * angle + sinPhaseOffset;
+
+            // Calculate brightness using abs(sin())
+            float sinVal = fabs(sin(sinAngle));
+            uint8_t brightness = (uint8_t)(sinVal * maxBrightness);
+
+            ring[i] = CRGB(brightness, 0, 0);
+        }
+    }
+
+    // Sin wave modes 9 & 10: RGB with separate offsets
+    void updateSinWaveRGB(bool differentSpeeds) {
+        CRGB* ring = leds.getRingLeds();
+
+        // Update phases
+        sinPhaseOffset += 0.015f;  // Base rotation (for visual interest)
+        sinTimePhase += 0.02f;     // Subtle overall modulation
+
+        // Update color offsets
+        for (uint8_t c = 0; c < 3; c++) {
+            sinColorOffsets[c] += sinColorSpeeds[c];
+            if (sinColorOffsets[c] > 2.0f * PI) {
+                sinColorOffsets[c] -= 2.0f * PI;
+            }
+        }
+
+        // Subtle overall brightness variation
+        float throb = 0.85f + 0.15f * sin(sinTimePhase);
+
+        for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
+            // Calculate base angle for this pixel
+            float angle = (float)i * 2.0f * PI / RING_NUM_PIXELS;
+
+            // Calculate each color channel with its own offset
+            uint8_t r, g, b;
+
+            float sinR = fabs(sin(8.0f * angle + sinColorOffsets[0]));
+            float sinG = fabs(sin(8.0f * angle + sinColorOffsets[1]));
+            float sinB = fabs(sin(8.0f * angle + sinColorOffsets[2]));
+
+            r = (uint8_t)(sinR * 255.0f * throb);
+            g = (uint8_t)(sinG * 255.0f * throb);
+            b = (uint8_t)(sinB * 255.0f * throb);
+
+            ring[i] = CRGB(r, g, b);
+        }
     }
 };
 
