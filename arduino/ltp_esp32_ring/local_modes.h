@@ -175,7 +175,7 @@ private:
         CRGB* ring = leds.getRingLeds();
 
         // Process ring as two halves with fire rising from each end toward the middle
-        uint16_t halfLen = RING_NUM_PIXELS / 2;
+        uint16_t halfLen = RING_NUM_PIXELS / 2;  // 101 for 202 pixels
 
         // Cool down every cell
         for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
@@ -184,13 +184,17 @@ private:
         }
 
         // Heat rises (from each end toward middle)
-        // First half: heat rises from 0 toward halfLen
-        for (uint16_t i = halfLen - 1; i >= 2; i--) {
+        // First half: heat rises from pixel 0 toward halfLen (0 -> 100)
+        for (int16_t i = halfLen; i >= 2; i--) {
             heat[i] = (heat[i - 1] + heat[i - 2] + heat[i - 2]) / 3;
         }
-        // Second half: heat rises from end toward middle
-        for (uint16_t i = RING_NUM_PIXELS - 2; i >= halfLen + 2; i--) {
+        // Second half: heat rises from end toward middle (201 -> 101)
+        for (int16_t i = halfLen + 1; i <= RING_NUM_PIXELS - 3; i++) {
             heat[i] = (heat[i + 1] + heat[i + 2] + heat[i + 2]) / 3;
+        }
+        // Handle edge pixels near the end
+        if (RING_NUM_PIXELS >= 2) {
+            heat[RING_NUM_PIXELS - 2] = (heat[RING_NUM_PIXELS - 1] + heat[RING_NUM_PIXELS - 1]) / 2;
         }
 
         // Randomly ignite sparks at both ends

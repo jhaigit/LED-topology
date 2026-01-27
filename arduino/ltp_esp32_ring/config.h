@@ -20,8 +20,8 @@
 
 // WS2812 Satellite LEDs (each on separate pin)
 #define WS2812_NUM_LEDS     4
-#define WS2812_PIN_0        16      // GPIO16 / RXD2 (UART2 RX)
-#define WS2812_PIN_1        17      // GPIO17 / TXD2 (UART2 TX)
+#define WS2812_PIN_0        17      // GPIO16 / RXD2 (UART2 RX)
+#define WS2812_PIN_1        16      // GPIO17 / TXD2 (UART2 TX)
 #define WS2812_PIN_2        25      // GPIO25 / DAC1 / ADC2_CH8
 #define WS2812_PIN_3        26      // GPIO26 / DAC2 / ADC2_CH9
 #define WS2812_DEFAULT_OFFSET 21    // Ring position offset for WS2812 mapping

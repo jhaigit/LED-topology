@@ -176,22 +176,15 @@ void checkIdleTimeout() {
 }
 
 // ============================================================================
-// Touch Callback
+// Touch Callbacks
 // ============================================================================
 
-void onTouchEvent(uint8_t touchIdx) {
-    Serial.printf("Touch %d detected\r\n", touchIdx);
+// Called on touch press only - handles flash and mode switching
+void onTouchPress(uint8_t touchIdx) {
+    Serial.printf("Touch %d pressed\r\n", touchIdx);
 
     // Flash corresponding WS2812
     leds.flashWS2812(touchIdx);
-
-    // Send input event if enabled and connected
-    if (config.inputEventsEnabled && wifi.hasClient()) {
-        char inputName[16];
-        snprintf(inputName, sizeof(inputName), "Touch%d", touchIdx);
-        String event = protocol.buildInputEvent(touchIdx, inputName, true);
-        wifi.send(event);
-    }
 
     // Handle local mode switching
     if (!localModes.isActive()) {
@@ -202,6 +195,19 @@ void onTouchEvent(uint8_t touchIdx) {
         // Advance to next mode
         localModes.nextMode();
         config.localMode = localModes.getCurrentMode();
+    }
+}
+
+// Called on both press and release - sends input events to controller
+void onTouchStateChange(uint8_t touchIdx, bool pressed) {
+    Serial.printf("Touch %d %s\r\n", touchIdx, pressed ? "pressed" : "released");
+
+    // Send input event if enabled and connected
+    if (config.inputEventsEnabled && wifi.hasClient()) {
+        char inputName[16];
+        snprintf(inputName, sizeof(inputName), "Touch%d", touchIdx);
+        String event = protocol.buildInputEvent(touchIdx, inputName, pressed);
+        wifi.send(event);
     }
 }
 
@@ -282,6 +288,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdReset();
     } else if (strcmp(cmd, "touch") == 0) {
         cmdTouch();
+    } else if (strcmp(cmd, "sensitivity") == 0) {
+        cmdSensitivity(args);
     } else if (strcmp(cmd, "test") == 0) {
         cmdTest();
     } else {
@@ -299,6 +307,7 @@ void UsbTerminal::cmdHelp() {
     Serial.println("  mode <0-5|255>          - Set local mode (255=cycle)");
     Serial.println("  status                  - Show current status");
     Serial.println("  touch                   - Show touch sensor values");
+    Serial.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (lower=more sensitive)");
     Serial.println("  test                    - Run LED test pattern");
     Serial.println("  save                    - Save config to NVS");
     Serial.println("  reset                   - Factory reset");
@@ -446,11 +455,38 @@ void UsbTerminal::cmdReset() {
 void UsbTerminal::cmdTouch() {
     Serial.println("Touch sensor values:");
     if (touch) {
+        Serial.printf("Sensitivity: %.2f\r\n", touch->getSensitivity());
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
             Serial.printf("  Touch %d: value=%d, baseline=%d, threshold=%d, touched=%s\r\n",
                           i, touch->getRawValue(i), touch->getBaseline(i),
                           touch->getThreshold(i), touch->isTouched(i) ? "YES" : "no");
         }
+    }
+}
+
+void UsbTerminal::cmdSensitivity(const char* args) {
+    if (!touch) {
+        Serial.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        Serial.printf("Current sensitivity: %.2f (lower = more sensitive)\r\n",
+                      touch->getSensitivity());
+        Serial.println("Usage: sensitivity <0.1-0.95>");
+        return;
+    }
+
+    float sens = atof(args);
+    if (sens < 0.1 || sens > 0.95) {
+        Serial.println("Sensitivity must be 0.1-0.95");
+        return;
+    }
+
+    touch->setSensitivity(sens);
+    // Update threshold display
+    for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+        Serial.printf("  Touch %d: new threshold=%d\r\n", i, touch->getThreshold(i));
     }
 }
 
@@ -524,7 +560,8 @@ void setup() {
 
     // Initialize touch sensors
     touch.begin();
-    touch.setOnTouch(onTouchEvent);
+    touch.setOnTouch(onTouchPress);
+    touch.setOnTouchState(onTouchStateChange);
 
     // Start local mode if configured
     if (config.localMode != LOCAL_MODE_BLANK) {

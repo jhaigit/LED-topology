@@ -11,14 +11,17 @@
 #include <Arduino.h>
 #include "config.h"
 
-// Touch callback function type
+// Touch callback function type (idx, pressed)
 typedef void (*TouchCallback)(uint8_t touchIdx);
+typedef void (*TouchStateCallback)(uint8_t touchIdx, bool pressed);
 
 class TouchHandler {
 public:
     TouchHandler()
         : onTouchCallback(nullptr)
+        , onTouchStateCallback(nullptr)
         , calibrated(false)
+        , sensitivity(TOUCH_THRESHOLD_RATIO)
     {
         touchPins[0] = TOUCH_PIN_0;
         touchPins[1] = TOUCH_PIN_1;
@@ -53,7 +56,7 @@ public:
             }
 
             baselines[i] = sum / TOUCH_CALIBRATION_SAMPLES;
-            thresholds[i] = (uint16_t)(baselines[i] * TOUCH_THRESHOLD_RATIO);
+            thresholds[i] = (uint16_t)(baselines[i] * sensitivity);
 
             Serial.printf("  Touch %d: baseline=%d, threshold=%d\r\n",
                           i, baselines[i], thresholds[i]);
@@ -79,7 +82,12 @@ public:
                     lastState[i] = touched;
                     lastTouchTime[i] = now;
 
-                    // Trigger callback on touch (not release)
+                    // Trigger state callback for both press and release
+                    if (onTouchStateCallback) {
+                        onTouchStateCallback(i, touched);
+                    }
+
+                    // Trigger legacy callback on touch only (for flash/mode switching)
                     if (touched && onTouchCallback) {
                         onTouchCallback(i);
                     }
@@ -88,10 +96,27 @@ public:
         }
     }
 
-    // Set touch callback
+    // Set touch callback (press only, for local actions)
     void setOnTouch(TouchCallback callback) {
         onTouchCallback = callback;
     }
+
+    // Set touch state callback (press and release, for input events)
+    void setOnTouchState(TouchStateCallback callback) {
+        onTouchStateCallback = callback;
+    }
+
+    // Set touch sensitivity (0.0-1.0, lower = more sensitive)
+    void setSensitivity(float sens) {
+        sensitivity = constrain(sens, 0.1f, 0.95f);
+        // Recalculate thresholds with new sensitivity
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            thresholds[i] = (uint16_t)(baselines[i] * sensitivity);
+        }
+        Serial.printf("Touch sensitivity set to %.2f\r\n", sensitivity);
+    }
+
+    float getSensitivity() const { return sensitivity; }
 
     // Get current touch state for a sensor
     bool isTouched(uint8_t idx) const {
@@ -126,7 +151,9 @@ private:
     bool lastState[TOUCH_NUM_SENSORS];
     uint32_t lastTouchTime[TOUCH_NUM_SENSORS];
     TouchCallback onTouchCallback;
+    TouchStateCallback onTouchStateCallback;
     bool calibrated;
+    float sensitivity;
 };
 
 #endif // TOUCH_HANDLER_H

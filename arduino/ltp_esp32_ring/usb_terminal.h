@@ -97,6 +97,7 @@ private:
     void cmdSave();
     void cmdReset();
     void cmdTouch();
+    void cmdSensitivity(const char* args);
     void cmdTest();
 };
 
