@@ -566,6 +566,9 @@ void setup() {
     touch.setOnTouch(onTouchPress);
     touch.setOnTouchState(onTouchStateChange);
 
+    // Give local modes access to touch handler for touch-reactive mode
+    localModes.setTouchHandler(&touch);
+
     // Start local mode if configured
     if (config.localMode != LOCAL_MODE_BLANK) {
         localModes.start(config.localMode);

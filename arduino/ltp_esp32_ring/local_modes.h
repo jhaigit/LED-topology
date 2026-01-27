@@ -12,11 +12,13 @@
 #include <FastLED.h>
 #include "config.h"
 #include "ring_driver.h"
+#include "touch_handler.h"
 
 class LocalModes {
 public:
     LocalModes(RingDriver& driver)
         : leds(driver)
+        , touchHandler(nullptr)
         , active(false)
         , currentMode(LOCAL_MODE_BLANK)
         , displayMode(LOCAL_MODE_BLANK)
@@ -25,6 +27,11 @@ public:
         , lastUpdate(0)
         , modeStartTime(0)
     {}
+
+    // Set touch handler for touch-reactive modes
+    void setTouchHandler(TouchHandler* handler) {
+        touchHandler = handler;
+    }
 
     // Start or switch to a local mode
     void start(uint8_t mode) {
@@ -49,6 +56,11 @@ public:
             // Initialize mitosis mode
             if (displayMode == LOCAL_MODE_MITOSIS) {
                 initMitosis();
+            }
+
+            // Initialize touch mode
+            if (displayMode == LOCAL_MODE_TOUCH) {
+                initTouch();
             }
         }
     }
@@ -90,6 +102,7 @@ public:
             case LOCAL_MODE_SPARKLE: interval = 30; break;
             case LOCAL_MODE_CHASE:   interval = 40; break;
             case LOCAL_MODE_MITOSIS: interval = 25; break;
+            case LOCAL_MODE_TOUCH:   interval = 20; break;
             default: interval = 50; break;
         }
 
@@ -117,6 +130,7 @@ public:
             case LOCAL_MODE_SPARKLE: updateSparkle(); break;
             case LOCAL_MODE_CHASE:   updateChase(); break;
             case LOCAL_MODE_MITOSIS: updateMitosis(); break;
+            case LOCAL_MODE_TOUCH:   updateTouch(); break;
         }
 
         leds.show();
@@ -127,6 +141,7 @@ public:
 
 private:
     RingDriver& leds;
+    TouchHandler* touchHandler;
     bool active;
     uint8_t currentMode;    // Configured mode (may be CYCLE)
     uint8_t displayMode;    // Actual mode being displayed
@@ -139,7 +154,7 @@ private:
     uint8_t heat[RING_NUM_PIXELS];
 
     // Mitosis mode data
-    static const uint8_t MAX_CIRCLERS = 16;
+    static const uint8_t MAX_CIRCLERS = 8;
     struct Circler {
         float position;      // 0 to RING_NUM_PIXELS
         float speed;         // pixels per update, can be negative
@@ -151,6 +166,18 @@ private:
     uint8_t circlerCount;
     uint32_t nextSplitTime;
     bool splitting;          // true = splitting phase, false = merging phase
+
+    // Touch mode data
+    static const uint8_t MAX_RIPPLES = 12;  // Max active ripples
+    struct TouchRipple {
+        uint16_t centerPos;     // Ring position of globe
+        float radius;           // Current radius in pixels
+        uint8_t hue;            // Color hue
+        uint8_t brightness;     // Starting brightness
+        bool active;
+    };
+    TouchRipple ripples[MAX_RIPPLES];
+    uint8_t nextRippleHue[4];   // Next hue for each globe
 
     // Cylon: scanning eye that wraps around the ring seamlessly
     void updateCylon() {
@@ -472,6 +499,150 @@ private:
                 }
             }
         }
+    }
+
+    // Initialize touch mode
+    void initTouch() {
+        // Clear all ripples
+        for (uint8_t i = 0; i < MAX_RIPPLES; i++) {
+            ripples[i].active = false;
+        }
+        // Initialize starting hues for each globe
+        for (uint8_t i = 0; i < 4; i++) {
+            nextRippleHue[i] = random8();
+        }
+    }
+
+    // Get ring position for a globe (WS2812) index
+    uint16_t getGlobeRingPosition(uint8_t globeIdx) {
+        uint8_t offset = leds.getWS2812Offset();
+        uint16_t spacing = (globeIdx * RING_NUM_PIXELS + WS2812_NUM_LEDS / 2) / WS2812_NUM_LEDS;
+        return (offset + spacing) % RING_NUM_PIXELS;
+    }
+
+    // Touch-reactive mode: ripples emanate from globe positions based on touch
+    void updateTouch() {
+        if (!touchHandler) return;
+
+        CRGB* ring = leds.getRingLeds();
+        const uint8_t fadeAmount = 25;
+        const float rippleSpeed = 2.5f;
+        const uint8_t rippleWidth = 8;
+
+        // Fade all pixels
+        for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
+            ring[i].fadeToBlackBy(fadeAmount);
+        }
+
+        // Check each touch sensor and create ripples
+        for (uint8_t t = 0; t < TOUCH_NUM_SENSORS; t++) {
+            uint16_t rawValue = touchHandler->getRawValue(t);
+            uint16_t baseline = touchHandler->getBaseline(t);
+            uint16_t threshold = touchHandler->getThreshold(t);
+
+            // Calculate touch intensity (0-255)
+            // Lower raw value = more touch (capacitance pulls value down)
+            uint8_t intensity = 0;
+            if (rawValue < baseline) {
+                // Map from threshold..0 to 0..255
+                int32_t touchAmount = baseline - rawValue;
+                int32_t maxTouch = baseline - threshold;
+                if (maxTouch > 0) {
+                    intensity = constrain(touchAmount * 255 / maxTouch, 0, 255);
+                }
+            }
+
+            // Get ring position for this globe
+            uint16_t globePos = getGlobeRingPosition(t);
+
+            // Draw glow at globe position based on touch intensity
+            if (intensity > 20) {
+                uint8_t glowRadius = 3 + (intensity >> 5);  // 3-10 pixels
+                for (int8_t offset = -glowRadius; offset <= glowRadius; offset++) {
+                    uint16_t pos = (globePos + offset + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+                    uint8_t dist = abs(offset);
+                    uint8_t brightness = intensity - (dist * intensity / glowRadius);
+                    CRGB glowColor = CHSV(nextRippleHue[t], 255, brightness);
+                    ring[pos] = blend(ring[pos], glowColor, 200);
+                }
+
+                // Spawn new ripple when touch exceeds threshold
+                if (intensity > 100 && !touchHandler->isTouched(t)) {
+                    // Only spawn if not already touching (on press)
+                } else if (touchHandler->isTouched(t)) {
+                    // While touching, occasionally spawn ripples
+                    if (random8() < 15) {  // ~6% chance per frame
+                        spawnRipple(globePos, nextRippleHue[t], intensity);
+                        nextRippleHue[t] += random8(20, 50);  // Shift color
+                    }
+                }
+            }
+        }
+
+        // Update and draw ripples
+        for (uint8_t r = 0; r < MAX_RIPPLES; r++) {
+            if (!ripples[r].active) continue;
+
+            // Expand ripple
+            ripples[r].radius += rippleSpeed;
+
+            // Fade brightness as it expands
+            if (ripples[r].brightness > 3) {
+                ripples[r].brightness -= 3;
+            } else {
+                ripples[r].active = false;
+                continue;
+            }
+
+            // Deactivate if too large
+            if (ripples[r].radius > RING_NUM_PIXELS / 3) {
+                ripples[r].active = false;
+                continue;
+            }
+
+            // Draw ripple ring (expanding outward in both directions)
+            int16_t innerRadius = (int16_t)(ripples[r].radius - rippleWidth / 2);
+            int16_t outerRadius = (int16_t)(ripples[r].radius + rippleWidth / 2);
+
+            for (int16_t dist = max((int16_t)0, innerRadius); dist <= outerRadius; dist++) {
+                // Distance from ideal radius determines brightness
+                float radiusDist = abs(dist - ripples[r].radius);
+                uint8_t brightness = ripples[r].brightness * (1.0f - radiusDist / (rippleWidth / 2.0f));
+                if (brightness < 5) continue;
+
+                CRGB rippleColor = CHSV(ripples[r].hue, 255, brightness);
+
+                // Draw at +dist and -dist from center
+                uint16_t posPlus = (ripples[r].centerPos + dist) % RING_NUM_PIXELS;
+                uint16_t posMinus = (ripples[r].centerPos - dist + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+
+                ring[posPlus] = blend(ring[posPlus], rippleColor, 180);
+                if (dist > 0) {  // Don't double-draw center
+                    ring[posMinus] = blend(ring[posMinus], rippleColor, 180);
+                }
+            }
+        }
+    }
+
+    // Spawn a new ripple at the given position
+    void spawnRipple(uint16_t centerPos, uint8_t hue, uint8_t brightness) {
+        // Find inactive ripple slot
+        for (uint8_t i = 0; i < MAX_RIPPLES; i++) {
+            if (!ripples[i].active) {
+                ripples[i].active = true;
+                ripples[i].centerPos = centerPos;
+                ripples[i].radius = 0;
+                ripples[i].hue = hue;
+                ripples[i].brightness = brightness;
+                return;
+            }
+        }
+        // If no slot, overwrite oldest (first in array)
+        ripples[0].active = true;
+        ripples[0].centerPos = centerPos;
+        ripples[0].radius = 0;
+        ripples[0].hue = hue;
+        ripples[0].brightness = brightness;
     }
 };
 
