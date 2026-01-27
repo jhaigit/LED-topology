@@ -20,8 +20,8 @@
 
 // WS2812 Satellite LEDs (each on separate pin)
 #define WS2812_NUM_LEDS     4
-#define WS2812_PIN_0        17      // GPIO16 / RXD2 (UART2 RX)
-#define WS2812_PIN_1        16      // GPIO17 / TXD2 (UART2 TX)
+#define WS2812_PIN_0        17      // GPIO17 / TXD2 (UART2 TX)
+#define WS2812_PIN_1        16      // GPIO16 / RXD2 (UART2 RX)
 #define WS2812_PIN_2        25      // GPIO25 / DAC1 / ADC2_CH8
 #define WS2812_PIN_3        26      // GPIO26 / DAC2 / ADC2_CH9
 #define WS2812_DEFAULT_OFFSET 21    // Ring position offset for WS2812 mapping
@@ -35,10 +35,10 @@
 // ============================================================================
 
 #define TOUCH_NUM_SENSORS   4
-#define TOUCH_PIN_0         4       // GPIO4  / Touch0 (T0) / ADC2_CH0 - for WS2812 LED 0
-#define TOUCH_PIN_1         15      // GPIO15 / Touch3 (T3) / ADC2_CH3 / HSPI CS - for WS2812 LED 1
-#define TOUCH_PIN_2         13      // GPIO13 / Touch4 (T4) / ADC2_CH4 / HSPI MOSI - for WS2812 LED 2
-#define TOUCH_PIN_3         12      // GPIO12 / Touch5 (T5) / ADC2_CH5 / HSPI MISO - for WS2812 LED 3
+#define TOUCH_PIN_0         12      // GPIO12 / Touch5 (T5) / ADC2_CH5 / HSPI MISO - for WS2812 LED 3
+#define TOUCH_PIN_1         13      // GPIO13 / Touch4 (T4) / ADC2_CH4 / HSPI MOSI - for WS2812 LED 2
+#define TOUCH_PIN_2         4       // GPIO4  / Touch0 (T0) / ADC2_CH0 - for WS2812 LED 0
+#define TOUCH_PIN_3         15      // GPIO15 / Touch3 (T3) / ADC2_CH3 / HSPI CS - for WS2812 LED 1
 
 // Touch detection parameters
 #define TOUCH_THRESHOLD_RATIO   0.6     // Trigger at 60% of baseline

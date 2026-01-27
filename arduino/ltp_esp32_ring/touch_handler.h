@@ -106,7 +106,7 @@ public:
         onTouchStateCallback = callback;
     }
 
-    // Set touch sensitivity (0.0-1.0, lower = more sensitive)
+    // Set touch sensitivity (0.0-1.0, higher = more sensitive)
     void setSensitivity(float sens) {
         sensitivity = constrain(sens, 0.1f, 0.95f);
         // Recalculate thresholds with new sensitivity

@@ -312,7 +312,7 @@ void UsbTerminal::cmdHelp() {
     Serial.println("  mode <0-5|255>          - Set local mode (255=cycle)");
     Serial.println("  status                  - Show current status");
     Serial.println("  touch                   - Show touch sensor values");
-    Serial.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (lower=more sensitive)");
+    Serial.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
     Serial.println("  test                    - Run LED test pattern");
     Serial.println("  save                    - Save config to NVS");
     Serial.println("  reset                   - Factory reset");
@@ -479,7 +479,7 @@ void UsbTerminal::cmdSensitivity(const char* args) {
     }
 
     if (strlen(args) == 0) {
-        Serial.printf("Current sensitivity: %.2f (lower = more sensitive)\r\n",
+        Serial.printf("Current sensitivity: %.2f (higher = more sensitive)\r\n",
                       touch->getSensitivity());
         Serial.println("Usage: sensitivity <0.1-0.95>");
         return;
