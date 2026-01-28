@@ -310,21 +310,33 @@ private:
         }
     }
 
-    // Sparkle: random sparkles around the ring
+    // Sparkle: random sparkles around the ring with slow rotation
     void updateSparkle() {
         const uint8_t fadeAmount = 20;
 
         CRGB* ring = leds.getRingLeds();
+
+        // Slow rotation: shift all pixels by 1 every 4 frames
+        if (position % 4 == 0) {
+            CRGB last = ring[RING_NUM_PIXELS - 1];
+            for (int i = RING_NUM_PIXELS - 1; i > 0; i--) {
+                ring[i] = ring[i - 1];
+            }
+            ring[0] = last;
+        }
+        position++;
 
         // Fade all pixels
         for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
             ring[i].fadeToBlackBy(fadeAmount);
         }
 
-        // Add random sparkles
-        for (uint8_t i = 0; i < 4; i++) {
-            uint16_t pos = random16(RING_NUM_PIXELS);
-            ring[pos] = CHSV(random8(), 200, 255);
+        // Add ~1.8 sparkles per frame (probabilistic)
+        for (uint8_t i = 0; i < 2; i++) {
+            if (i == 0 || random8() < 204) {  // 1st always, 2nd ~80%
+                uint16_t pos = random16(RING_NUM_PIXELS);
+                ring[pos] = CHSV(random8(), 200, 255);
+            }
         }
     }
 
