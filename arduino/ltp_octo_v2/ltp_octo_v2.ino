@@ -1208,6 +1208,13 @@ void processPacket(const LtpPacket& pkt) {
             handleGetControl(pkt.payload, pkt.length);
             break;
 
+        case CMD_GET_INPUT: {
+            // No inputs on this device — return empty list
+            uint8_t resp[2] = {0, 0};  // num_inputs=0, reserved=0
+            protocol.sendPacket(CMD_INPUTS_LIST, resp, 2);
+            break;
+        }
+
         case CMD_PIXEL_SET_ALL:
             handlePixelSetAll(pkt.payload, pkt.length);
             break;
