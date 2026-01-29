@@ -99,6 +99,9 @@ private:
     void cmdReset();
     void cmdTouch();
     void cmdSensitivity(const char* args);
+    void cmdCalibrate();
+    void cmdTouchMon(const char* args);
+    void cmdThreshold(const char* args);
     void cmdTimezone(const char* args);
     void cmdTest();
 };

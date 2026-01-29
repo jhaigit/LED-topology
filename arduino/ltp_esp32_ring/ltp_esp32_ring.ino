@@ -98,6 +98,7 @@ void loadConfig() {
     if (strlen(config.timezone) == 0) {
         strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
     }
+    config.cycleTime = preferences.getUShort("cycleTime", 10);
 
     preferences.end();
 
@@ -123,6 +124,7 @@ void saveConfig() {
     preferences.putBool("inputEvents", config.inputEventsEnabled);
     preferences.putFloat("touchSens", config.touchSensitivity);
     preferences.putString("timezone", config.timezone);
+    preferences.putUShort("cycleTime", config.cycleTime);
 
     preferences.end();
     dualOut.println("Config saved to NVS");
@@ -142,6 +144,7 @@ void resetConfig() {
     config.inputEventsEnabled = true;
     config.touchSensitivity = TOUCH_THRESHOLD_RATIO;
     strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
+    config.cycleTime = 10;
 
     saveConfig();
     dualOut.println("Config reset to defaults");
@@ -309,6 +312,12 @@ void UsbTerminal::processCommand(const char* line) {
         cmdTouch();
     } else if (strcmp(cmd, "sensitivity") == 0) {
         cmdSensitivity(args);
+    } else if (strcmp(cmd, "calibrate") == 0) {
+        cmdCalibrate();
+    } else if (strcmp(cmd, "touchmon") == 0) {
+        cmdTouchMon(args);
+    } else if (strcmp(cmd, "threshold") == 0) {
+        cmdThreshold(args);
     } else if (strcmp(cmd, "timezone") == 0 || strcmp(cmd, "tz") == 0) {
         cmdTimezone(args);
     } else if (strcmp(cmd, "test") == 0) {
@@ -329,6 +338,9 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  status                  - Show current status");
     dualOut.println("  touch                   - Show touch sensor values");
     dualOut.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
+    dualOut.println("  calibrate               - Recalibrate touch sensors (do not touch during)");
+    dualOut.println("  touchmon [seconds]      - Monitor touch values continuously (default 10s)");
+    dualOut.println("  threshold <0-3> <value> - Manually set threshold for a sensor");
     dualOut.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
     dualOut.println("  test                    - Run LED test pattern");
     dualOut.println("  save                    - Save config to NVS");
@@ -525,6 +537,109 @@ void UsbTerminal::cmdSensitivity(const char* args) {
     }
 }
 
+void UsbTerminal::cmdCalibrate() {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+    dualOut.println("Starting calibration - do NOT touch sensors!");
+    delay(500);  // Give user time to release
+    touch->calibrate();
+}
+
+void UsbTerminal::cmdTouchMon(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    int duration = 10;  // Default 10 seconds
+    if (strlen(args) > 0) {
+        duration = atoi(args);
+        if (duration < 1) duration = 1;
+        if (duration > 300) duration = 300;
+    }
+
+    dualOut.printf("Monitoring touch sensors for %d seconds...\r\n", duration);
+    dualOut.println("Legend: value (baseline) [threshold] <TOUCHED if below threshold>");
+    dualOut.println("Press any key to stop early.\r\n");
+
+    uint32_t startTime = millis();
+    uint32_t endTime = startTime + (duration * 1000);
+    uint32_t lastPrint = 0;
+
+    while (millis() < endTime) {
+        // Check for key press to stop early (both Serial and telnet would need handling)
+        if (Serial.available()) {
+            Serial.read();  // Consume the character
+            dualOut.println("\r\nMonitoring stopped by user.");
+            return;
+        }
+
+        // Print every 200ms
+        if (millis() - lastPrint >= 200) {
+            lastPrint = millis();
+            dualOut.printf("T0: %4d (%4d) [%4d]%s  T1: %4d (%4d) [%4d]%s  T2: %4d (%4d) [%4d]%s  T3: %4d (%4d) [%4d]%s\r\n",
+                touch->getRawValue(0), touch->getBaseline(0), touch->getThreshold(0),
+                touch->isTouched(0) ? " *" : "  ",
+                touch->getRawValue(1), touch->getBaseline(1), touch->getThreshold(1),
+                touch->isTouched(1) ? " *" : "  ",
+                touch->getRawValue(2), touch->getBaseline(2), touch->getThreshold(2),
+                touch->isTouched(2) ? " *" : "  ",
+                touch->getRawValue(3), touch->getBaseline(3), touch->getThreshold(3),
+                touch->isTouched(3) ? " *" : "  ");
+        }
+
+        // Still run normal updates so touches work
+        touch->update();
+        delay(10);
+    }
+    dualOut.println("\r\nMonitoring complete.");
+}
+
+void UsbTerminal::cmdThreshold(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        dualOut.println("Current thresholds:");
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            dualOut.printf("  Touch %d: %d (baseline=%d, ratio=%.2f)\r\n",
+                i, touch->getThreshold(i), touch->getBaseline(i),
+                (float)touch->getThreshold(i) / touch->getBaseline(i));
+        }
+        dualOut.println("Usage: threshold <sensor 0-3> <value>");
+        dualOut.println("  Lower threshold = more sensitive (triggers sooner)");
+        dualOut.println("  Typical range: 20-80% of baseline");
+        return;
+    }
+
+    // Parse sensor index and value
+    int sensor = -1;
+    int value = -1;
+    if (sscanf(args, "%d %d", &sensor, &value) != 2) {
+        dualOut.println("Usage: threshold <sensor 0-3> <value>");
+        return;
+    }
+
+    if (sensor < 0 || sensor >= TOUCH_NUM_SENSORS) {
+        dualOut.printf("Sensor must be 0-%d\r\n", TOUCH_NUM_SENSORS - 1);
+        return;
+    }
+
+    if (value < 1 || value > 1000) {
+        dualOut.println("Value must be 1-1000");
+        return;
+    }
+
+    touch->setThreshold(sensor, value);
+    dualOut.printf("Touch %d threshold set to %d (baseline=%d, ratio=%.2f)\r\n",
+        sensor, value, touch->getBaseline(sensor),
+        (float)value / touch->getBaseline(sensor));
+}
+
 void UsbTerminal::cmdTimezone(const char* args) {
     if (strlen(args) == 0) {
         dualOut.printf("Current timezone: %s\r\n", config->timezone);
@@ -633,6 +748,7 @@ void setup() {
 
     // Give local modes access to touch handler for touch-reactive mode
     localModes.setTouchHandler(&touch);
+    localModes.setCycleTime(config.cycleTime);
 
     // Start local mode if configured
     if (config.localMode != LOCAL_MODE_BLANK) {
@@ -652,6 +768,9 @@ void setup() {
     protocol.begin(&config, &leds, 5001);  // UDP port will be 5001
     protocol.setLocalModeCallback([](uint8_t mode) {
         localModes.start(mode);
+    });
+    protocol.setCycleTimeCallback([](uint16_t seconds) {
+        localModes.setCycleTime(seconds);
     });
 
     // Initialize USB terminal

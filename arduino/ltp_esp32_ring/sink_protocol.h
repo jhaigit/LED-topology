@@ -46,6 +46,7 @@ struct ControlValue {
 
 // Callback for when local mode changes via protocol
 typedef void (*LocalModeCallback)(uint8_t mode);
+typedef void (*CycleTimeCallback)(uint16_t seconds);
 
 class SinkProtocol {
 public:
@@ -56,6 +57,7 @@ public:
         , streamActive(false)
         , lastSeq(0)
         , onLocalModeChange(nullptr)
+        , onCycleTimeChange(nullptr)
     {
         streamId[0] = '\0';
     }
@@ -69,6 +71,11 @@ public:
     // Set callback for local mode changes
     void setLocalModeCallback(LocalModeCallback callback) {
         onLocalModeChange = callback;
+    }
+
+    // Set callback for cycle time changes
+    void setCycleTimeCallback(CycleTimeCallback callback) {
+        onCycleTimeChange = callback;
     }
 
     // Process a JSON message line, returns response (caller must free)
@@ -124,6 +131,7 @@ private:
     char streamId[32];
     int lastSeq;
     LocalModeCallback onLocalModeChange;
+    CycleTimeCallback onCycleTimeChange;
 
     String handleCapabilityRequest(int seq);
     String handleStreamSetup(int seq, JsonDocument& doc);
@@ -292,6 +300,7 @@ String SinkProtocol::handleControlGet(int seq, JsonDocument& doc) {
         values["brightness"] = config->brightness;
         values["gamma"] = config->gamma / 10.0;
         values["local_mode"] = config->localMode;
+        values["cycle_time"] = config->cycleTime;
     }
 
     String response;
@@ -364,6 +373,7 @@ float SinkProtocol::getControlValue(const char* id) {
     if (strcmp(id, "brightness") == 0) return config->brightness;
     if (strcmp(id, "gamma") == 0) return config->gamma / 10.0;
     if (strcmp(id, "local_mode") == 0) return config->localMode;
+    if (strcmp(id, "cycle_time") == 0) return config->cycleTime;
     // ws2812_offset is USB-terminal only
     return 0;
 }
@@ -391,6 +401,14 @@ bool SinkProtocol::setControlValue(const char* id, float value) {
             return true;
         }
         return false;
+    }
+    if (strcmp(id, "cycle_time") == 0) {
+        config->cycleTime = constrain((int)value, 1, 3600);
+        dualOut.printf("Protocol: cycle_time=%d\r\n", config->cycleTime);
+        if (onCycleTimeChange) {
+            onCycleTimeChange(config->cycleTime);
+        }
+        return true;
     }
     // ws2812_offset is USB-terminal only
     return false;

@@ -79,6 +79,7 @@ struct Config {
     bool frameAck;
     uint16_t statusInterval;
     uint8_t localMode;          // Local display mode (0 = blank/off)
+    uint16_t cycleTime;         // Seconds per mode when cycling
 } config = {
     CONFIG_MAGIC,
     CONFIG_VERSION,
@@ -88,7 +89,8 @@ struct Config {
     false,                      // autoShow
     false,                      // frameAck
     0,                          // statusInterval
-    LOCAL_MODE_BLANK            // localMode (default blank)
+    LOCAL_MODE_BLANK,           // localMode (default blank)
+    10                          // cycleTime (seconds)
 };
 
 // Idle timeout tracking
@@ -127,7 +129,7 @@ uint32_t lastHeartbeat = 0;
 bool heartbeatState = false;
 
 // Control definitions
-#define NUM_CONTROLS 7
+#define NUM_CONTROLS 8
 
 // ============================================================================
 // CONFIG PERSISTENCE
@@ -421,9 +423,9 @@ void updateLocalMode() {
     if (now - lastModeUpdate < interval) return;
     lastModeUpdate = now;
 
-    // Handle cycle mode - switch every 10 seconds
+    // Handle cycle mode - switch based on cycleTime
     if (config.localMode == LOCAL_MODE_CYCLE) {
-        if (now - modeStartTime > 10000) {
+        if (now - modeStartTime > (uint32_t)config.cycleTime * 1000) {
             modeStartTime = now;
             currentDisplayMode++;
             if (currentDisplayMode >= LOCAL_MODE_COUNT) {
@@ -840,6 +842,12 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
             }
             break;
 
+        case CTRL_ID_CYCLE_TIME:
+            if (length >= 3) {
+                config.cycleTime = payload[1] | ((uint16_t)payload[2] << 8);
+            }
+            break;
+
         default:
             protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
             return;
@@ -882,6 +890,10 @@ void handleGetControl(const uint8_t* payload, uint16_t length) {
             break;
         case CTRL_ID_LOCAL_MODE:
             response[respLen++] = config.localMode;
+            break;
+        case CTRL_ID_CYCLE_TIME:
+            response[respLen++] = config.cycleTime & 0xFF;
+            response[respLen++] = config.cycleTime >> 8;
             break;
         default:
             protocol.sendNak(CMD_GET_CONTROL, ERR_INVALID_PARAM);

@@ -201,6 +201,7 @@ struct DeviceConfig {
     bool inputEventsEnabled;
     float touchSensitivity;     // Touch threshold ratio (0.1-0.95, higher=more sensitive)
     char timezone[48];          // POSIX TZ string (e.g. "PST8PDT,M3.2.0,M11.1.0")
+    uint16_t cycleTime;         // Seconds per mode when cycling (default 10)
 };
 
 #endif // ESP32_RING_CONFIG_H

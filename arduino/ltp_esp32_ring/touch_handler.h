@@ -142,6 +142,12 @@ public:
         return thresholds[idx];
     }
 
+    // Set threshold value for a specific sensor (for manual tuning)
+    void setThreshold(uint8_t idx, uint16_t value) {
+        if (idx >= TOUCH_NUM_SENSORS) return;
+        thresholds[idx] = value;
+    }
+
     bool isCalibrated() const { return calibrated; }
 
 private:

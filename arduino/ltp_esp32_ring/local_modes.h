@@ -27,11 +27,17 @@ public:
         , hue(0)
         , lastUpdate(0)
         , modeStartTime(0)
+        , cycleTimeMs(LOCAL_MODE_CYCLE_TIME)
     {}
 
     // Set touch handler for touch-reactive modes
     void setTouchHandler(TouchHandler* handler) {
         touchHandler = handler;
+    }
+
+    // Set cycle time (seconds per mode when cycling)
+    void setCycleTime(uint16_t seconds) {
+        cycleTimeMs = (uint32_t)seconds * 1000;
     }
 
     // Start or switch to a local mode
@@ -132,7 +138,7 @@ public:
 
         // Handle cycle mode timing
         if (currentMode == LOCAL_MODE_CYCLE) {
-            if (now - modeStartTime >= LOCAL_MODE_CYCLE_TIME) {
+            if (now - modeStartTime >= cycleTimeMs) {
                 modeStartTime = now;
                 displayMode++;
                 // Skip touch and clock modes in cycle
@@ -187,6 +193,7 @@ private:
     uint8_t hue;
     uint32_t lastUpdate;
     uint32_t modeStartTime;
+    uint32_t cycleTimeMs;   // Milliseconds per mode when cycling
 
     // Fire effect heat map
     uint8_t heat[RING_NUM_PIXELS];
