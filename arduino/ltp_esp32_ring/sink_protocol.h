@@ -185,6 +185,10 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     device["max_refresh_hz"] = 60;
     device["protocol_version"] = "0.1";
 
+    // Build info
+    device["git_commit"] = GIT_COMMIT;
+    device["build_date"] = BUILD_DATE;
+
     // Controls
     JsonArray controls = device["controls"].to<JsonArray>();
 

@@ -24,6 +24,14 @@
 #include "led_driver.h"
 #include "led_driver_lpd8806.h"
 
+// Build version info (set by Makefile, fallback for IDE builds)
+#ifndef GIT_COMMIT
+#define GIT_COMMIT "unknown"
+#endif
+#ifndef BUILD_DATE
+#define BUILD_DATE "00000000"
+#endif
+
 // ============================================================================
 // CONFIGURATION - Modify these for your setup
 // ============================================================================
@@ -508,6 +516,27 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             response[respLen++] = LTP_PROTOCOL_MINOR;
             response[respLen++] = (FIRMWARE_VERSION_MAJOR << 4) | FIRMWARE_VERSION_MINOR;
             response[respLen++] = 0;
+            break;
+
+        case INFO_BUILD:
+            // Git commit hash (null-terminated)
+            {
+                const char* commit = GIT_COMMIT;
+                uint8_t i = 0;
+                while (commit[i] && i < 15) {
+                    response[respLen++] = commit[i++];
+                }
+                response[respLen++] = 0;
+            }
+            // Build date YYYYMMDD (null-terminated)
+            {
+                const char* date = BUILD_DATE;
+                uint8_t i = 0;
+                while (date[i] && i < 15) {
+                    response[respLen++] = date[i++];
+                }
+                response[respLen++] = 0;
+            }
             break;
 
         case INFO_STRIPS:

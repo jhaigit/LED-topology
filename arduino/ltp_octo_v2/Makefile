@@ -40,6 +40,11 @@ HEX_FILE ?= $(BUILD_DIR)/$(SKETCH).hex
 CLI = arduino-cli
 TEENSY_LOADER = teensy_loader_cli
 
+# Version info (embedded at compile time)
+GIT_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date +%Y%m%d)
+BUILD_FLAGS = -DGIT_COMMIT=\"$(GIT_COMMIT)\" -DBUILD_DATE=\"$(BUILD_DATE)\"
+
 # Shared libraries directory
 LIBRARIES = ../libraries
 
@@ -67,24 +72,28 @@ setup:
 
 # Compile for Teensy 3.2 (default)
 build:
-	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@echo ""
-	@echo "Build complete. Hex file: $(BUILD_DIR)/$(SKETCH).hex"
+	@echo "Build complete. Hex file: $(BUILD_DIR)/$(SKETCH).hex ($(GIT_COMMIT))"
 
 build-teensy32:
-	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 .
+	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy32/$(SKETCH).hex ltp_octo_v2_teensy32.hex
-	@echo "Teensy 3.2 build complete: ltp_octo_v2_teensy32.hex"
+	@echo "Teensy 3.2 build complete: ltp_octo_v2_teensy32.hex ($(GIT_COMMIT))"
 
 build-teensy35:
-	$(CLI) compile --fqbn teensy:avr:teensy35 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy35 .
+	$(CLI) compile --fqbn teensy:avr:teensy35 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy35 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy35/$(SKETCH).hex ltp_octo_v2_teensy35.hex
-	@echo "Teensy 3.5 build complete: ltp_octo_v2_teensy35.hex"
+	@echo "Teensy 3.5 build complete: ltp_octo_v2_teensy35.hex ($(GIT_COMMIT))"
 
 build-teensy36:
-	$(CLI) compile --fqbn teensy:avr:teensy36 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy36 .
+	$(CLI) compile --fqbn teensy:avr:teensy36 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy36 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy36/$(SKETCH).hex ltp_octo_v2_teensy36.hex
-	@echo "Teensy 3.6 build complete: ltp_octo_v2_teensy36.hex"
+	@echo "Teensy 3.6 build complete: ltp_octo_v2_teensy36.hex ($(GIT_COMMIT))"
 
 # Build all supported Teensy variants
 build-all: build-teensy32 build-teensy35 build-teensy36
@@ -157,7 +166,8 @@ size: build
 
 # Compile with verbose output
 build-verbose:
-	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) --verbose .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) --verbose \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 
 # ============================================================================
 # Help

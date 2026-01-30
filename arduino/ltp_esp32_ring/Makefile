@@ -29,6 +29,11 @@ BUILD_DIR = build
 # arduino-cli executable
 CLI = arduino-cli
 
+# Version info (embedded at compile time)
+GIT_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date +%Y%m%d)
+BUILD_FLAGS = -DGIT_COMMIT=\"$(GIT_COMMIT)\" -DBUILD_DATE=\"$(BUILD_DATE)\"
+
 # Shared libraries directory (local)
 LIBRARIES = ../libraries
 
@@ -75,9 +80,10 @@ build:
 		--libraries $(LIBRARIES) \
 		--build-path $(BUILD_DIR) \
 		--build-property "build.partitions=$(PARTITION_SCHEME)" \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" \
 		.
 	@echo ""
-	@echo "Build complete."
+	@echo "Build complete. Git: $(GIT_COMMIT) Date: $(BUILD_DATE)"
 	@echo "Binary size:"
 	@ls -lh $(BUILD_DIR)/$(SKETCH).bin 2>/dev/null || true
 
@@ -125,6 +131,7 @@ build-verbose:
 		--libraries $(LIBRARIES) \
 		--build-path $(BUILD_DIR) \
 		--verbose \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" \
 		.
 
 # Show memory usage
@@ -146,8 +153,9 @@ build-esp32:
 		--fqbn esp32:esp32:esp32 \
 		--libraries $(LIBRARIES) \
 		--build-path $(BUILD_DIR)/esp32 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" \
 		.
-	@echo "ESP32 DevKit build complete"
+	@echo "ESP32 DevKit build complete ($(GIT_COMMIT))"
 
 # ESP32-S2
 build-esp32s2:
@@ -155,8 +163,9 @@ build-esp32s2:
 		--fqbn esp32:esp32:esp32s2 \
 		--libraries $(LIBRARIES) \
 		--build-path $(BUILD_DIR)/esp32s2 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" \
 		.
-	@echo "ESP32-S2 build complete"
+	@echo "ESP32-S2 build complete ($(GIT_COMMIT))"
 
 # ESP32-S3
 build-esp32s3:
@@ -164,8 +173,9 @@ build-esp32s3:
 		--fqbn esp32:esp32:esp32s3 \
 		--libraries $(LIBRARIES) \
 		--build-path $(BUILD_DIR)/esp32s3 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" \
 		.
-	@echo "ESP32-S3 build complete"
+	@echo "ESP32-S3 build complete ($(GIT_COMMIT))"
 
 # ESP32-C3
 build-esp32c3:
@@ -173,8 +183,9 @@ build-esp32c3:
 		--fqbn esp32:esp32:esp32c3 \
 		--libraries $(LIBRARIES) \
 		--build-path $(BUILD_DIR)/esp32c3 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" \
 		.
-	@echo "ESP32-C3 build complete"
+	@echo "ESP32-C3 build complete ($(GIT_COMMIT))"
 
 # Build all ESP32 variants
 build-all: build-esp32 build-esp32s3
@@ -191,9 +202,10 @@ dist:
 		--fqbn $(BOARD) \
 		--libraries $(LIBRARIES) \
 		--build-path $(BUILD_DIR) \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" \
 		.
 	@cp $(BUILD_DIR)/$(SKETCH).bin ltp_esp32_ring.bin
-	@echo "Distributable binary: ltp_esp32_ring.bin"
+	@echo "Distributable binary: ltp_esp32_ring.bin ($(GIT_COMMIT))"
 	@ls -lh ltp_esp32_ring.bin
 
 # ============================================================================

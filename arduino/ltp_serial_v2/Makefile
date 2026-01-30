@@ -26,6 +26,11 @@ BUILD_DIR = build
 # arduino-cli executable
 CLI = arduino-cli
 
+# Version info (embedded at compile time)
+GIT_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE := $(shell date +%Y%m%d)
+BUILD_FLAGS = -DGIT_COMMIT=\"$(GIT_COMMIT)\" -DBUILD_DATE=\"$(BUILD_DATE)\"
+
 # Shared libraries directory
 LIBRARIES = ../libraries
 
@@ -56,9 +61,10 @@ setup-teensy:
 
 # Compile the sketch
 build:
-	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@echo ""
-	@echo "Build complete."
+	@echo "Build complete. Git: $(GIT_COMMIT) Date: $(BUILD_DATE)"
 
 # Upload to board
 upload: build
@@ -93,40 +99,48 @@ boards:
 # ============================================================================
 
 build-uno:
-	$(CLI) compile --fqbn arduino:avr:uno --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/uno .
-	@echo "Arduino Uno build complete"
+	$(CLI) compile --fqbn arduino:avr:uno --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/uno \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Arduino Uno build complete ($(GIT_COMMIT))"
 
 build-nano:
-	$(CLI) compile --fqbn arduino:avr:nano --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/nano .
-	@echo "Arduino Nano build complete"
+	$(CLI) compile --fqbn arduino:avr:nano --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/nano \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Arduino Nano build complete ($(GIT_COMMIT))"
 
 build-mega:
-	$(CLI) compile --fqbn arduino:avr:mega --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/mega .
-	@echo "Arduino Mega build complete"
+	$(CLI) compile --fqbn arduino:avr:mega --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/mega \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Arduino Mega build complete ($(GIT_COMMIT))"
 
 # ============================================================================
 # Teensy targets
 # ============================================================================
 
 build-teensy32:
-	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 .
-	@echo "Teensy 3.2 build complete"
+	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Teensy 3.2 build complete ($(GIT_COMMIT))"
 
 build-teensy35:
-	$(CLI) compile --fqbn teensy:avr:teensy35 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy35 .
-	@echo "Teensy 3.5 build complete"
+	$(CLI) compile --fqbn teensy:avr:teensy35 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy35 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Teensy 3.5 build complete ($(GIT_COMMIT))"
 
 build-teensy36:
-	$(CLI) compile --fqbn teensy:avr:teensy36 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy36 .
-	@echo "Teensy 3.6 build complete"
+	$(CLI) compile --fqbn teensy:avr:teensy36 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy36 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Teensy 3.6 build complete ($(GIT_COMMIT))"
 
 build-teensy40:
-	$(CLI) compile --fqbn teensy:avr:teensy40 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 .
-	@echo "Teensy 4.0 build complete"
+	$(CLI) compile --fqbn teensy:avr:teensy40 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Teensy 4.0 build complete ($(GIT_COMMIT))"
 
 build-teensy41:
-	$(CLI) compile --fqbn teensy:avr:teensy41 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy41 .
-	@echo "Teensy 4.1 build complete"
+	$(CLI) compile --fqbn teensy:avr:teensy41 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy41 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+	@echo "Teensy 4.1 build complete ($(GIT_COMMIT))"
 
 # Build all Teensy variants
 build-all-teensy: build-teensy32 build-teensy40 build-teensy41
@@ -175,19 +189,22 @@ load-verbose:
 
 # Build and create distributable hex files
 dist-teensy32:
-	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 .
+	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy32/$(SKETCH).hex ltp_serial_v2_teensy32.hex
-	@echo "Teensy 3.2 hex: ltp_serial_v2_teensy32.hex"
+	@echo "Teensy 3.2 hex: ltp_serial_v2_teensy32.hex ($(GIT_COMMIT))"
 
 dist-teensy40:
-	$(CLI) compile --fqbn teensy:avr:teensy40 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 .
+	$(CLI) compile --fqbn teensy:avr:teensy40 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy40/$(SKETCH).hex ltp_serial_v2_teensy40.hex
-	@echo "Teensy 4.0 hex: ltp_serial_v2_teensy40.hex"
+	@echo "Teensy 4.0 hex: ltp_serial_v2_teensy40.hex ($(GIT_COMMIT))"
 
 dist-teensy41:
-	$(CLI) compile --fqbn teensy:avr:teensy41 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy41 .
+	$(CLI) compile --fqbn teensy:avr:teensy41 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy41 \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy41/$(SKETCH).hex ltp_serial_v2_teensy41.hex
-	@echo "Teensy 4.1 hex: ltp_serial_v2_teensy41.hex"
+	@echo "Teensy 4.1 hex: ltp_serial_v2_teensy41.hex ($(GIT_COMMIT))"
 
 # Build all distributable hex files
 dist-all: dist-teensy32 dist-teensy40 dist-teensy41
@@ -204,7 +221,8 @@ build-all: build-uno build-nano build-mega build-all-teensy
 
 # Compile with verbose output
 build-verbose:
-	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) --verbose .
+	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) --verbose \
+		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
 
 # Show memory usage
 size: build

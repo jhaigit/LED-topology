@@ -84,6 +84,7 @@
 #define INFO_CONTROLS       0x04
 #define INFO_STATS          0x05
 #define INFO_INPUTS         0x06
+#define INFO_BUILD          0x07
 
 // Error codes
 #define ERR_OK              0x00
