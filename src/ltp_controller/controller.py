@@ -160,6 +160,22 @@ class Controller:
         """Get online sinks."""
         return [s for s in self._sinks.values() if s.online]
 
+    def purge_offline_sinks(self) -> int:
+        """Remove all offline sinks. Returns count of removed sinks."""
+        to_remove = [key for key, sink in self._sinks.items() if not sink.online]
+        for key in to_remove:
+            del self._sinks[key]
+            logger.info(f"Purged offline sink: {key}")
+        return len(to_remove)
+
+    def purge_offline_sources(self) -> int:
+        """Remove all offline sources. Returns count of removed sources."""
+        to_remove = [key for key, src in self._sources.items() if not src.online]
+        for key in to_remove:
+            del self._sources[key]
+            logger.info(f"Purged offline source: {key}")
+        return len(to_remove)
+
     def on_source_change(self, callback: DeviceCallback) -> None:
         """Set callback for source changes."""
         self._on_source_change = callback

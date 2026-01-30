@@ -214,6 +214,18 @@ def create_app(
         except TimeoutError:
             return jsonify({"error": "Device did not respond in time"}), 504
 
+    @app.route("/api/sinks/purge", methods=["POST"])
+    def api_sinks_purge() -> Any:
+        """Remove all offline sinks."""
+        count = controller.purge_offline_sinks()
+        return jsonify({"status": "ok", "removed": count})
+
+    @app.route("/api/sources/purge", methods=["POST"])
+    def api_sources_purge() -> Any:
+        """Remove all offline sources."""
+        count = controller.purge_offline_sources()
+        return jsonify({"status": "ok", "removed": count})
+
     # ==================== API: Sink Fill ====================
 
     @app.route("/api/sinks/<sink_id>/fill", methods=["POST"])

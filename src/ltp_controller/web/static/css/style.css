@@ -331,6 +331,16 @@ h2 {
     font-size: 0.8rem;
 }
 
+.btn-secondary {
+    background: var(--bg-secondary);
+    border-color: var(--border);
+}
+
+.btn-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
 /* Tables */
 .table {
     width: 100%;

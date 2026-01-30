@@ -8,7 +8,10 @@
         <h1>Sinks</h1>
         <p class="subtitle">Discovered display devices on the network</p>
     </div>
-    <button class="btn" onclick="refreshDiscovery()" id="refresh-btn">Refresh Discovery</button>
+    <div class="btn-group">
+        <button class="btn" onclick="refreshDiscovery()" id="refresh-btn">Refresh Discovery</button>
+        <button class="btn btn-secondary" onclick="purgeOffline()" id="purge-btn">Purge Offline</button>
+    </div>
 </div>
 
 {% if sinks %}
@@ -426,6 +429,34 @@ function refreshDiscovery() {
         })
         .catch(err => {
             console.error('Discovery refresh error:', err);
+            btn.textContent = 'Error';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 2000);
+        });
+}
+
+function purgeOffline() {
+    const btn = document.getElementById('purge-btn');
+    const originalText = btn.textContent;
+    btn.textContent = 'Purging...';
+    btn.disabled = true;
+
+    fetch('/api/sinks/purge', { method: 'POST' })
+        .then(response => response.json())
+        .then(data => {
+            btn.textContent = `Removed ${data.removed}`;
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                if (data.removed > 0) {
+                    window.location.reload();
+                }
+            }, 1000);
+        })
+        .catch(err => {
+            console.error('Purge error:', err);
             btn.textContent = 'Error';
             setTimeout(() => {
                 btn.textContent = originalText;
