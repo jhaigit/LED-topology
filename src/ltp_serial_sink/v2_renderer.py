@@ -35,7 +35,6 @@ from ltp_serial_cli.protocol import (
     CTRL_ID_FRAME_ACK,
     CTRL_ID_IDLE_TIMEOUT,
     CTRL_ID_LOCAL_MODE,
-    CTRL_ID_CYCLE_TIME,
     CMD_SAVE_CONFIG,
     CMD_LOAD_CONFIG,
     CMD_RESET_CONFIG,
@@ -235,15 +234,6 @@ class V2Renderer:
             control_type="uint8",
             min_value=0,
             max_value=255,
-        )
-
-        # Cycle time - time per mode in cycle mode (milliseconds)
-        self._controls[CTRL_ID_CYCLE_TIME] = DeviceControl(
-            id=CTRL_ID_CYCLE_TIME,
-            name="cycle_time",
-            control_type="uint16",
-            min_value=1000,
-            max_value=65535,
         )
 
         # Auto-show and frame-ack are always available
