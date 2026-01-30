@@ -1222,7 +1222,7 @@ def create_app(
         """Get available controls for a sink (for rule creation).
 
         Returns the list of controls exposed by the sink, including both
-        local controls and hardware controls (prefixed with hw_).
+        local controls and hardware controls.
         """
         sink = controller.get_sink(sink_id)
         if not sink:

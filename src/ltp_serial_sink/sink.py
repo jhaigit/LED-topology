@@ -167,7 +167,7 @@ class SerialSink:
             if device_ctrl.control_type == "bool":
                 self._controls.register(
                     BooleanControl(
-                        id=f"hw_{device_ctrl.name}",
+                        id=device_ctrl.name,
                         name=ctrl_name,
                         description="",
                         value=bool(current_value) if current_value is not None else False,
@@ -189,7 +189,7 @@ class SerialSink:
 
                 self._controls.register(
                     NumberControl(
-                        id=f"hw_{device_ctrl.name}",
+                        id=device_ctrl.name,
                         name=ctrl_name,
                         description="",
                         value=value,
@@ -215,7 +215,7 @@ class SerialSink:
 
                 self._controls.register(
                     EnumControl(
-                        id=f"hw_{device_ctrl.name}",
+                        id=device_ctrl.name,
                         name=ctrl_name,
                         description="",
                         value=str_value,
@@ -422,27 +422,18 @@ class SerialSink:
         errors = {}
 
         for control_id, value in values.items():
-            # Handle hardware controls - forward to device
-            if control_id.startswith("hw_"):
-                if self._renderer is None:
-                    errors[control_id] = "No serial device connected"
-                    continue
-
-                # Extract device control name from control_id (e.g., "hw_brightness" -> "brightness")
-                device_ctrl_name = control_id[3:]  # Remove "hw_" prefix
-
-                # Find the device control by name
-                device_ctrl = None
-                device_ctrl_id = None
+            # Check if this is a hardware control by looking it up in the renderer
+            device_ctrl = None
+            device_ctrl_id = None
+            if self._renderer is not None:
                 for ctrl_id, ctrl in self._renderer.controls.items():
-                    if ctrl.name == device_ctrl_name:
+                    if ctrl.name == control_id:
                         device_ctrl = ctrl
                         device_ctrl_id = ctrl_id
                         break
 
-                if device_ctrl is None:
-                    errors[control_id] = f"Unknown device control: {device_ctrl_name}"
-                    continue
+            # Handle hardware controls - forward to device
+            if device_ctrl is not None:
 
                 try:
                     # Convert value based on control type

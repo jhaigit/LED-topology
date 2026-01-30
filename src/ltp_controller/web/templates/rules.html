@@ -652,10 +652,10 @@ async function loadSinkControls(actionId) {
 
         let options = '<option value="">Select control...</option>';
         for (const ctrl of data.controls || []) {
-            // ctrl.id is the control identifier (e.g., "hw_local_mode")
+            // ctrl.id is the control identifier (e.g., "local_mode")
             // ctrl.name is the display name (e.g., "Local Mode")
             const ctrlId = ctrl.id;
-            const displayName = ctrl.name || ctrlId.replace('hw_', '');
+            const displayName = ctrl.name || ctrlId;
             options += `<option value="${ctrlId}">${displayName}</option>`;
         }
         controlSelect.innerHTML = options;
