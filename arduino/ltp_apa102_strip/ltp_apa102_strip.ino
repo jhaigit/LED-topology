@@ -729,6 +729,15 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             break;
 
         case INFO_BUILD:
+            // Firmware name (null-terminated)
+            {
+                const char* name = FIRMWARE_NAME;
+                uint8_t i = 0;
+                while (name[i] && i < 15) {
+                    response[respLen++] = name[i++];
+                }
+                response[respLen++] = 0;
+            }
             // Git commit hash (null-terminated)
             {
                 const char* commit = GIT_COMMIT;

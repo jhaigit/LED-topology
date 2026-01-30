@@ -186,6 +186,7 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     device["protocol_version"] = "0.1";
 
     // Build info
+    device["firmware_name"] = FIRMWARE_NAME;
     device["git_commit"] = GIT_COMMIT;
     device["build_date"] = BUILD_DATE;
 

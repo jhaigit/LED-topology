@@ -49,6 +49,7 @@
 #define FIRMWARE_VERSION_MAJOR  1
 #define FIRMWARE_VERSION_MINOR  0
 #define DEVICE_NAME         "LTP-LPD8806"
+#define FIRMWARE_NAME       "ltp-serial-v2"
 
 // ============================================================================
 // GLOBALS
@@ -519,6 +520,15 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             break;
 
         case INFO_BUILD:
+            // Firmware name (null-terminated)
+            {
+                const char* name = FIRMWARE_NAME;
+                uint8_t i = 0;
+                while (name[i] && i < 15) {
+                    response[respLen++] = name[i++];
+                }
+                response[respLen++] = 0;
+            }
             // Git commit hash (null-terminated)
             {
                 const char* commit = GIT_COMMIT;

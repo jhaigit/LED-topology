@@ -90,6 +90,7 @@
 #define FIRMWARE_VERSION_MINOR  0
 #define DEVICE_NAME_DEFAULT     "LTP-Ring"
 #define DEVICE_NAME_MAX_LEN     16
+#define FIRMWARE_NAME           "ltp-esp32-ring"
 
 // ============================================================================
 // Local Mode Configuration

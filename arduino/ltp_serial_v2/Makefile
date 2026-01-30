@@ -27,7 +27,7 @@ BUILD_DIR = build
 CLI = arduino-cli
 
 # Version info (embedded at compile time)
-GIT_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")
+GIT_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")$(shell git diff --quiet 2>/dev/null || echo "+")
 BUILD_DATE := $(shell date +%Y%m%d)
 BUILD_FLAGS = -DGIT_COMMIT=\"$(GIT_COMMIT)\" -DBUILD_DATE=\"$(BUILD_DATE)\"
 

@@ -70,6 +70,7 @@
 #define FIRMWARE_VERSION_MAJOR  1
 #define FIRMWARE_VERSION_MINOR  0
 #define DEVICE_NAME         "LTP-APA102"
+#define FIRMWARE_NAME       "ltp-apa102-strip"
 
 // Maximum payload size (Teensy 3.2 has 64KB RAM)
 // LTP_MAX_PAYLOAD must be defined before including ltp_protocol.h

@@ -44,6 +44,7 @@
 #define FIRMWARE_VERSION_MAJOR  1
 #define FIRMWARE_VERSION_MINOR  0
 #define DEVICE_NAME         "LTP-Octo8"
+#define FIRMWARE_NAME       "ltp-octo-v2"
 
 // Maximum payload size (Teensy 3.2 has 64KB RAM)
 // LTP_MAX_PAYLOAD must be defined before including ltp_protocol.h
