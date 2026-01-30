@@ -14,7 +14,7 @@
 {% if sinks %}
 <div class="device-grid">
     {% for sink in sinks %}
-    <div class="device-card {% if sink.online %}online{% else %}offline{% endif %}">
+    <div class="device-card {% if sink.online %}online{% else %}offline{% endif %}" data-sink-id="{{ sink.id }}">
         <div class="device-header">
             <span class="status-dot"></span>
             <h3>{{ sink.name }}</h3>
@@ -491,6 +491,25 @@ function stopInputsRefresh() {
 
 // Start loading inputs when page loads
 document.addEventListener('DOMContentLoaded', startInputsRefresh);
+
+// Auto-refresh sink status every 5 seconds
+function updateSinkStatus() {
+    fetch('/api/sinks')
+        .then(r => r.json())
+        .then(sinks => {
+            sinks.forEach(sink => {
+                const card = document.querySelector(`[data-sink-id="${sink.id}"]`);
+                if (card) {
+                    card.classList.toggle('online', sink.online);
+                    card.classList.toggle('offline', !sink.online);
+                }
+            });
+        })
+        .catch(err => console.error('Failed to update sink status:', err));
+}
+
+// Start status refresh
+setInterval(updateSinkStatus, 5000);
 </script>
 <style>
 .page-header {
