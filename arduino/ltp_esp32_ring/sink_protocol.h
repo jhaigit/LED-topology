@@ -218,6 +218,15 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     localMode["min"] = 0;
     localMode["max"] = 255;
 
+    JsonObject cycleTime = controls.add<JsonObject>();
+    cycleTime["id"] = "cycle_time";
+    cycleTime["name"] = "Cycle Time";
+    cycleTime["type"] = "number";
+    cycleTime["value"] = config->cycleTime;
+    cycleTime["min"] = 1;
+    cycleTime["max"] = 3600;
+    cycleTime["step"] = 1;
+
     // Note: ws2812_offset is USB-terminal only, not exposed via sink protocol
 
     // Inputs (touch sensors)
