@@ -35,6 +35,12 @@ def parse_args() -> argparse.Namespace:
         help="Device name (default: Serial LED Strip)",
     )
     parser.add_argument(
+        "--description",
+        type=str,
+        default="",
+        help="Device description",
+    )
+    parser.add_argument(
         "--port",
         "-p",
         type=str,
@@ -179,6 +185,7 @@ def config_from_args(args: argparse.Namespace) -> SerialSinkConfig:
 
     return SerialSinkConfig(
         name=args.name,
+        description=args.description,
         port=args.port or "",
         baudrate=args.baudrate,
         timeout=args.timeout,
