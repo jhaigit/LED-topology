@@ -32,6 +32,7 @@ from .protocol import (
     INFO_STRIPS,
     INFO_STATUS,
     INFO_STATS,
+    INFO_CONTROLS,
     CTRL_ID_BRIGHTNESS,
     CTRL_ID_GAMMA,
     CTRL_ID_AUTO_SHOW,
@@ -535,6 +536,50 @@ class LtpDevice:
         self._send(LtpProtocol.build_get_info(INFO_STATS))
         packet = self._wait_for_response(CMD_INFO_RESPONSE)
         return self._parse_stats_response(packet)
+
+    def get_controls(self) -> list[dict]:
+        """Get all device control definitions.
+
+        Returns:
+            List of control info dicts with keys: id, type, min, max, name
+        """
+        self._send(LtpProtocol.build_get_info(INFO_CONTROLS))
+        packet = self._wait_for_response(CMD_INFO_RESPONSE)
+
+        controls = []
+        if len(packet.payload) >= 1:
+            num_controls = packet.payload[0]
+            offset = 1
+
+            for _ in range(num_controls):
+                if offset + 6 <= len(packet.payload):
+                    ctrl_id = packet.payload[offset]
+                    ctrl_type = packet.payload[offset + 1]
+                    min_val = packet.payload[offset + 2] | (packet.payload[offset + 3] << 8)
+                    # Sign extend for int16
+                    if min_val >= 32768:
+                        min_val -= 65536
+                    max_val = packet.payload[offset + 4] | (packet.payload[offset + 5] << 8)
+                    if max_val >= 32768:
+                        max_val -= 65536
+                    offset += 6
+
+                    # Parse null-terminated name
+                    name_end = offset
+                    while name_end < len(packet.payload) and packet.payload[name_end] != 0:
+                        name_end += 1
+                    name = packet.payload[offset:name_end].decode("utf-8", errors="replace")
+                    offset = name_end + 1  # Skip null terminator
+
+                    controls.append({
+                        "id": ctrl_id,
+                        "type": ctrl_type,
+                        "min": min_val,
+                        "max": max_val,
+                        "name": name,
+                    })
+
+        return controls
 
     def get_inputs(self) -> list[dict]:
         """Get all device inputs.

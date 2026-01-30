@@ -113,6 +113,26 @@ bool heartbeatState = false;
 
 #define NUM_CONTROLS 8
 
+// Control metadata for INFO_CONTROLS response
+struct ControlDef {
+    uint8_t id;
+    uint8_t type;
+    int16_t minVal;
+    int16_t maxVal;
+    const char* name;
+};
+
+static const ControlDef controlDefs[NUM_CONTROLS] = {
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  0,     255,   "brightness" },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  10,    30,    "gamma" },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, 0,     32767, "idle_timeout" },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   0,     1,     "auto_show" },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   0,     1,     "frame_ack" },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, 0,     32767, "status_interval" },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  0,     255,   "local_mode" },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, 1000,  32767, "cycle_time" },
+};
+
 // ============================================================================
 // CONFIG PERSISTENCE
 // ============================================================================
@@ -643,7 +663,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
     }
 
     uint8_t infoType = payload[0];
-    uint8_t response[64];
+    uint8_t response[200];  // Large enough for INFO_CONTROLS
     uint16_t respLen = 0;
 
     switch (infoType) {
@@ -776,6 +796,26 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
                 response[respLen++] = (uptime >> 8) & 0xFF;
                 response[respLen++] = (uptime >> 16) & 0xFF;
                 response[respLen++] = (uptime >> 24) & 0xFF;
+            }
+            break;
+
+        case INFO_CONTROLS:
+            // Return control metadata: count, then for each: id, type, min(2), max(2), name(null-term)
+            response[respLen++] = NUM_CONTROLS;
+            for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
+                const ControlDef& ctrl = controlDefs[i];
+                response[respLen++] = ctrl.id;
+                response[respLen++] = ctrl.type;
+                response[respLen++] = ctrl.minVal & 0xFF;
+                response[respLen++] = (ctrl.minVal >> 8) & 0xFF;
+                response[respLen++] = ctrl.maxVal & 0xFF;
+                response[respLen++] = (ctrl.maxVal >> 8) & 0xFF;
+                // Copy name (null-terminated)
+                const char* name = ctrl.name;
+                while (*name && respLen < sizeof(response) - 1) {
+                    response[respLen++] = *name++;
+                }
+                response[respLen++] = 0;
             }
             break;
 

@@ -38,7 +38,21 @@ from ltp_serial_cli.protocol import (
     CMD_SAVE_CONFIG,
     CMD_LOAD_CONFIG,
     CMD_RESET_CONFIG,
+    CTRL_BOOL,
+    CTRL_UINT8,
+    CTRL_UINT16,
+    CTRL_INT8,
+    CTRL_INT16,
 )
+
+# Map control type codes to type names
+CTRL_TYPE_NAMES = {
+    CTRL_BOOL: "bool",
+    CTRL_UINT8: "uint8",
+    CTRL_UINT16: "uint16",
+    CTRL_INT8: "int8",
+    CTRL_INT16: "int16",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -193,14 +207,29 @@ class V2Renderer:
             raise
 
     def _populate_controls(self) -> None:
-        """Populate controls dict from device capabilities."""
+        """Query and populate controls from device."""
         self._controls.clear()
 
-        if not self._device_info:
+        if not self._device or not self._device_info:
             return
 
-        # Standard controls based on capabilities
-        if self._device_info.has_brightness:
+        try:
+            # Query controls from device
+            controls_data = self._device.get_controls()
+            for ctrl in controls_data:
+                ctrl_id = ctrl["id"]
+                ctrl_type = CTRL_TYPE_NAMES.get(ctrl["type"], "uint8")
+                self._controls[ctrl_id] = DeviceControl(
+                    id=ctrl_id,
+                    name=ctrl["name"],
+                    control_type=ctrl_type,
+                    min_value=ctrl["min"],
+                    max_value=ctrl["max"],
+                )
+            logger.debug(f"Device controls from INFO_CONTROLS: {list(self._controls.keys())}")
+        except Exception as e:
+            logger.warning(f"Failed to query controls from device: {e}")
+            # Fallback to minimal hardcoded controls for older firmware
             self._controls[CTRL_ID_BRIGHTNESS] = DeviceControl(
                 id=CTRL_ID_BRIGHTNESS,
                 name="brightness",
@@ -208,47 +237,12 @@ class V2Renderer:
                 min_value=0,
                 max_value=255,
             )
-
-        if self._device_info.has_gamma:
-            self._controls[CTRL_ID_GAMMA] = DeviceControl(
-                id=CTRL_ID_GAMMA,
-                name="gamma",
-                control_type="uint8",
-                min_value=10,  # 1.0 * 10
-                max_value=30,  # 3.0 * 10
+            self._controls[CTRL_ID_AUTO_SHOW] = DeviceControl(
+                id=CTRL_ID_AUTO_SHOW,
+                name="auto_show",
+                control_type="bool",
             )
-
-        # Idle timeout (available on devices with EEPROM)
-        self._controls[CTRL_ID_IDLE_TIMEOUT] = DeviceControl(
-            id=CTRL_ID_IDLE_TIMEOUT,
-            name="idle_timeout",
-            control_type="uint16",
-            min_value=0,
-            max_value=65535,
-        )
-
-        # Local mode control (uint8 - values are device-specific)
-        self._controls[CTRL_ID_LOCAL_MODE] = DeviceControl(
-            id=CTRL_ID_LOCAL_MODE,
-            name="local_mode",
-            control_type="uint8",
-            min_value=0,
-            max_value=255,
-        )
-
-        # Auto-show and frame-ack are always available
-        self._controls[CTRL_ID_AUTO_SHOW] = DeviceControl(
-            id=CTRL_ID_AUTO_SHOW,
-            name="auto_show",
-            control_type="bool",
-        )
-        self._controls[CTRL_ID_FRAME_ACK] = DeviceControl(
-            id=CTRL_ID_FRAME_ACK,
-            name="frame_ack",
-            control_type="bool",
-        )
-
-        logger.debug(f"Device controls: {list(self._controls.keys())}")
+            logger.debug("Using fallback controls for older firmware")
 
     def _populate_inputs(self) -> None:
         """Query and store inputs from the device."""

@@ -158,6 +158,13 @@
 #define CTRL_ID_LOCAL_MODE  6
 #define CTRL_ID_CYCLE_TIME  7
 
+// Control types for INFO_CONTROLS response (matches Python CTRL_* constants)
+#define CTRL_TYPE_BOOL      0x01
+#define CTRL_TYPE_UINT8     0x02
+#define CTRL_TYPE_UINT16    0x03
+#define CTRL_TYPE_INT8      0x04
+#define CTRL_TYPE_INT16     0x05
+
 // Input types
 #define INPUT_BUTTON        0x01
 #define INPUT_ENCODER       0x02
