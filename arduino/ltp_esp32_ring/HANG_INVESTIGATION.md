@@ -1,5 +1,8 @@
 # ESP32 Ring Controller - Hang/Freeze Investigation
 
+> **STATUS (2026-01-30)**: Most likely power-related. Deferred pending hardware
+> debugging. See `docs/TODO.md` for current priorities.
+
 ## Symptoms
 - Device hangs/freezes frequently
 - During hang: telnet session also freezes

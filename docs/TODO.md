@@ -1,0 +1,165 @@
+# LTP Development TODO
+
+## Known Issues
+
+### ESP32 Ring Hang - Most Likely Power Related
+
+**Status**: Documented, not yet resolved
+
+The ESP32 ring controller experiences intermittent hangs where:
+- LED pattern freezes
+- Ping fails (WiFi stack unresponsive)
+- Tends to occur when all/many LEDs are on (bright states)
+
+**Root cause**: Most likely electrical/power issues. The 202 APA102 LEDs at
+full brightness draw ~12A, which can cause voltage sag, brownout, or ground
+bounce that crashes the ESP32's WiFi radio.
+
+**See**: `arduino/ltp_esp32_ring/HANG_INVESTIGATION.md` for full analysis.
+
+**Next steps**: Hardware debugging (measure voltage under load, test with
+reduced brightness, check power supply rating).
+
+---
+
+### Control Set Flakiness
+
+**Status**: Outstanding, to be addressed after protocol cleanup
+
+Setting controls via the web UI fails ~50% of the time. The error chain shows
+empty exception messages and "no response" errors. Retry usually works.
+
+**Hypotheses**: Health check TCP connection interference, pool connection
+going half-dead, or ESP32 sending response to wrong client.
+
+**See**: `docs/control-set-failure-diagnosis.md` for detailed analysis.
+
+---
+
+## Protocol & UI Cleanup (Priority)
+
+Before addressing control set flakiness, these cleanups should be done:
+
+### 1. Build Information Display
+
+**Goal**: Make build info (git commit, build date, firmware name) available
+and displayable on the controller web UI.
+
+**Current state**:
+- Serial firmware sends `INFO_BUILD` (0x07) response with git commit and date
+- ESP32 JSON protocol includes `firmware_name`, `git_commit`, `build_date` in
+  capability response
+- Controller web UI does not display this information
+
+**Tasks**:
+- [ ] Add build info to sink detail view in web UI
+- [ ] Ensure serial sink queries and stores build info
+- [ ] Display firmware version/commit on sinks list (hover or column)
+
+---
+
+### 2. Control Classification (Low-Level vs High-Level)
+
+**Goal**: Clean way to distinguish hardware controls (exported from embedded
+firmware) from higher-level controls (managed by Python sink/controller).
+
+**Background**: Previously used "hw_" prefix hack, now removed. Need a proper
+mechanism.
+
+**Proposed solution**: Add a `flags` or `category` field to control metadata:
+
+```cpp
+// Control flags for INFO_CONTROLS response
+#define CTRL_FLAG_HARDWARE   0x01  // Direct hardware control
+#define CTRL_FLAG_READONLY   0x02  // Read-only (for status values)
+#define CTRL_FLAG_VOLATILE   0x04  // Not persisted to EEPROM
+#define CTRL_FLAG_ACTION     0x08  // One-time action (see #3 below)
+```
+
+**Tasks**:
+- [ ] Add flags byte to INFO_CONTROLS protocol
+- [ ] Update firmware to set appropriate flags
+- [ ] Update Python to parse and use flags
+- [ ] UI can filter/group controls by category
+
+---
+
+### 3. Action-Type Controls (One-Time Operations)
+
+**Goal**: Support controls that trigger one-time operations rather than
+setting persistent values.
+
+**Examples**:
+- `save` - Save current config to EEPROM/NVS
+- `reboot` - Restart device
+- `calibrate` - Run calibration routine
+
+**Proposed approach**: New control type `CTRL_TYPE_ACTION` (0x06)
+
+```cpp
+#define CTRL_TYPE_ACTION    0x06  // One-time action, no persistent value
+```
+
+For action controls:
+- `value` field is ignored (can send 1 to trigger)
+- UI renders as a button instead of slider/input
+- GET_CONTROL returns 0 (or last trigger timestamp?)
+
+**Tasks**:
+- [ ] Add CTRL_TYPE_ACTION to protocol
+- [ ] Update firmware to define action controls (save, reboot, etc.)
+- [ ] Update Python control type handling
+- [ ] Update UI to render actions as buttons
+
+---
+
+### 4. Control Descriptions and Units
+
+**Goal**: Controls export a description string that can include units,
+ranges, or usage hints.
+
+**Current state**: Controls have only `name` (short identifier). Users don't
+know what "gamma" means or that it's stored as value*10.
+
+**Proposed addition to INFO_CONTROLS**:
+
+```cpp
+// Current format per control:
+//   id(1) + type(1) + min(2) + max(2) + name(null-term)
+
+// New format:
+//   id(1) + type(1) + flags(1) + min(2) + max(2) + name(null-term) + description(null-term)
+```
+
+**Example descriptions**:
+- brightness: "Global LED brightness (0-255)"
+- gamma: "Gamma correction factor (1.0-3.0, stored as x10)"
+- cycle_time: "Local mode cycle interval in seconds"
+- idle_timeout: "Seconds until local mode activates (0=never)"
+
+**Tasks**:
+- [ ] Extend INFO_CONTROLS format with description field
+- [ ] Update firmware to include descriptions
+- [ ] Update Python parser
+- [ ] Display descriptions in UI (tooltip or help text)
+
+---
+
+## Implementation Order
+
+1. **Build info display** - Low risk, immediate user value
+2. **Control flags** - Required foundation for #3 and #4
+3. **Action controls** - Enables save/reboot buttons
+4. **Control descriptions** - Polish, can be added incrementally
+
+After these cleanups, revisit control set flakiness with cleaner codebase.
+
+---
+
+## Notes
+
+- Protocol changes should maintain backward compatibility where possible
+  (description can be optional, flags default to 0)
+- ESP32 JSON protocol may differ from serial binary protocol - document
+  which features apply to which
+- Test with both serial sinks and ESP32 ring after changes
