@@ -42,19 +42,18 @@ Before addressing control set flakiness, these cleanups should be done:
 
 ### 1. Build Information Display
 
+**Status**: DONE
+
 **Goal**: Make build info (git commit, build date, firmware name) available
 and displayable on the controller web UI.
 
-**Current state**:
-- Serial firmware sends `INFO_BUILD` (0x07) response with git commit and date
-- ESP32 JSON protocol includes `firmware_name`, `git_commit`, `build_date` in
-  capability response
-- Controller web UI does not display this information
-
-**Tasks**:
-- [ ] Add build info to sink detail view in web UI
-- [ ] Ensure serial sink queries and stores build info
-- [ ] Display firmware version/commit on sinks list (hover or column)
+**Implementation**:
+- Added `INFO_BUILD` (0x07) constant and `BuildInfo` dataclass to protocol
+- Added `get_build_info()` method to `LtpDevice` for serial protocol
+- V2Renderer queries build info on device connection
+- Sink capability response includes `firmware_name`, `git_commit`, `build_date`
+- Web UI displays build info on sinks and sources pages
+- Shows abbreviated commit hash with date, full details in tooltip
 
 ---
 
