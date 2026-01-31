@@ -572,14 +572,19 @@ class ServiceBrowser:
         # If no IPv4 from mDNS, try to resolve the hostname to get IPv4
         if not ipv4_addresses and info.server:
             try:
-                resolved_ip = socket.gethostbyname(info.server)
-                ipv4_addresses = [resolved_ip]
-                logger.debug(f"Resolved {info.server} to {resolved_ip}")
+                # Use getaddrinfo which respects NSS (including mDNS via nss-mdns)
+                hostname = info.server.rstrip(".")
+                results = socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM)
+                if results:
+                    resolved_ip = results[0][4][0]
+                    ipv4_addresses = [resolved_ip]
+                    logger.debug(f"Resolved {hostname} to {resolved_ip}")
             except socket.gaierror as e:
-                logger.debug(f"Could not resolve {info.server} to IPv4: {e}")
+                logger.warning(f"Could not resolve {info.server} to IPv4: {e}")
 
         # Prefer IPv4, fall back to IPv6
         addresses = ipv4_addresses if ipv4_addresses else ipv6_addresses
+        logger.debug(f"Addresses for {name}: IPv4={ipv4_addresses}, IPv6={ipv6_addresses}, using={addresses}")
 
         if not addresses:
             logger.warning(f"No addresses for {name} (server={info.server})")
