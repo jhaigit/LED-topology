@@ -1,10 +1,15 @@
 """mDNS service discovery for LTP devices."""
 
 import asyncio
+import atexit
+import ctypes
 import logging
+import os
 import shutil
+import signal
 import socket
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from typing import Callable
 from uuid import UUID
@@ -12,10 +17,43 @@ from uuid import UUID
 from zeroconf import IPVersion, ServiceInfo, ServiceStateChange, Zeroconf
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 
+# Track all active avahi processes for cleanup on exit
+_active_avahi_processes: list[subprocess.Popen] = []
+
 
 def _avahi_available() -> bool:
     """Check if avahi-publish-service is available."""
     return shutil.which("avahi-publish-service") is not None
+
+
+def _cleanup_avahi_processes() -> None:
+    """Cleanup handler for atexit - kills any remaining avahi processes."""
+    for proc in _active_avahi_processes[:]:
+        if proc.poll() is None:  # Still running
+            try:
+                proc.terminate()
+                proc.wait(timeout=1)
+            except (subprocess.TimeoutExpired, OSError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+        _active_avahi_processes.remove(proc)
+
+
+# Register cleanup handler at module load time
+atexit.register(_cleanup_avahi_processes)
+
+
+def _set_pdeathsig() -> None:
+    """Set PR_SET_PDEATHSIG so child dies when parent dies (Linux only)."""
+    if sys.platform == "linux":
+        try:
+            PR_SET_PDEATHSIG = 1
+            libc = ctypes.CDLL("libc.so.6", use_errno=True)
+            libc.prctl(PR_SET_PDEATHSIG, signal.SIGTERM)
+        except (OSError, AttributeError):
+            pass  # Not critical, just a backup mechanism
 
 from libltp.types import (
     ColorFormat,
@@ -191,11 +229,18 @@ class ServiceAdvertiser:
         )
 
         # Start avahi-publish-service in background
+        # - start_new_session: Creates new process group so it can be killed as a group
+        # - preexec_fn: Sets PR_SET_PDEATHSIG so child dies if parent dies unexpectedly
         self._avahi_process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
+            start_new_session=True,
+            preexec_fn=_set_pdeathsig,
         )
+
+        # Track for cleanup on exit
+        _active_avahi_processes.append(self._avahi_process)
 
     async def _start_zeroconf(self) -> None:
         """Start advertising using python-zeroconf."""
@@ -227,11 +272,16 @@ class ServiceAdvertiser:
 
         # Stop avahi process if running
         if self._avahi_process is not None:
+            # Remove from global tracking list first
+            if self._avahi_process in _active_avahi_processes:
+                _active_avahi_processes.remove(self._avahi_process)
+
             self._avahi_process.terminate()
             try:
                 self._avahi_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._avahi_process.kill()
+                self._avahi_process.wait(timeout=1)  # Wait after kill
             self._avahi_process = None
             logger.info(f"Stopped advertising service '{self.name}' (avahi)")
             return

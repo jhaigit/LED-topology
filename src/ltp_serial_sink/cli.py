@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+import signal
 import sys
 import time
 from pathlib import Path
@@ -285,15 +286,50 @@ def test_connection(config: SerialSinkConfig) -> bool:
 
 
 async def run_sink(config: SerialSinkConfig) -> None:
-    """Run the sink."""
+    """Run the sink with robust signal handling."""
     sink = SerialSink(config)
+    shutdown_event = asyncio.Event()
+
+    def signal_handler(signum: int, frame: object) -> None:
+        """Handle termination signals by triggering graceful shutdown."""
+        sig_name = signal.Signals(signum).name
+        logging.getLogger(__name__).info(f"Received {sig_name}, initiating shutdown...")
+        shutdown_event.set()
+
+    # Install signal handlers for graceful shutdown
+    original_sigterm = signal.signal(signal.SIGTERM, signal_handler)
+    original_sigint = signal.signal(signal.SIGINT, signal_handler)
 
     try:
-        await sink.run()
-    except KeyboardInterrupt:
-        pass
+        # Run sink until shutdown is requested
+        sink_task = asyncio.create_task(sink.run())
+        shutdown_task = asyncio.create_task(shutdown_event.wait())
+
+        # Wait for either sink to finish or shutdown signal
+        done, pending = await asyncio.wait(
+            [sink_task, shutdown_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        # Cancel any pending tasks
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Unexpected error: {e}")
     finally:
+        # Always run cleanup, regardless of how we exited
+        logging.getLogger(__name__).info("Running cleanup...")
         await sink.stop()
+        logging.getLogger(__name__).info("Cleanup complete")
+
+        # Restore original signal handlers
+        signal.signal(signal.SIGTERM, original_sigterm)
+        signal.signal(signal.SIGINT, original_sigint)
 
 
 def main() -> int:
@@ -355,10 +391,8 @@ def main() -> int:
     print()
 
     # Run
-    try:
-        asyncio.run(run_sink(config))
-    except KeyboardInterrupt:
-        print("\nShutdown requested")
+    asyncio.run(run_sink(config))
+    print("Shutdown complete")
 
     return 0
 
