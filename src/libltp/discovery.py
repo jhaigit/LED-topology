@@ -551,8 +551,21 @@ class ServiceBrowser:
             except ValueError:
                 pass
 
-        # Get addresses - prefer IP addresses from mDNS
-        addresses = [socket.inet_ntoa(addr) for addr in info.addresses]
+        # Get addresses - prefer IPv4 for better compatibility
+        addresses = []
+        # First try IPv4 addresses
+        for addr in info.addresses_by_version(IPVersion.V4Only):
+            try:
+                addresses.append(socket.inet_ntoa(addr))
+            except (OSError, ValueError):
+                pass
+        # If no IPv4, try IPv6 addresses
+        if not addresses:
+            for addr in info.addresses_by_version(IPVersion.V6Only):
+                try:
+                    addresses.append(socket.inet_ntop(socket.AF_INET6, addr))
+                except (OSError, ValueError):
+                    pass
 
         # If no addresses from mDNS, try to resolve the hostname
         if not addresses and info.server:
