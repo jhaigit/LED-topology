@@ -151,20 +151,21 @@ struct ControlDef {
     int16_t minVal;
     int16_t maxVal;
     const char* name;
+    const char* description;
 };
 
 static const ControlDef controlDefs[NUM_CONTROLS] = {
-    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness" },
-    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma" },
-    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout" },
-    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show" },
-    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack" },
-    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval" },
-    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "local_mode" },
-    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1000,  32767, "cycle_time" },
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness", "Global LED brightness" },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma", "Gamma correction (1.0-3.0, stored as x10)" },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout", "Seconds until local mode activates (0=never)" },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show", "Auto-display after pixel commands" },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack", "Send acknowledgment after frames" },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval", "Status broadcast interval in ms (0=off)" },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "local_mode", "Local animation mode (0=off, 255=cycle)" },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1000,  32767, "cycle_time", "Mode cycle interval in ms" },
     // Action controls
-    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save" },
-    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot" },
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save", "Save current config to EEPROM" },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot", "Restart the device" },
 };
 
 // Get current value of a control (returns value, size in bytes via pointer)
@@ -665,7 +666,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
 
         case INFO_CONTROLS:
             // Return control metadata: count, then for each:
-            // id(1), type(1), flags(1), min(2), max(2), value(1-2), name(null-term)
+            // id(1), type(1), flags(1), min(2), max(2), value(1-2), name(null-term), description(null-term)
             response[respLen++] = NUM_CONTROLS;
             for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
                 const ControlDef& ctrl = controlDefs[i];
@@ -685,8 +686,14 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
                 }
                 // Copy name (null-terminated)
                 const char* name = ctrl.name;
-                while (*name && respLen < sizeof(response) - 1) {
+                while (*name && respLen < sizeof(response) - 2) {
                     response[respLen++] = *name++;
+                }
+                response[respLen++] = 0;
+                // Copy description (null-terminated)
+                const char* desc = ctrl.description;
+                while (*desc && respLen < sizeof(response) - 1) {
+                    response[respLen++] = *desc++;
                 }
                 response[respLen++] = 0;
             }

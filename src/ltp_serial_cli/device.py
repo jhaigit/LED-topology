@@ -556,7 +556,7 @@ class LtpDevice:
         """Get all device control definitions.
 
         Returns:
-            List of control info dicts with keys: id, type, min, max, name
+            List of control info dicts with keys: id, type, flags, min, max, value, name, description
         """
         self._send(LtpProtocol.build_get_info(INFO_CONTROLS))
         packet = self._wait_for_response(CMD_INFO_RESPONSE)
@@ -567,7 +567,7 @@ class LtpDevice:
             offset = 1
 
             for _ in range(num_controls):
-                # Format: id(1), type(1), flags(1), min(2), max(2), value(1-2), name(null-term)
+                # Format: id(1), type(1), flags(1), min(2), max(2), value(1-2), name(null-term), description(null-term)
                 if offset + 7 <= len(packet.payload):
                     ctrl_id = packet.payload[offset]
                     ctrl_type = packet.payload[offset + 1]
@@ -600,6 +600,13 @@ class LtpDevice:
                     name = packet.payload[offset:name_end].decode("utf-8", errors="replace")
                     offset = name_end + 1  # Skip null terminator
 
+                    # Parse null-terminated description
+                    desc_end = offset
+                    while desc_end < len(packet.payload) and packet.payload[desc_end] != 0:
+                        desc_end += 1
+                    description = packet.payload[offset:desc_end].decode("utf-8", errors="replace")
+                    offset = desc_end + 1  # Skip null terminator
+
                     controls.append({
                         "id": ctrl_id,
                         "type": ctrl_type,
@@ -608,6 +615,7 @@ class LtpDevice:
                         "max": max_val,
                         "value": value,
                         "name": name,
+                        "description": description,
                     })
 
         return controls

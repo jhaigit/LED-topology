@@ -170,7 +170,7 @@ class SerialSink:
                     BooleanControl(
                         id=device_ctrl.name,
                         name=ctrl_name,
-                        description="",
+                        description=device_ctrl.description,
                         value=bool(current_value) if current_value is not None else False,
                         group="hardware",
                     )
@@ -192,7 +192,7 @@ class SerialSink:
                     NumberControl(
                         id=device_ctrl.name,
                         name=ctrl_name,
-                        description="",
+                        description=device_ctrl.description,
                         value=value,
                         min=min_val,
                         max=max_val,
@@ -218,7 +218,7 @@ class SerialSink:
                     EnumControl(
                         id=device_ctrl.name,
                         name=ctrl_name,
-                        description="",
+                        description=device_ctrl.description,
                         value=str_value,
                         options=options,
                         group="hardware",
@@ -229,7 +229,7 @@ class SerialSink:
                     ActionControl(
                         id=device_ctrl.name,
                         name=ctrl_name,
-                        description="",
+                        description=device_ctrl.description,
                         group="hardware",
                     )
                 )

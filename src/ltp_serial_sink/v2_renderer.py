@@ -94,6 +94,7 @@ class DeviceControl:
     max_value: int | None = None
     flags: int = 0  # CTRL_FLAG_* bitmask
     enum_values: list[str] = field(default_factory=list)
+    description: str = ""
 
     @property
     def readonly(self) -> bool:
@@ -269,6 +270,7 @@ class V2Renderer:
                     min_value=ctrl["min"],
                     max_value=ctrl["max"],
                     flags=ctrl.get("flags", 0),
+                    description=ctrl.get("description", ""),
                 )
             logger.debug(f"Device controls from INFO_CONTROLS: {list(self._controls.keys())}")
         except Exception as e:

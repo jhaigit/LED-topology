@@ -71,7 +71,7 @@
             <div class="control-list">
                 {% for control in sink.controls %}
                 <div class="control-row" data-sink-id="{{ sink.id }}" data-control-id="{{ control.id }}">
-                    <label class="control-name">{{ control.name }}</label>
+                    <label class="control-name" {% if control.description %}title="{{ control.description }}"{% endif %}>{{ control.name }}</label>
                     {% set current_value = sink.control_values.get(control.id, control.get('value', '')) %}
                     {% if control.type == 'action' %}
                     <button class="btn btn-sm btn-action" onclick="triggerAction('{{ sink.id }}', '{{ control.id }}', '{{ control.name }}')">
@@ -225,6 +225,10 @@
 .control-name {
     font-size: 0.9rem;
     color: var(--text-muted, #9ca3af);
+}
+.control-name[title] {
+    cursor: help;
+    border-bottom: 1px dotted var(--text-muted, #9ca3af);
 }
 .control-input {
     padding: 4px 8px;
