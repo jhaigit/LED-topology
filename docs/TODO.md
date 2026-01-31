@@ -148,6 +148,37 @@ discovery issues on restart.
 
 ---
 
+### 6. mDNS Discovery IPv4/IPv6 Fixes
+
+**Status**: DONE
+
+**Problem**: Devices discovered via IPv6 multicast couldn't be connected to
+because the controller only used IPv4, and address extraction failed for IPv6.
+
+**Root cause**: On some networks, IPv4 mDNS multicast doesn't propagate between
+machines (switch configuration, IGMP snooping issues), but IPv6 multicast works.
+
+**Symptoms**:
+- Device visible in `avahi-browse` but not in controller
+- Device discovered but health checks fail with "Name or service not known"
+- Device discovered but connects to IPv6 address that's unreachable
+
+**Implementation**:
+- Changed ServiceBrowser/ServiceAdvertiser to use `IPVersion.All` (not V4Only)
+- Fixed address extraction to handle both IPv4 and IPv6 properly
+- Added hostname resolution fallback via `getaddrinfo()` when mDNS only returns IPv6
+- Prefer IPv4 addresses when available for better compatibility
+- Added debug logging for address resolution troubleshooting
+- Increased service resolution timeout from 3s to 5s
+
+**Workaround for broken IPv4 multicast**: If a device is only discoverable via
+IPv6 but IPv6 connectivity doesn't work, add a static hosts entry:
+```
+echo "10.0.1.2 hostname.local hostname" | sudo tee -a /etc/hosts
+```
+
+---
+
 ## Implementation Order
 
 1. ~~**Build info display**~~ - DONE
@@ -155,6 +186,7 @@ discovery issues on restart.
 3. ~~**Action controls**~~ - DONE
 4. ~~**Control descriptions**~~ - DONE
 5. ~~**Signal handling**~~ - DONE
+6. ~~**mDNS IPv4/IPv6 fixes**~~ - DONE
 
 After these cleanups, revisit control set flakiness with cleaner codebase.
 
