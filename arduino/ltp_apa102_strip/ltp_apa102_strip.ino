@@ -751,7 +751,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
     }
 
     uint8_t infoType = payload[0];
-    uint8_t response[200];  // Large enough for INFO_CONTROLS
+    uint8_t response[600];  // Large enough for INFO_CONTROLS with descriptions
     uint16_t respLen = 0;
 
     switch (infoType) {
