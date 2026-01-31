@@ -125,17 +125,17 @@ struct ControlDef {
 };
 
 static const ControlDef controlDefs[NUM_CONTROLS] = {
-    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness", "Global LED brightness" },
-    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma", "Gamma correction (1.0-3.0, stored as x10)" },
-    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout", "Seconds until local mode activates (0=never)" },
-    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show", "Auto-display after pixel commands" },
-    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack", "Send acknowledgment after frames" },
-    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval", "Status broadcast interval in ms (0=off)" },
-    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "local_mode", "Local animation mode (0=off, 255=cycle)" },
-    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1000,  32767, "cycle_time", "Mode cycle interval in ms" },
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness", "0-255" },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma", "x10, 10=1.0" },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout", "secs, 0=off" },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show", "show after cmds" },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack", "ack frames" },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval", "ms, 0=off" },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "local_mode", "0=off, 255=cycle" },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1000,  32767, "cycle_time", "ms" },
     // Action controls
-    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save", "Save current config to EEPROM" },
-    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot", "Restart the device" },
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save", "save to EEPROM" },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot", "restart" },
 };
 
 // Get current value of a control (returns value, size in bytes via pointer)
@@ -700,7 +700,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
     }
 
     uint8_t infoType = payload[0];
-    uint8_t response[600];  // Large enough for INFO_CONTROLS with descriptions
+    uint8_t response[350];  // Large enough for INFO_CONTROLS with descriptions
     uint16_t respLen = 0;
 
     switch (infoType) {
