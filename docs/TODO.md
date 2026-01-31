@@ -101,7 +101,7 @@ setting persistent values.
 
 ### 4. Control Descriptions and Units
 
-**Status**: Implemented, not yet verified
+**Status**: DONE
 
 **Goal**: Controls export a description string that can include units,
 ranges, or usage hints.
@@ -111,18 +111,40 @@ ranges, or usage hints.
 - Protocol: INFO_CONTROLS format extended with description(null-term) after name
 - Python: DeviceControl dataclass includes description, passed through to UI
 - UI: Descriptions shown as tooltips on control names (dotted underline, help cursor)
+- Fixed buffer overflow (increased response buffer, used terse descriptions)
 
-**Control descriptions added**:
-- brightness: "Global LED brightness"
-- gamma: "Gamma correction (1.0-3.0, stored as x10)"
-- idle_timeout: "Seconds until local mode activates (0=never)"
-- auto_show: "Auto-display after pixel commands"
-- frame_ack: "Send acknowledgment after frames"
-- status_interval: "Status broadcast interval in ms (0=off)"
-- local_mode: "Local animation mode (0=off, 255=cycle)"
-- cycle_time: "Mode cycle interval in ms"
-- save: "Save current config to EEPROM"
-- reboot: "Restart the device"
+**Control descriptions** (terse format to save RAM):
+- brightness: "0-255"
+- gamma: "x10, 10=1.0"
+- idle_timeout: "secs, 0=off"
+- auto_show: "after pixel cmds"
+- frame_ack: "ack frames"
+- status_interval: "ms, 0=off"
+- local_mode: "0=off, 255=cycle"
+- cycle_time: "ms"
+- save: "save to EEPROM"
+- reboot: "restart device"
+
+---
+
+### 5. Robust Signal Handling for mDNS Cleanup
+
+**Status**: DONE
+
+**Goal**: Ensure mDNS service registrations are cleaned up even when the
+sink is terminated abnormally (SIGTERM, SIGKILL, crash).
+
+**Problem**: When the sink was killed before cleanup ran, avahi-publish-service
+processes became orphaned zombies, leaving stale mDNS registrations that caused
+discovery issues on restart.
+
+**Implementation**:
+- Added SIGTERM/SIGINT handlers to sink CLI for graceful shutdown
+- Added atexit handler to kill orphaned avahi-publish-service processes
+- Use PR_SET_PDEATHSIG so avahi subprocess dies if parent dies unexpectedly
+- Start avahi in new process group for clean termination
+- Track all avahi processes globally for cleanup on module exit
+- Controller auto-refetches capabilities when device port changes on discovery
 
 ---
 
@@ -131,7 +153,8 @@ ranges, or usage hints.
 1. ~~**Build info display**~~ - DONE
 2. ~~**Control flags**~~ - DONE
 3. ~~**Action controls**~~ - DONE
-4. ~~**Control descriptions**~~ - Implemented, needs verification
+4. ~~**Control descriptions**~~ - DONE
+5. ~~**Signal handling**~~ - DONE
 
 After these cleanups, revisit control set flakiness with cleaner codebase.
 
