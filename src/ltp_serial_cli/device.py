@@ -33,6 +33,7 @@ from .protocol import (
     INFO_STATUS,
     INFO_STATS,
     INFO_CONTROLS,
+    INFO_BUILD,
     CTRL_ID_BRIGHTNESS,
     CTRL_ID_GAMMA,
     CTRL_ID_AUTO_SHOW,
@@ -178,6 +179,15 @@ class DeviceStats:
     checksum_errors: int = 0
     buffer_overflows: int = 0
     uptime_seconds: int = 0
+
+
+@dataclass
+class BuildInfo:
+    """Device build information."""
+
+    firmware_name: str = ""
+    git_commit: str = ""
+    build_date: str = ""
 
 
 # Type alias for input event callback
@@ -618,6 +628,46 @@ class LtpDevice:
                     })
 
         return inputs
+
+    def get_build_info(self) -> BuildInfo:
+        """Get device build information.
+
+        Returns:
+            BuildInfo with firmware_name, git_commit, build_date
+        """
+        self._send(LtpProtocol.build_get_info(INFO_BUILD))
+        packet = self._wait_for_response(CMD_INFO_RESPONSE)
+
+        info = BuildInfo()
+        if len(packet.payload) >= 1:
+            offset = 0
+
+            # Parse firmware name (null-terminated)
+            name_end = offset
+            while name_end < len(packet.payload) and packet.payload[name_end] != 0:
+                name_end += 1
+            if name_end > offset:
+                info.firmware_name = packet.payload[offset:name_end].decode("utf-8", errors="replace")
+            offset = name_end + 1
+
+            # Parse git commit (null-terminated)
+            if offset < len(packet.payload):
+                commit_end = offset
+                while commit_end < len(packet.payload) and packet.payload[commit_end] != 0:
+                    commit_end += 1
+                if commit_end > offset:
+                    info.git_commit = packet.payload[offset:commit_end].decode("utf-8", errors="replace")
+                offset = commit_end + 1
+
+            # Parse build date (null-terminated)
+            if offset < len(packet.payload):
+                date_end = offset
+                while date_end < len(packet.payload) and packet.payload[date_end] != 0:
+                    date_end += 1
+                if date_end > offset:
+                    info.build_date = packet.payload[offset:date_end].decode("utf-8", errors="replace")
+
+        return info
 
     def get_pixels(
         self, start: int = 0, count: int = 0, strip_id: int = 0

@@ -45,6 +45,12 @@
                 <span class="value">{{ source.device.properties.rate }} Hz</span>
             </div>
             {% endif %}
+            {% if source.capabilities and source.capabilities.git_commit %}
+            <div class="detail-row">
+                <span class="label">Build:</span>
+                <span class="value build-info" title="{{ source.capabilities.firmware_name or '' }} {{ source.capabilities.build_date or '' }}">{{ source.capabilities.git_commit[:8] }}{% if source.capabilities.build_date %} ({{ source.capabilities.build_date }}){% endif %}</span>
+            </div>
+            {% endif %}
         </div>
 
         {% if source.controls %}
@@ -153,6 +159,11 @@ function purgeOffline() {
 }
 .page-header .subtitle {
     margin: 0.25rem 0 0 0;
+}
+.build-info {
+    font-family: monospace;
+    font-size: 0.85rem;
+    cursor: help;
 }
 </style>
 {% endblock %}

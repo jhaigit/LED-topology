@@ -350,6 +350,16 @@ class SerialSink:
             device_info["backend"]["firmware"] = self._renderer.device_info.firmware_version
             device_info["backend"]["device_name"] = self._renderer.device_info.device_name
 
+        # Add build info if available
+        if self._renderer and self._renderer.build_info:
+            build = self._renderer.build_info
+            if build.firmware_name:
+                device_info["firmware_name"] = build.firmware_name
+            if build.git_commit:
+                device_info["git_commit"] = build.git_commit
+            if build.build_date:
+                device_info["build_date"] = build.build_date
+
         # Add inputs if available
         if self._renderer and self._renderer.inputs:
             device_info["inputs"] = [

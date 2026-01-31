@@ -24,6 +24,7 @@ from ltp_serial_cli import (
     DeviceStatus,
     DeviceStats,
     StripInfo,
+    BuildInfo,
     LtpError,
     LtpConnectionError,
     LtpTimeoutError,
@@ -135,6 +136,7 @@ class V2Renderer:
 
         # Device info cached after connection
         self._device_info: DeviceInfo | None = None
+        self._build_info: BuildInfo | None = None
         self._controls: dict[int, DeviceControl] = {}
         self._inputs: dict[int, DeviceInput] = {}
 
@@ -176,6 +178,19 @@ class V2Renderer:
                     f"{self._device_info.total_pixels} pixels, "
                     f"firmware v{self._device_info.firmware_version}"
                 )
+
+                # Query build info
+                try:
+                    self._build_info = self._device.get_build_info()
+                    if self._build_info.git_commit:
+                        logger.info(
+                            f"Build: {self._build_info.firmware_name} "
+                            f"commit {self._build_info.git_commit} "
+                            f"({self._build_info.build_date})"
+                        )
+                except Exception as e:
+                    logger.debug(f"Could not get build info: {e}")
+                    self._build_info = None
 
                 # Build controls list from device capabilities
                 self._populate_controls()
@@ -374,6 +389,11 @@ class V2Renderer:
     def device_info(self) -> DeviceInfo | None:
         """Get cached device info."""
         return self._device_info
+
+    @property
+    def build_info(self) -> BuildInfo | None:
+        """Get cached build info."""
+        return self._build_info
 
     @property
     def pixel_count(self) -> int:

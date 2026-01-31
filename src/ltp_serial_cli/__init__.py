@@ -30,7 +30,7 @@ from .protocol import (
     CMD_PIXEL_FRAME, CMD_PIXEL_FRAME_RLE, CMD_PIXEL_DELTA,
     CMD_SET_CONTROL, CMD_INPUT_EVENT,
     # Info types
-    INFO_ALL, INFO_VERSION, INFO_STRIPS, INFO_STATUS, INFO_CONTROLS, INFO_STATS, INFO_INPUTS,
+    INFO_ALL, INFO_VERSION, INFO_STRIPS, INFO_STATUS, INFO_CONTROLS, INFO_STATS, INFO_INPUTS, INFO_BUILD,
     # Error codes
     ERR_OK, ERR_CHECKSUM, ERR_INVALID_CMD, ERR_INVALID_LENGTH,
     ERR_INVALID_PARAM, ERR_BUFFER_OVERFLOW, ERR_PIXEL_OVERFLOW,
@@ -41,7 +41,7 @@ from .protocol import (
     LED_TYPE_WS2812, LED_TYPE_SK6812, LED_TYPE_APA102, LED_TYPE_LPD8806,
 )
 
-from .device import LtpDevice, DeviceInfo, StripInfo, DeviceStatus, DeviceStats
+from .device import LtpDevice, DeviceInfo, StripInfo, DeviceStatus, DeviceStats, BuildInfo
 from .exceptions import (
     LtpError,
     LtpConnectionError,
@@ -61,6 +61,7 @@ __all__ = [
     "StripInfo",
     "DeviceStatus",
     "DeviceStats",
+    "BuildInfo",
     # Exceptions
     "LtpError",
     "LtpConnectionError",

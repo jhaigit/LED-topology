@@ -57,6 +57,12 @@
                 <span class="value">{{ sink.device.properties.rate }} Hz</span>
             </div>
             {% endif %}
+            {% if sink.capabilities and sink.capabilities.git_commit %}
+            <div class="detail-row">
+                <span class="label">Build:</span>
+                <span class="value build-info" title="{{ sink.capabilities.firmware_name or '' }} {{ sink.capabilities.build_date or '' }}">{{ sink.capabilities.git_commit[:8] }}{% if sink.capabilities.build_date %} ({{ sink.capabilities.build_date }}){% endif %}</span>
+            </div>
+            {% endif %}
         </div>
 
         {% if sink.controls %}
@@ -628,6 +634,11 @@ setInterval(updateSinkStatus, 5000);
 .input-value-false {
     background: var(--bg-tertiary, #1f2937);
     color: var(--text-muted, #9ca3af);
+}
+.build-info {
+    font-family: monospace;
+    font-size: 0.85rem;
+    cursor: help;
 }
 </style>
 {% endblock %}
