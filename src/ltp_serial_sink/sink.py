@@ -14,6 +14,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from libltp import (
+    ActionControl,
     BooleanControl,
     ColorFormat,
     ControlRegistry,
@@ -220,6 +221,15 @@ class SerialSink:
                         description="",
                         value=str_value,
                         options=options,
+                        group="hardware",
+                    )
+                )
+            elif device_ctrl.control_type == "action":
+                self._controls.register(
+                    ActionControl(
+                        id=device_ctrl.name,
+                        name=ctrl_name,
+                        description="",
                         group="hardware",
                     )
                 )
@@ -469,6 +479,16 @@ class SerialSink:
                             device_value = 0
                         result = self._renderer.set_control(device_ctrl_id, device_value)
                         applied_value = value
+                    elif device_ctrl.control_type == "action":
+                        # Action controls trigger immediately, no persistent value
+                        result = self._renderer.set_control(device_ctrl_id, 1)
+                        applied_value = True
+                        if result:
+                            applied[control_id] = applied_value
+                            logger.info(f"Triggered action {control_id}")
+                        else:
+                            errors[control_id] = "Failed to trigger action on device"
+                        continue  # Skip the normal value update flow
                     else:
                         # Numeric control (integer)
                         device_value = int(float(value))

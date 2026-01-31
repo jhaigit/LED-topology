@@ -149,8 +149,20 @@ CTRL_FLAG_READONLY = 0x02  # Read-only (status values, cannot be set)
 CTRL_FLAG_VOLATILE = 0x04  # Not persisted to EEPROM/NVS
 CTRL_FLAG_ACTION = 0x08    # One-time action (triggers on any set)
 CTRL_FLAG_HIDDEN = 0x10    # Not shown in normal UI (internal/debug)
-CTRL_COLOR = 0x08
-CTRL_ACTION = 0x09
+
+# Standard control IDs
+CTRL_ID_BRIGHTNESS = 0
+CTRL_ID_GAMMA = 1
+CTRL_ID_IDLE_TIMEOUT = 2
+CTRL_ID_AUTO_SHOW = 3
+CTRL_ID_FRAME_ACK = 4
+CTRL_ID_STATUS_INTERVAL = 5
+CTRL_ID_LOCAL_MODE = 6
+CTRL_ID_CYCLE_TIME = 7
+
+# Action control IDs
+CTRL_ID_SAVE_CONFIG = 0xF0
+CTRL_ID_REBOOT = 0xF1
 
 # Control IDs (standard)
 CTRL_ID_BRIGHTNESS = 0

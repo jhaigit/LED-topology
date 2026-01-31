@@ -158,6 +158,10 @@
 #define CTRL_ID_LOCAL_MODE  6
 #define CTRL_ID_CYCLE_TIME  7
 
+// Action control IDs (standard)
+#define CTRL_ID_SAVE_CONFIG  0xF0  // Save config to EEPROM/NVS
+#define CTRL_ID_REBOOT       0xF1  // Reboot device
+
 // Control types for INFO_CONTROLS response (matches Python CTRL_* constants)
 #define CTRL_TYPE_BOOL      0x01
 #define CTRL_TYPE_UINT8     0x02

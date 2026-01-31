@@ -169,6 +169,9 @@ static const ControlDef controlDefs[NUM_CONTROLS] = {
     { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval" },
     { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "local_mode" },
     { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1000,  32767, "cycle_time" },
+    // Action controls
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save" },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot" },
 };
 
 // Get current value of a control (returns value, size in bytes via pointer)
@@ -194,6 +197,10 @@ uint16_t getControlValue(uint8_t controlId, uint8_t* valueSize) {
         case CTRL_ID_CYCLE_TIME:
             *valueSize = 2;
             return config.cycleTime;
+        case CTRL_ID_SAVE_CONFIG:
+        case CTRL_ID_REBOOT:
+            // Action controls have no persistent value
+            return 0;
         default:
             return 0;
     }
@@ -1113,6 +1120,21 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
             }
             break;
 
+        case CTRL_ID_SAVE_CONFIG:
+            // Action: save config to EEPROM
+            saveConfig();
+            break;
+
+        case CTRL_ID_REBOOT:
+            // Action: reboot device (Teensy)
+            protocol.sendAck(CMD_SET_CONTROL);
+            delay(100);
+            #if defined(__MK20DX256__) || defined(__MK64FX512__) || defined(__MK66FX1M0__)
+            // Teensy 3.x software reset
+            SCB_AIRCR = 0x05FA0004;
+            #endif
+            return;
+
         default:
             protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
             return;
@@ -1159,6 +1181,11 @@ void handleGetControl(const uint8_t* payload, uint16_t length) {
         case CTRL_ID_CYCLE_TIME:
             response[respLen++] = config.cycleTime & 0xFF;
             response[respLen++] = config.cycleTime >> 8;
+            break;
+        case CTRL_ID_SAVE_CONFIG:
+        case CTRL_ID_REBOOT:
+            // Action controls have no value
+            response[respLen++] = 0;
             break;
         default:
             protocol.sendNak(CMD_GET_CONTROL, ERR_INVALID_PARAM);

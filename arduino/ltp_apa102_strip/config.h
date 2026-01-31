@@ -87,6 +87,6 @@
 // NUMBER OF CONTROLS
 // ============================================================================
 
-#define NUM_CONTROLS        8
+#define NUM_CONTROLS        10
 
 #endif // LTP_APA102_CONFIG_H

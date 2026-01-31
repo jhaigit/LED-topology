@@ -73,7 +73,11 @@
                 <div class="control-row" data-sink-id="{{ sink.id }}" data-control-id="{{ control.id }}">
                     <label class="control-name">{{ control.name }}</label>
                     {% set current_value = sink.control_values.get(control.id, control.get('value', '')) %}
-                    {% if control.type == 'boolean' %}
+                    {% if control.type == 'action' %}
+                    <button class="btn btn-sm btn-action" onclick="triggerAction('{{ sink.id }}', '{{ control.id }}', '{{ control.name }}')">
+                        {{ control.name|capitalize }}
+                    </button>
+                    {% elif control.type == 'boolean' %}
                     <input type="checkbox" class="control-input"
                            {% if current_value %}checked{% endif %}
                            onchange="setControl('{{ sink.id }}', '{{ control.id }}', this.checked)">
@@ -242,6 +246,23 @@
 select.control-input {
     min-width: 100px;
 }
+.btn-action {
+    background: var(--secondary-bg, #374151);
+    border: 1px solid var(--border-color, #4b5563);
+    color: var(--text-color, #fff);
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.btn-action:hover:not(:disabled) {
+    background: var(--primary, #2563eb);
+    border-color: var(--primary, #2563eb);
+}
+.btn-action:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
 </style>
 
 {% else %}
@@ -280,6 +301,52 @@ function setControl(sinkId, controlId, value) {
         }
     })
     .catch(err => {
+        alert('Error: ' + err.message);
+    });
+}
+
+function triggerAction(sinkId, controlId, actionName) {
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    // Action controls trigger on any SET_CONTROL - value doesn't matter
+    const values = {};
+    values[controlId] = 1;
+
+    fetch(`/api/sinks/${sinkId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            btn.textContent = 'Done!';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                // Reload for reboot action since device will restart
+                if (actionName.toLowerCase() === 'reboot') {
+                    setTimeout(() => location.reload(), 2000);
+                }
+            }, 1000);
+        } else {
+            btn.textContent = 'Error';
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.disabled = false;
+            }, 2000);
+            alert('Error: ' + JSON.stringify(data.results || data.error));
+        }
+    })
+    .catch(err => {
+        btn.textContent = 'Error';
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }, 2000);
         alert('Error: ' + err.message);
     });
 }
