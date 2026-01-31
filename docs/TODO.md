@@ -101,33 +101,28 @@ setting persistent values.
 
 ### 4. Control Descriptions and Units
 
+**Status**: Implemented, not yet verified
+
 **Goal**: Controls export a description string that can include units,
 ranges, or usage hints.
 
-**Current state**: Controls have only `name` (short identifier). Users don't
-know what "gamma" means or that it's stored as value*10.
+**Implementation**:
+- Firmware: Added `description` field to ControlDef struct in all firmwares
+- Protocol: INFO_CONTROLS format extended with description(null-term) after name
+- Python: DeviceControl dataclass includes description, passed through to UI
+- UI: Descriptions shown as tooltips on control names (dotted underline, help cursor)
 
-**Proposed addition to INFO_CONTROLS**:
-
-```cpp
-// Current format per control:
-//   id(1) + type(1) + min(2) + max(2) + name(null-term)
-
-// New format:
-//   id(1) + type(1) + flags(1) + min(2) + max(2) + name(null-term) + description(null-term)
-```
-
-**Example descriptions**:
-- brightness: "Global LED brightness (0-255)"
-- gamma: "Gamma correction factor (1.0-3.0, stored as x10)"
-- cycle_time: "Local mode cycle interval in seconds"
+**Control descriptions added**:
+- brightness: "Global LED brightness"
+- gamma: "Gamma correction (1.0-3.0, stored as x10)"
 - idle_timeout: "Seconds until local mode activates (0=never)"
-
-**Tasks**:
-- [ ] Extend INFO_CONTROLS format with description field
-- [ ] Update firmware to include descriptions
-- [ ] Update Python parser
-- [ ] Display descriptions in UI (tooltip or help text)
+- auto_show: "Auto-display after pixel commands"
+- frame_ack: "Send acknowledgment after frames"
+- status_interval: "Status broadcast interval in ms (0=off)"
+- local_mode: "Local animation mode (0=off, 255=cycle)"
+- cycle_time: "Mode cycle interval in ms"
+- save: "Save current config to EEPROM"
+- reboot: "Restart the device"
 
 ---
 
@@ -136,7 +131,7 @@ know what "gamma" means or that it's stored as value*10.
 1. ~~**Build info display**~~ - DONE
 2. ~~**Control flags**~~ - DONE
 3. ~~**Action controls**~~ - DONE
-4. **Control descriptions** - Polish, can be added incrementally
+4. ~~**Control descriptions**~~ - Implemented, needs verification
 
 After these cleanups, revisit control set flakiness with cleaner codebase.
 
