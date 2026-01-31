@@ -513,23 +513,32 @@ class ServiceBrowser:
         state_change: ServiceStateChange,
     ) -> None:
         """Handle service state change asynchronously."""
-        async with self._lock:
-            if state_change == ServiceStateChange.Added:
-                await self._add_service(zeroconf, service_type, name)
-            elif state_change == ServiceStateChange.Removed:
-                self._remove_service(name)
-            elif state_change == ServiceStateChange.Updated:
-                await self._add_service(zeroconf, service_type, name)
+        try:
+            async with self._lock:
+                if state_change == ServiceStateChange.Added:
+                    await self._add_service(zeroconf, service_type, name)
+                elif state_change == ServiceStateChange.Removed:
+                    self._remove_service(name)
+                elif state_change == ServiceStateChange.Updated:
+                    await self._add_service(zeroconf, service_type, name)
+        except Exception as e:
+            logger.error(f"Error handling service change for {name}: {e}", exc_info=True)
 
     async def _add_service(
         self, zeroconf: Zeroconf, service_type: str, name: str
     ) -> None:
         """Add or update a discovered service."""
+        logger.debug(f"Resolving service: {name} ({service_type})")
         info = AsyncServiceInfo(service_type, name)
-        await info.async_request(zeroconf, 3000)
+        # Use 5 second timeout for cross-network discovery
+        resolved = await info.async_request(zeroconf, 5000)
+
+        if not resolved:
+            logger.warning(f"Service {name} resolution timed out")
+            return
 
         if not info.port:
-            logger.warning(f"Service {name} has no port, ignoring")
+            logger.warning(f"Service {name} has no port (server={info.server}), ignoring")
             return
 
         properties = _parse_txt_properties(info)
