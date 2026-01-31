@@ -144,21 +144,50 @@ bool heartbeatState = false;
 struct ControlDef {
     uint8_t id;
     uint8_t type;
+    uint8_t flags;
     int16_t minVal;
     int16_t maxVal;
     const char* name;
 };
 
 static const ControlDef controlDefs[NUM_CONTROLS] = {
-    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  0,     255,   "brightness" },
-    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  10,    30,    "gamma" },
-    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, 0,     32767, "idle_timeout" },
-    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   0,     1,     "auto_show" },
-    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   0,     1,     "frame_ack" },
-    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, 0,     32767, "status_interval" },
-    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  0,     255,   "local_mode" },
-    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, 1000,  32767, "cycle_time" },
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness" },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma" },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout" },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show" },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack" },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval" },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "local_mode" },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1000,  32767, "cycle_time" },
 };
+
+// Get current value of a control (returns value, size in bytes via pointer)
+uint16_t getControlValue(uint8_t controlId, uint8_t* valueSize) {
+    *valueSize = 1;  // Default to 1 byte
+    switch (controlId) {
+        case CTRL_ID_BRIGHTNESS:
+            return config.brightness;
+        case CTRL_ID_GAMMA:
+            return config.gamma;
+        case CTRL_ID_IDLE_TIMEOUT:
+            *valueSize = 2;
+            return config.idleTimeout;
+        case CTRL_ID_AUTO_SHOW:
+            return config.autoShow ? 1 : 0;
+        case CTRL_ID_FRAME_ACK:
+            return config.frameAck ? 1 : 0;
+        case CTRL_ID_STATUS_INTERVAL:
+            *valueSize = 2;
+            return config.statusInterval;
+        case CTRL_ID_LOCAL_MODE:
+            return config.localMode;
+        case CTRL_ID_CYCLE_TIME:
+            *valueSize = 2;
+            return config.cycleTime;
+        default:
+            return 0;
+    }
+}
 
 // ============================================================================
 // CONFIG PERSISTENCE
@@ -625,16 +654,25 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             break;
 
         case INFO_CONTROLS:
-            // Return control metadata: count, then for each: id, type, min(2), max(2), name(null-term)
+            // Return control metadata: count, then for each:
+            // id(1), type(1), flags(1), min(2), max(2), value(1-2), name(null-term)
             response[respLen++] = NUM_CONTROLS;
             for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
                 const ControlDef& ctrl = controlDefs[i];
                 response[respLen++] = ctrl.id;
                 response[respLen++] = ctrl.type;
+                response[respLen++] = ctrl.flags;
                 response[respLen++] = ctrl.minVal & 0xFF;
                 response[respLen++] = (ctrl.minVal >> 8) & 0xFF;
                 response[respLen++] = ctrl.maxVal & 0xFF;
                 response[respLen++] = (ctrl.maxVal >> 8) & 0xFF;
+                // Current value (1 or 2 bytes depending on type)
+                uint8_t valueSize;
+                uint16_t value = getControlValue(ctrl.id, &valueSize);
+                response[respLen++] = value & 0xFF;
+                if (valueSize > 1) {
+                    response[respLen++] = (value >> 8) & 0xFF;
+                }
                 // Copy name (null-terminated)
                 const char* name = ctrl.name;
                 while (*name && respLen < sizeof(response) - 1) {

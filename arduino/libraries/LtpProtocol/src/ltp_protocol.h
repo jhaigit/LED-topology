@@ -164,6 +164,14 @@
 #define CTRL_TYPE_UINT16    0x03
 #define CTRL_TYPE_INT8      0x04
 #define CTRL_TYPE_INT16     0x05
+#define CTRL_TYPE_ACTION    0x06  // One-time action (button), no persistent value
+
+// Control flags for INFO_CONTROLS response
+#define CTRL_FLAG_HARDWARE  0x01  // Direct hardware control (vs high-level/derived)
+#define CTRL_FLAG_READONLY  0x02  // Read-only (status values, cannot be set)
+#define CTRL_FLAG_VOLATILE  0x04  // Not persisted to EEPROM/NVS
+#define CTRL_FLAG_ACTION    0x08  // One-time action (triggers on any set)
+#define CTRL_FLAG_HIDDEN    0x10  // Not shown in normal UI (internal/debug)
 
 // Input types
 #define INPUT_BUTTON        0x01

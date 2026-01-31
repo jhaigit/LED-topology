@@ -44,6 +44,12 @@ from ltp_serial_cli.protocol import (
     CTRL_UINT16,
     CTRL_INT8,
     CTRL_INT16,
+    CTRL_ACTION,
+    CTRL_FLAG_HARDWARE,
+    CTRL_FLAG_READONLY,
+    CTRL_FLAG_VOLATILE,
+    CTRL_FLAG_ACTION,
+    CTRL_FLAG_HIDDEN,
 )
 
 # Map control type codes to type names
@@ -53,6 +59,7 @@ CTRL_TYPE_NAMES = {
     CTRL_UINT16: "uint16",
     CTRL_INT8: "int8",
     CTRL_INT16: "int16",
+    CTRL_ACTION: "action",
 }
 
 logger = logging.getLogger(__name__)
@@ -85,8 +92,28 @@ class DeviceControl:
     value: Any = None
     min_value: int | None = None
     max_value: int | None = None
+    flags: int = 0  # CTRL_FLAG_* bitmask
     enum_values: list[str] = field(default_factory=list)
-    readonly: bool = False
+
+    @property
+    def readonly(self) -> bool:
+        """Check if control is read-only."""
+        return bool(self.flags & CTRL_FLAG_READONLY)
+
+    @property
+    def is_hardware(self) -> bool:
+        """Check if control is a direct hardware control."""
+        return bool(self.flags & CTRL_FLAG_HARDWARE)
+
+    @property
+    def is_volatile(self) -> bool:
+        """Check if control is volatile (not persisted)."""
+        return bool(self.flags & CTRL_FLAG_VOLATILE)
+
+    @property
+    def is_action(self) -> bool:
+        """Check if control is a one-time action."""
+        return bool(self.flags & CTRL_FLAG_ACTION)
 
 
 @dataclass
@@ -238,8 +265,10 @@ class V2Renderer:
                     id=ctrl_id,
                     name=ctrl["name"],
                     control_type=ctrl_type,
+                    value=ctrl.get("value"),
                     min_value=ctrl["min"],
                     max_value=ctrl["max"],
+                    flags=ctrl.get("flags", 0),
                 )
             logger.debug(f"Device controls from INFO_CONTROLS: {list(self._controls.keys())}")
         except Exception as e:

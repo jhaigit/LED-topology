@@ -34,6 +34,11 @@ from .protocol import (
     INFO_STATS,
     INFO_CONTROLS,
     INFO_BUILD,
+    CTRL_BOOL,
+    CTRL_UINT8,
+    CTRL_UINT16,
+    CTRL_INT8,
+    CTRL_INT16,
     CTRL_ID_BRIGHTNESS,
     CTRL_ID_GAMMA,
     CTRL_ID_AUTO_SHOW,
@@ -562,17 +567,31 @@ class LtpDevice:
             offset = 1
 
             for _ in range(num_controls):
-                if offset + 6 <= len(packet.payload):
+                # Format: id(1), type(1), flags(1), min(2), max(2), value(1-2), name(null-term)
+                if offset + 7 <= len(packet.payload):
                     ctrl_id = packet.payload[offset]
                     ctrl_type = packet.payload[offset + 1]
-                    min_val = packet.payload[offset + 2] | (packet.payload[offset + 3] << 8)
+                    ctrl_flags = packet.payload[offset + 2]
+                    min_val = packet.payload[offset + 3] | (packet.payload[offset + 4] << 8)
                     # Sign extend for int16
                     if min_val >= 32768:
                         min_val -= 65536
-                    max_val = packet.payload[offset + 4] | (packet.payload[offset + 5] << 8)
+                    max_val = packet.payload[offset + 5] | (packet.payload[offset + 6] << 8)
                     if max_val >= 32768:
                         max_val -= 65536
-                    offset += 6
+                    offset += 7
+
+                    # Value size depends on type (UINT16/INT16 = 2 bytes, else 1)
+                    if ctrl_type in (CTRL_UINT16, CTRL_INT16):
+                        value = packet.payload[offset] | (packet.payload[offset + 1] << 8)
+                        if ctrl_type == CTRL_INT16 and value >= 32768:
+                            value -= 65536
+                        offset += 2
+                    else:
+                        value = packet.payload[offset]
+                        if ctrl_type == CTRL_INT8 and value >= 128:
+                            value -= 256
+                        offset += 1
 
                     # Parse null-terminated name
                     name_end = offset
@@ -584,8 +603,10 @@ class LtpDevice:
                     controls.append({
                         "id": ctrl_id,
                         "type": ctrl_type,
+                        "flags": ctrl_flags,
                         "min": min_val,
                         "max": max_val,
+                        "value": value,
                         "name": name,
                     })
 

@@ -139,8 +139,16 @@ CTRL_UINT8 = 0x02
 CTRL_UINT16 = 0x03
 CTRL_INT8 = 0x04
 CTRL_INT16 = 0x05
-CTRL_ENUM = 0x06
-CTRL_STRING = 0x07
+CTRL_ACTION = 0x06  # One-time action (button), no persistent value
+CTRL_ENUM = 0x10    # Reserved for future
+CTRL_STRING = 0x11  # Reserved for future
+
+# Control flags
+CTRL_FLAG_HARDWARE = 0x01  # Direct hardware control (vs high-level/derived)
+CTRL_FLAG_READONLY = 0x02  # Read-only (status values, cannot be set)
+CTRL_FLAG_VOLATILE = 0x04  # Not persisted to EEPROM/NVS
+CTRL_FLAG_ACTION = 0x08    # One-time action (triggers on any set)
+CTRL_FLAG_HIDDEN = 0x10    # Not shown in normal UI (internal/debug)
 CTRL_COLOR = 0x08
 CTRL_ACTION = 0x09
 
