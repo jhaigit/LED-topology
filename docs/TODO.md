@@ -77,7 +77,7 @@ firmware) from higher-level controls (managed by Python sink/controller).
 
 ### 3. Action-Type Controls (One-Time Operations)
 
-**Status**: Protocol ready, UI pending
+**Status**: DONE
 
 **Goal**: Support controls that trigger one-time operations rather than
 setting persistent values.
@@ -87,14 +87,15 @@ setting persistent values.
 - `reboot` - Restart device
 - `calibrate` - Run calibration routine
 
-**Implementation so far**:
+**Implementation**:
 - Added CTRL_TYPE_ACTION (0x06) to protocol
 - Added CTRL_FLAG_ACTION flag for additional flexibility
-- Python CTRL_TYPE_NAMES includes "action" type
-
-**Remaining tasks**:
-- [ ] Add action controls to firmware (save, reboot)
-- [ ] Update UI to render actions as buttons instead of inputs
+- Firmware: CTRL_ID_SAVE_CONFIG (0xF0) and CTRL_ID_REBOOT (0xF1)
+- All three firmwares (serial_v2, octo_v2, apa102_strip) handle save/reboot
+- Platform-specific reboot: AVR watchdog, Teensy SCB_AIRCR, ESP32 restart
+- Python sink registers ActionControl and handles trigger without storing value
+- UI renders action controls as buttons with feedback (Done!/Error)
+- Reboot action triggers page reload after 2 seconds
 
 ---
 
@@ -132,9 +133,9 @@ know what "gamma" means or that it's stored as value*10.
 
 ## Implementation Order
 
-1. **Build info display** - Low risk, immediate user value
-2. **Control flags** - Required foundation for #3 and #4
-3. **Action controls** - Enables save/reboot buttons
+1. ~~**Build info display**~~ - DONE
+2. ~~**Control flags**~~ - DONE
+3. ~~**Action controls**~~ - DONE
 4. **Control descriptions** - Polish, can be added incrementally
 
 After these cleanups, revisit control set flakiness with cleaner codebase.
