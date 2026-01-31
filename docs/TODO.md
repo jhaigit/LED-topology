@@ -59,31 +59,25 @@ and displayable on the controller web UI.
 
 ### 2. Control Classification (Low-Level vs High-Level)
 
+**Status**: DONE
+
 **Goal**: Clean way to distinguish hardware controls (exported from embedded
 firmware) from higher-level controls (managed by Python sink/controller).
 
-**Background**: Previously used "hw_" prefix hack, now removed. Need a proper
-mechanism.
-
-**Proposed solution**: Add a `flags` or `category` field to control metadata:
-
-```cpp
-// Control flags for INFO_CONTROLS response
-#define CTRL_FLAG_HARDWARE   0x01  // Direct hardware control
-#define CTRL_FLAG_READONLY   0x02  // Read-only (for status values)
-#define CTRL_FLAG_VOLATILE   0x04  // Not persisted to EEPROM
-#define CTRL_FLAG_ACTION     0x08  // One-time action (see #3 below)
-```
-
-**Tasks**:
-- [ ] Add flags byte to INFO_CONTROLS protocol
-- [ ] Update firmware to set appropriate flags
-- [ ] Update Python to parse and use flags
+**Implementation**:
+- Added flags byte to INFO_CONTROLS protocol format
+- Added CTRL_FLAG_* constants: HARDWARE, READONLY, VOLATILE, ACTION, HIDDEN
+- All firmware controls marked with CTRL_FLAG_HARDWARE
+- auto_show, frame_ack, status_interval also marked VOLATILE
+- Python DeviceControl has is_hardware, is_volatile, is_action, readonly props
+- INFO_CONTROLS also now includes current value (avoids extra query)
 - [ ] UI can filter/group controls by category
 
 ---
 
 ### 3. Action-Type Controls (One-Time Operations)
+
+**Status**: Protocol ready, UI pending
 
 **Goal**: Support controls that trigger one-time operations rather than
 setting persistent values.
@@ -93,22 +87,14 @@ setting persistent values.
 - `reboot` - Restart device
 - `calibrate` - Run calibration routine
 
-**Proposed approach**: New control type `CTRL_TYPE_ACTION` (0x06)
+**Implementation so far**:
+- Added CTRL_TYPE_ACTION (0x06) to protocol
+- Added CTRL_FLAG_ACTION flag for additional flexibility
+- Python CTRL_TYPE_NAMES includes "action" type
 
-```cpp
-#define CTRL_TYPE_ACTION    0x06  // One-time action, no persistent value
-```
-
-For action controls:
-- `value` field is ignored (can send 1 to trigger)
-- UI renders as a button instead of slider/input
-- GET_CONTROL returns 0 (or last trigger timestamp?)
-
-**Tasks**:
-- [ ] Add CTRL_TYPE_ACTION to protocol
-- [ ] Update firmware to define action controls (save, reboot, etc.)
-- [ ] Update Python control type handling
-- [ ] Update UI to render actions as buttons
+**Remaining tasks**:
+- [ ] Add action controls to firmware (save, reboot)
+- [ ] Update UI to render actions as buttons instead of inputs
 
 ---
 
