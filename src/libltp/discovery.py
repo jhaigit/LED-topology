@@ -552,29 +552,37 @@ class ServiceBrowser:
                 pass
 
         # Get addresses - prefer IPv4 for better compatibility
-        addresses = []
-        # First try IPv4 addresses
+        ipv4_addresses = []
+        ipv6_addresses = []
+
+        # Extract IPv4 addresses
         for addr in info.addresses_by_version(IPVersion.V4Only):
             try:
-                addresses.append(socket.inet_ntoa(addr))
+                ipv4_addresses.append(socket.inet_ntoa(addr))
             except (OSError, ValueError):
                 pass
-        # If no IPv4, try IPv6 addresses
-        if not addresses:
-            for addr in info.addresses_by_version(IPVersion.V6Only):
-                try:
-                    addresses.append(socket.inet_ntop(socket.AF_INET6, addr))
-                except (OSError, ValueError):
-                    pass
 
-        # If no addresses from mDNS, try to resolve the hostname
-        if not addresses and info.server:
+        # Extract IPv6 addresses
+        for addr in info.addresses_by_version(IPVersion.V6Only):
+            try:
+                ipv6_addresses.append(socket.inet_ntop(socket.AF_INET6, addr))
+            except (OSError, ValueError):
+                pass
+
+        # If no IPv4 from mDNS, try to resolve the hostname to get IPv4
+        if not ipv4_addresses and info.server:
             try:
                 resolved_ip = socket.gethostbyname(info.server)
-                addresses = [resolved_ip]
+                ipv4_addresses = [resolved_ip]
                 logger.debug(f"Resolved {info.server} to {resolved_ip}")
             except socket.gaierror as e:
-                logger.warning(f"Could not resolve {info.server}: {e}")
+                logger.debug(f"Could not resolve {info.server} to IPv4: {e}")
+
+        # Prefer IPv4, fall back to IPv6
+        addresses = ipv4_addresses if ipv4_addresses else ipv6_addresses
+
+        if not addresses:
+            logger.warning(f"No addresses for {name} (server={info.server})")
 
         device = DiscoveredDevice(
             name=name,
