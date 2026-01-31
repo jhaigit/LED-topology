@@ -247,7 +247,7 @@ class ServiceAdvertiser:
         if self._zeroconf is not None:
             return
 
-        self._zeroconf = AsyncZeroconf(ip_version=IPVersion.V4Only)
+        self._zeroconf = AsyncZeroconf(ip_version=IPVersion.All)
         self._service_info = self._build_service_info()
 
         logger.info(
@@ -599,7 +599,7 @@ class ServiceBrowser:
         if self._zeroconf is not None:
             return
 
-        self._zeroconf = AsyncZeroconf(ip_version=IPVersion.V4Only)
+        self._zeroconf = AsyncZeroconf(ip_version=IPVersion.All)
 
         for service_type in self.service_types:
             browser = AsyncServiceBrowser(
