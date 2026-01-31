@@ -199,10 +199,16 @@ class Controller:
             if device_key in self._sources:
                 # Update existing
                 state = self._sources[device_key]
+                old_port = state.port
                 state.device = device
                 state.last_seen = datetime.now()
                 state.online = True
-                logger.info(f"Source updated: {state.name}")
+                # If port changed, source was restarted - refetch capabilities
+                if state.port != old_port:
+                    logger.info(f"Source updated (port changed): {state.name}")
+                    asyncio.create_task(self._fetch_device_info(state))
+                else:
+                    logger.info(f"Source updated: {state.name}")
             else:
                 # New source
                 state = DeviceState(device=device)
@@ -230,10 +236,16 @@ class Controller:
             if device_key in self._sinks:
                 # Update existing
                 state = self._sinks[device_key]
+                old_port = state.port
                 state.device = device
                 state.last_seen = datetime.now()
                 state.online = True
-                logger.info(f"Sink updated: {state.name}")
+                # If port changed, sink was restarted - refetch capabilities
+                if state.port != old_port:
+                    logger.info(f"Sink updated (port changed): {state.name}")
+                    asyncio.create_task(self._fetch_device_info(state))
+                else:
+                    logger.info(f"Sink updated: {state.name}")
             else:
                 # New sink
                 state = DeviceState(device=device)
