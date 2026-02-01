@@ -22,6 +22,7 @@ from ltp_controller.virtual_sources.fonts import (
     is_ttf_font,
     parse_ttf_font_spec,
     render_ttf_text_to_numpy,
+    render_ttf_text_antialiased,
     measure_ttf_text,
     HAS_PIL,
 )
@@ -167,6 +168,31 @@ def render_text_to_pixels(
     return pixels
 
 
+def render_text_to_pixels_antialiased(
+    text: str,
+    font_name: str = DEFAULT_FONT,
+) -> np.ndarray:
+    """Render text to a 2D grayscale array for anti-aliased rendering.
+
+    Args:
+        text: Text to render
+        font_name: Font to use (TTF spec like "DejaVuSans:16" for AA, bitmap falls back to 0/255)
+
+    Returns:
+        2D uint8 array (height, width) with values 0-255 for alpha blending
+    """
+    # Check if this is a TTF font
+    if is_ttf_font(font_name):
+        ttf_name, size = parse_ttf_font_spec(font_name)
+        if not text:
+            return np.zeros((size + 4, 0), dtype=np.uint8)
+        return render_ttf_text_antialiased(text, ttf_name, size)
+
+    # Bitmap fonts don't have anti-aliasing - convert bool to 0/255
+    bool_pixels = render_text_to_pixels(text, font_name)
+    return (bool_pixels.astype(np.uint8) * 255)
+
+
 class TextRenderer:
     """High-level text renderer for LED matrices.
 
@@ -176,6 +202,7 @@ class TextRenderer:
     - Text alignment
     - Multiple fonts
     - Foreground/background colors
+    - Anti-aliased TTF rendering
     """
 
     def __init__(
@@ -187,13 +214,15 @@ class TextRenderer:
         background_color: tuple[int, int, int] = (0, 0, 0),
         align: TextAlign = TextAlign.LEFT,
         vertical_align: VerticalAlign = VerticalAlign.MIDDLE,
+        antialias: bool = False,
     ):
         """Initialize text renderer.
 
         Args:
             width: Display width in pixels
             height: Display height in pixels
-            font_name: Font to use (5x7, 3x5, 4x6)
+            font_name: Font to use (5x7, 3x5, 4x6, or TTF spec)
+            antialias: Enable anti-aliasing for TTF fonts
             text_color: RGB text color
             background_color: RGB background color
             align: Horizontal text alignment
@@ -206,6 +235,7 @@ class TextRenderer:
         self.background_color = background_color
         self.align = align
         self.vertical_align = vertical_align
+        self.antialias = antialias
 
         # Initialize font info
         if is_ttf_font(font_name):
@@ -266,9 +296,15 @@ class TextRenderer:
         if not text:
             return output
 
-        # Render text to boolean mask
-        text_pixels = render_text_to_pixels(text, self.font_name)
-        text_height, text_width = text_pixels.shape
+        # Render text - either anti-aliased (grayscale) or boolean mask
+        if self.antialias and is_ttf_font(self.font_name):
+            text_alpha = render_text_to_pixels_antialiased(text, self.font_name)
+            use_antialias = True
+        else:
+            text_pixels = render_text_to_pixels(text, self.font_name)
+            use_antialias = False
+
+        text_height, text_width = text_alpha.shape if use_antialias else text_pixels.shape
 
         # Calculate alignment offsets
         if self.align == TextAlign.LEFT:
@@ -301,16 +337,35 @@ class TextRenderer:
         if copy_width <= 0 or copy_height <= 0:
             return output
 
-        # Copy text pixels with color
-        text_mask = text_pixels[
-            src_y_start:src_y_start + copy_height,
-            src_x_start:src_x_start + copy_width
-        ]
+        if use_antialias:
+            # Anti-aliased: blend between background and text color using alpha
+            alpha = text_alpha[
+                src_y_start:src_y_start + copy_height,
+                src_x_start:src_x_start + copy_width
+            ].astype(np.float32) / 255.0
 
-        output[
-            dst_y_start:dst_y_start + copy_height,
-            dst_x_start:dst_x_start + copy_width
-        ][text_mask] = self.text_color
+            dst_region = output[
+                dst_y_start:dst_y_start + copy_height,
+                dst_x_start:dst_x_start + copy_width
+            ]
+
+            # Blend: result = bg * (1 - alpha) + fg * alpha
+            for c in range(3):
+                dst_region[:, :, c] = (
+                    self.background_color[c] * (1 - alpha) +
+                    self.text_color[c] * alpha
+                ).astype(np.uint8)
+        else:
+            # Non-anti-aliased: simple mask
+            text_mask = text_pixels[
+                src_y_start:src_y_start + copy_height,
+                src_x_start:src_x_start + copy_width
+            ]
+
+            output[
+                dst_y_start:dst_y_start + copy_height,
+                dst_x_start:dst_x_start + copy_width
+            ][text_mask] = self.text_color
 
         return output
 

@@ -100,6 +100,17 @@ class TextSource(VirtualSource):
             )
         )
 
+        # Anti-aliasing (TTF only)
+        self._controls.register(
+            BooleanControl(
+                id="antialias",
+                name="Anti-alias",
+                description="Smooth edges for TTF fonts",
+                value=True,
+                group="text",
+            )
+        )
+
         # Colors
         self._controls.register(
             ColorControl(
@@ -295,6 +306,7 @@ class TextSource(VirtualSource):
 
         align = TextAlign(align_str)
         valign = VerticalAlign(valign_str)
+        antialias = self.get_control("antialias")
 
         if self._renderer is None or self._renderer.width != width or self._renderer.height != height:
             self._renderer = TextRenderer(
@@ -305,6 +317,7 @@ class TextSource(VirtualSource):
                 background_color=bg_color,
                 align=align,
                 vertical_align=valign,
+                antialias=antialias,
             )
         else:
             # Update settings
@@ -313,6 +326,7 @@ class TextSource(VirtualSource):
             self._renderer.background_color = bg_color
             self._renderer.align = align
             self._renderer.vertical_align = valign
+            self._renderer.antialias = antialias
 
         return self._renderer
 

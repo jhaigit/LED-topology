@@ -712,6 +712,59 @@ def render_ttf_text_to_numpy(
     return np.array(bitmap, dtype=bool)
 
 
+def render_ttf_text_antialiased(
+    text: str,
+    font_name: str | None = None,
+    size: int = 16,
+):
+    """Render text using a TrueType font with anti-aliasing (grayscale).
+
+    Args:
+        text: Text to render
+        font_name: Font name or path (None for default)
+        size: Font size in pixels (height)
+
+    Returns:
+        numpy array of shape (height, width) with uint8 values 0-255
+        representing alpha/intensity for blending
+    """
+    import numpy as np
+
+    if not HAS_PIL:
+        raise RuntimeError("PIL/Pillow required for TrueType fonts")
+
+    if not text:
+        return np.zeros((size + 4, 0), dtype=np.uint8)
+
+    # Get font
+    if font_name is None:
+        font_name = get_default_ttf_font()
+    font = get_ttf_font(font_name, size)
+
+    if font is None:
+        raise RuntimeError(f"Could not load font: {font_name}")
+
+    # Measure text
+    bbox = font.getbbox(text)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+
+    # Create image slightly larger to handle descenders/ascenders
+    img_width = text_width + 2
+    img_height = size + 4
+
+    # Create grayscale image
+    img = Image.new("L", (img_width, img_height), 0)
+    draw = ImageDraw.Draw(img)
+
+    # Draw text (white on black), vertically centered
+    y_offset = (img_height - text_height) // 2 - bbox[1]
+    draw.text((1, y_offset), text, font=font, fill=255)
+
+    # Convert to numpy array (preserving grayscale values for anti-aliasing)
+    return np.array(img, dtype=np.uint8)
+
+
 def measure_ttf_text(
     text: str,
     font_name: str | None = None,
