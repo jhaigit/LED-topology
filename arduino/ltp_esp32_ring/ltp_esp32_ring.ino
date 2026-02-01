@@ -773,6 +773,12 @@ void setup() {
     protocol.setCycleTimeCallback([](uint16_t seconds) {
         localModes.setCycleTime(seconds);
     });
+    protocol.setSaveCallback(saveConfig);
+    protocol.setRebootCallback([]() {
+        dualOut.println("Rebooting...");
+        delay(100);  // Allow message to flush
+        ESP.restart();
+    });
 
     // Initialize USB terminal
     terminal.begin(&config, &wifi, &leds, &touch);

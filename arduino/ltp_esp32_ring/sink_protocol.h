@@ -45,9 +45,10 @@ struct ControlValue {
     bool readonly;
 };
 
-// Callback for when local mode changes via protocol
+// Callbacks for control changes via protocol
 typedef void (*LocalModeCallback)(uint8_t mode);
 typedef void (*CycleTimeCallback)(uint16_t seconds);
+typedef void (*ActionCallback)();
 
 class SinkProtocol {
 public:
@@ -59,6 +60,8 @@ public:
         , lastSeq(0)
         , onLocalModeChange(nullptr)
         , onCycleTimeChange(nullptr)
+        , onSave(nullptr)
+        , onReboot(nullptr)
     {
         streamId[0] = '\0';
     }
@@ -77,6 +80,16 @@ public:
     // Set callback for cycle time changes
     void setCycleTimeCallback(CycleTimeCallback callback) {
         onCycleTimeChange = callback;
+    }
+
+    // Set callback for save action
+    void setSaveCallback(ActionCallback callback) {
+        onSave = callback;
+    }
+
+    // Set callback for reboot action
+    void setRebootCallback(ActionCallback callback) {
+        onReboot = callback;
     }
 
     // Process a JSON message line, returns response (caller must free)
@@ -133,6 +146,8 @@ private:
     int lastSeq;
     LocalModeCallback onLocalModeChange;
     CycleTimeCallback onCycleTimeChange;
+    ActionCallback onSave;
+    ActionCallback onReboot;
 
     String handleCapabilityRequest(int seq);
     String handleStreamSetup(int seq, JsonDocument& doc);
@@ -240,6 +255,19 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     cycleTime["min"] = 1;
     cycleTime["max"] = 3600;
     cycleTime["step"] = 1;
+
+    // Action controls
+    JsonObject save = controls.add<JsonObject>();
+    save["id"] = "save";
+    save["name"] = "Save";
+    save["type"] = "action";
+    save["description"] = "save to flash";
+
+    JsonObject reboot = controls.add<JsonObject>();
+    reboot["id"] = "reboot";
+    reboot["name"] = "Reboot";
+    reboot["type"] = "action";
+    reboot["description"] = "restart";
 
     // Note: ws2812_offset is USB-terminal only, not exposed via sink protocol
 
@@ -442,6 +470,20 @@ bool SinkProtocol::setControlValue(const char* id, float value) {
         dualOut.printf("Protocol: cycle_time=%d\r\n", config->cycleTime);
         if (onCycleTimeChange) {
             onCycleTimeChange(config->cycleTime);
+        }
+        return true;
+    }
+    if (strcmp(id, "save") == 0) {
+        dualOut.println("Protocol: save");
+        if (onSave) {
+            onSave();
+        }
+        return true;
+    }
+    if (strcmp(id, "reboot") == 0) {
+        dualOut.println("Protocol: reboot");
+        if (onReboot) {
+            onReboot();
         }
         return true;
     }
