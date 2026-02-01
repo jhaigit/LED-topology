@@ -11,6 +11,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include "config.h"
+#include "build_info.h"
 
 // Message types (matching Python libltp.types.MessageType)
 #define MSG_CAPABILITY_REQUEST      "capability_request"
