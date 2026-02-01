@@ -198,6 +198,7 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     brightness["id"] = "brightness";
     brightness["name"] = "Brightness";
     brightness["type"] = "number";
+    brightness["description"] = "0-255";
     brightness["value"] = config->brightness;
     brightness["min"] = 0;
     brightness["max"] = 255;
@@ -206,15 +207,26 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     gamma["id"] = "gamma";
     gamma["name"] = "Gamma";
     gamma["type"] = "number";
+    gamma["description"] = "1.0-3.0";
     gamma["value"] = config->gamma / 10.0;
     gamma["min"] = 1.0;
     gamma["max"] = 3.0;
     gamma["step"] = 0.1;
 
+    JsonObject idleTimeout = controls.add<JsonObject>();
+    idleTimeout["id"] = "idle_timeout";
+    idleTimeout["name"] = "Idle Timeout";
+    idleTimeout["type"] = "number";
+    idleTimeout["description"] = "secs, 0=off";
+    idleTimeout["value"] = config->idleTimeout;
+    idleTimeout["min"] = 0;
+    idleTimeout["max"] = 32767;
+
     JsonObject localMode = controls.add<JsonObject>();
     localMode["id"] = "local_mode";
     localMode["name"] = "Local Mode";
     localMode["type"] = "number";
+    localMode["description"] = "0=off, 255=cycle";
     localMode["value"] = config->localMode;
     localMode["min"] = 0;
     localMode["max"] = 255;
@@ -223,6 +235,7 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     cycleTime["id"] = "cycle_time";
     cycleTime["name"] = "Cycle Time";
     cycleTime["type"] = "number";
+    cycleTime["description"] = "mode cycle, secs";
     cycleTime["value"] = config->cycleTime;
     cycleTime["min"] = 1;
     cycleTime["max"] = 3600;
@@ -314,6 +327,7 @@ String SinkProtocol::handleControlGet(int seq, JsonDocument& doc) {
         // Return all controls (ws2812_offset is USB-only)
         values["brightness"] = config->brightness;
         values["gamma"] = config->gamma / 10.0;
+        values["idle_timeout"] = config->idleTimeout;
         values["local_mode"] = config->localMode;
         values["cycle_time"] = config->cycleTime;
     }
@@ -387,6 +401,7 @@ String SinkProtocol::buildInputEvent(uint8_t touchIdx, const char* inputName, bo
 float SinkProtocol::getControlValue(const char* id) {
     if (strcmp(id, "brightness") == 0) return config->brightness;
     if (strcmp(id, "gamma") == 0) return config->gamma / 10.0;
+    if (strcmp(id, "idle_timeout") == 0) return config->idleTimeout;
     if (strcmp(id, "local_mode") == 0) return config->localMode;
     if (strcmp(id, "cycle_time") == 0) return config->cycleTime;
     // ws2812_offset is USB-terminal only
@@ -403,6 +418,11 @@ bool SinkProtocol::setControlValue(const char* id, float value) {
     if (strcmp(id, "gamma") == 0) {
         config->gamma = constrain((int)(value * 10), 10, 30);
         dualOut.printf("Protocol: gamma=%.1f\r\n", config->gamma / 10.0);
+        return true;
+    }
+    if (strcmp(id, "idle_timeout") == 0) {
+        config->idleTimeout = constrain((int)value, 0, 32767);
+        dualOut.printf("Protocol: idle_timeout=%d\r\n", config->idleTimeout);
         return true;
     }
     if (strcmp(id, "local_mode") == 0) {
