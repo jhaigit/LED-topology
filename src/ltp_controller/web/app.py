@@ -1004,6 +1004,37 @@ def create_app(
         source.stop()
         return jsonify({"status": "ok"})
 
+    @app.route("/api/virtual-sources/<source_id>/preview")
+    def api_virtual_source_preview(source_id: str) -> Any:
+        """Get preview of virtual source output as SVG."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        # Get dimensions
+        dims = source.config.output_dimensions
+        if len(dims) >= 2:
+            width, height = dims[0], dims[1]
+        else:
+            width = dims[0]
+            height = 1
+
+        # Render a frame
+        import time
+        num_pixels = width * height
+        time_elapsed = time.time() - source._start_time if source._start_time else 0.0
+        try:
+            frame = source.render(num_pixels, time_elapsed)
+            pixels = frame.tolist() if hasattr(frame, 'tolist') else list(frame)
+        except Exception as e:
+            # Return empty preview on error
+            pixels = []
+
+        return _generate_led_svg_2d(pixels, width, height)
+
     # ==================== Page: Scalar Sources ====================
 
     @app.route("/scalar-sources")

@@ -40,6 +40,16 @@
             </div>
         </div>
 
+        <div class="device-preview" id="preview-container-{{ vs.id }}">
+            <h4>Preview</h4>
+            <div class="preview-frame">
+                <img src="/api/virtual-sources/{{ vs.id }}/preview"
+                     alt="Preview"
+                     class="preview-img"
+                     id="preview-{{ vs.id }}">
+            </div>
+        </div>
+
         <div class="device-controls">
             <h4>Controls</h4>
             <ul class="control-list" id="controls-{{ vs.id }}">
@@ -265,8 +275,26 @@ function updateControl(sourceId, controlId, value) {
                 valueSpan.textContent = value.toFixed(2);
             }
         }
+        // Refresh preview after control change
+        refreshPreview(sourceId);
     });
 }
+
+function refreshPreview(sourceId) {
+    const img = document.getElementById('preview-' + sourceId);
+    if (img) {
+        const src = img.src.split('?')[0];
+        img.src = src + '?t=' + Date.now();
+    }
+}
+
+// Refresh all previews periodically for animated sources
+setInterval(() => {
+    document.querySelectorAll('.preview-img').forEach(img => {
+        const src = img.src.split('?')[0];
+        img.src = src + '?t=' + Date.now();
+    });
+}, 200);
 
 function startSource(id) {
     fetch(`/api/virtual-sources/${id}/start`, { method: 'POST' })
@@ -369,6 +397,27 @@ function deleteSource(id) {
     border-radius: 4px;
     background: var(--secondary-bg, #1f2937);
     color: var(--text-primary, #f3f4f6);
+}
+.device-preview {
+    margin-bottom: 1rem;
+}
+.device-preview h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.9em;
+    color: var(--text-secondary, #9ca3af);
+}
+.preview-frame {
+    background: #111;
+    border-radius: 4px;
+    padding: 0.5rem;
+    display: flex;
+    justify-content: center;
+    overflow: auto;
+}
+.preview-img {
+    max-width: 100%;
+    height: auto;
+    image-rendering: pixelated;
 }
 </style>
 {% endblock %}
