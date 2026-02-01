@@ -26,14 +26,7 @@
 #include <ltp_protocol.h>
 #include "led_driver.h"
 #include "led_driver_lpd8806.h"
-
-// Build version info (set by Makefile, fallback for IDE builds)
-#ifndef GIT_COMMIT
-#define GIT_COMMIT "unknown"
-#endif
-#ifndef BUILD_DATE
-#define BUILD_DATE "00000000"
-#endif
+#include "build_info.h"
 
 // ============================================================================
 // CONFIGURATION - Modify these for your setup
