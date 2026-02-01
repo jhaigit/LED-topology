@@ -73,25 +73,25 @@ setup:
 # Compile for Teensy 3.2 (default)
 build:
 	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) \
-		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+		--build-property "build.extra_flags=$(BUILD_FLAGS)" .
 	@echo ""
 	@echo "Build complete. Hex file: $(BUILD_DIR)/$(SKETCH).hex ($(GIT_COMMIT))"
 
 build-teensy32:
 	$(CLI) compile --fqbn teensy:avr:teensy31 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 \
-		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+		--build-property "build.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy32/$(SKETCH).hex ltp_apa102_strip_teensy32.hex
 	@echo "Teensy 3.2 build complete: ltp_apa102_strip_teensy32.hex ($(GIT_COMMIT))"
 
 build-teensylc:
 	$(CLI) compile --fqbn teensy:avr:teensyLC --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensylc \
-		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+		--build-property "build.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensylc/$(SKETCH).hex ltp_apa102_strip_teensylc.hex
 	@echo "Teensy LC build complete: ltp_apa102_strip_teensylc.hex ($(GIT_COMMIT))"
 
 build-teensy40:
 	$(CLI) compile --fqbn teensy:avr:teensy40 --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 \
-		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+		--build-property "build.extra_flags=$(BUILD_FLAGS)" .
 	@cp $(BUILD_DIR)/teensy40/$(SKETCH).hex ltp_apa102_strip_teensy40.hex
 	@echo "Teensy 4.0 build complete: ltp_apa102_strip_teensy40.hex ($(GIT_COMMIT))"
 
@@ -167,7 +167,7 @@ size: build
 # Compile with verbose output
 build-verbose:
 	$(CLI) compile --fqbn $(BOARD) --libraries $(LIBRARIES) --build-path $(BUILD_DIR) --verbose \
-		--build-property "compiler.cpp.extra_flags=$(BUILD_FLAGS)" .
+		--build-property "build.extra_flags=$(BUILD_FLAGS)" .
 
 # ============================================================================
 # Help

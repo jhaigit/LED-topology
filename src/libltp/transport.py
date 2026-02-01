@@ -179,9 +179,11 @@ class ControlServer:
 
         await conn.handle_messages()
 
-        self._connections.remove(conn)
-        if self._on_disconnect:
-            self._on_disconnect(conn)
+        # Connection may already be removed by stop()
+        if conn in self._connections:
+            self._connections.remove(conn)
+            if self._on_disconnect:
+                self._on_disconnect(conn)
 
     async def start(self) -> None:
         """Start the server."""
@@ -192,15 +194,16 @@ class ControlServer:
 
     async def stop(self) -> None:
         """Stop the server."""
+        # Close all connections FIRST to unblock handlers waiting on readline()
+        for conn in self._connections:
+            await conn.close()
+        self._connections.clear()
+
+        # Now stop accepting new connections and wait for cleanup
         if self._server:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
-
-        # Close all connections
-        for conn in self._connections:
-            await conn.close()
-        self._connections.clear()
 
         logger.info("Control server stopped")
 
