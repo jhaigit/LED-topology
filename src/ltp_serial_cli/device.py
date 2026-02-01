@@ -503,21 +503,39 @@ class LtpDevice:
         self._send(LtpProtocol.build_set_control_bool(CTRL_ID_FRAME_ACK, enabled))
         self._wait_for_ack(CMD_SET_CONTROL)
 
-    def set_control(self, control_id: int, value: int):
-        """Set a control value (generic UINT8)."""
-        self._send(LtpProtocol.build_set_control_uint8(control_id, value))
+    def set_control(self, control_id: int, value: int, control_type: int = CTRL_UINT8):
+        """Set a control value.
+
+        Args:
+            control_id: Control identifier
+            value: Value to set
+            control_type: Control type (CTRL_UINT8, CTRL_UINT16, CTRL_BOOL, etc.)
+        """
+        if control_type == CTRL_UINT16 or control_type == CTRL_INT16:
+            self._send(LtpProtocol.build_set_control_uint16(control_id, value))
+        elif control_type == CTRL_BOOL:
+            self._send(LtpProtocol.build_set_control_bool(control_id, bool(value)))
+        else:
+            self._send(LtpProtocol.build_set_control_uint8(control_id, value))
         self._wait_for_ack(CMD_SET_CONTROL)
 
-    def get_control(self, control_id: int) -> int:
+    def get_control(self, control_id: int, control_type: int = CTRL_UINT8) -> int:
         """
         Get a control value.
+
+        Args:
+            control_id: Control identifier
+            control_type: Control type (CTRL_UINT8, CTRL_UINT16, etc.)
 
         Returns:
             Control value (interpretation depends on control type)
         """
         self._send(LtpProtocol.build_get_control(control_id))
         packet = self._wait_for_response(CMD_CONTROL_RESPONSE)
-        if len(packet.payload) >= 2:
+        if control_type == CTRL_UINT16 or control_type == CTRL_INT16:
+            if len(packet.payload) >= 3:
+                return packet.payload[1] | (packet.payload[2] << 8)
+        elif len(packet.payload) >= 2:
             return packet.payload[1]
         return 0
 

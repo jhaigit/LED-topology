@@ -449,7 +449,10 @@ class V2Renderer:
             return None
 
         try:
-            return self._device.get_control(control_id)
+            # Look up control type to read the correct number of bytes
+            ctrl = self._controls.get(control_id)
+            ctrl_type_code = self._get_control_type_code(ctrl.control_type if ctrl else "uint8")
+            return self._device.get_control(control_id, ctrl_type_code)
         except LtpError as e:
             ctrl = self._controls.get(control_id)
             ctrl_name = ctrl.name if ctrl else f"id={control_id}"
@@ -462,13 +465,29 @@ class V2Renderer:
             return False
 
         try:
-            self._device.set_control(control_id, value)
+            # Look up control type to send the correct number of bytes
+            ctrl = self._controls.get(control_id)
+            ctrl_type_code = self._get_control_type_code(ctrl.control_type if ctrl else "uint8")
+            self._device.set_control(control_id, value, ctrl_type_code)
             return True
         except LtpError as e:
             ctrl = self._controls.get(control_id)
             ctrl_name = ctrl.name if ctrl else f"id={control_id}"
             logger.warning(f"Failed to set control {ctrl_name} to {value!r}: {e}")
             return False
+
+    def _get_control_type_code(self, type_name: str) -> int:
+        """Convert control type name to protocol type code."""
+        type_map = {
+            "bool": CTRL_BOOL,
+            "uint8": CTRL_UINT8,
+            "uint16": CTRL_UINT16,
+            "int8": CTRL_INT8,
+            "int16": CTRL_INT16,
+            "action": CTRL_ACTION,
+            "enum": CTRL_UINT8,  # Enums are stored as uint8
+        }
+        return type_map.get(type_name, CTRL_UINT8)
 
     def set_brightness(self, value: int) -> bool:
         """Set device brightness (0-255)."""
