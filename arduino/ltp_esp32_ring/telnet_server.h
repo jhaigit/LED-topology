@@ -114,6 +114,10 @@ public:
                         linePos = 0;
                         return true;  // Command ready
                     }
+                } else if (c == 0x03) {
+                    // Ctrl+C: cancel current line, print new prompt
+                    linePos = 0;
+                    client.print("^C\r\n");
                 } else if (c == '\b' || c == 127) {
                     if (linePos > 0) {
                         linePos--;
