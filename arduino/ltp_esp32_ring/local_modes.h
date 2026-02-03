@@ -756,6 +756,20 @@ private:
         const float rippleSpeed = 2.5f;
         const uint8_t rippleWidth = 8;
 
+        // Spawn continuous ripples while sensors are held
+        if (touchHandler) {
+            for (uint8_t t = 0; t < TOUCH_NUM_SENSORS; t++) {
+                if (touchHandler->isTouched(t)) {
+                    // ~6% chance per frame to spawn a ripple while held
+                    if (random8() < 15) {
+                        uint16_t globePos = getGlobeRingPosition(t);
+                        spawnRipple(globePos, nextRippleHue[t], 180);
+                        nextRippleHue[t] += random8(20, 50);
+                    }
+                }
+            }
+        }
+
         // Update and draw ripples
         for (uint8_t r = 0; r < MAX_RIPPLES; r++) {
             if (!ripples[r].active) continue;
