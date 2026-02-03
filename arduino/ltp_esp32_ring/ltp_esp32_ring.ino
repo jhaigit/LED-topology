@@ -91,7 +91,7 @@ void loadConfig() {
     config.brightness = preferences.getUChar("brightness", 255);
     config.gamma = preferences.getUChar("gamma", 22);
     config.idleTimeout = preferences.getUShort("idleTimeout", DEFAULT_IDLE_TIMEOUT);
-    config.localMode = preferences.getUChar("localMode", LOCAL_MODE_RAINBOW);
+    config.localMode = preferences.getUChar("localMode", LOCAL_MODE_BLANK);
     config.ws2812Offset = preferences.getUChar("ws2812Offset", WS2812_DEFAULT_OFFSET);
     config.inputEventsEnabled = preferences.getBool("inputEvents", true);
     config.touchSensitivity = preferences.getFloat("touchSens", TOUCH_THRESHOLD_RATIO);
@@ -140,7 +140,7 @@ void resetConfig() {
     config.brightness = 255;
     config.gamma = 22;
     config.idleTimeout = DEFAULT_IDLE_TIMEOUT;
-    config.localMode = LOCAL_MODE_RAINBOW;
+    config.localMode = LOCAL_MODE_BLANK;  // Touch-overlay only by default
     config.ws2812Offset = WS2812_DEFAULT_OFFSET;
     config.inputEventsEnabled = true;
     config.touchSensitivity = TOUCH_THRESHOLD_RATIO;
@@ -191,33 +191,63 @@ void checkIdleTimeout() {
 }
 
 // ============================================================================
-// Touch Callbacks
+// Touch Callbacks and Navigation State Machine
 // ============================================================================
 
-// Called on touch press only - handles flash and mode switching
+// Navigation state machine:
+// - Mode 0 (touch-only, default) → long hold 2 → Mode 255 (cycling)
+// - Mode 255 (cycling) → tap advances pattern, long hold 2 → Mode 11 (clock)
+// - Any pattern mode (1-10) → long hold 2 → Mode 11 (clock)
+// - Mode 11 (clock) → long hold 2 → Mode 0
+// Navigation is runtime only - does not persist to config
+
+// Called on touch press - handles ripple trigger and mode advancement in cycle
 void onTouchPress(uint8_t touchIdx) {
     dualOut.printf("Touch %d pressed\r\n", touchIdx);
 
     // Reset idle timer on any touch
     resetActivityTimer();
 
-    // In touch-reactive mode, don't switch modes or flash (touch is used for the effect)
-    if (localModes.isActive() && localModes.getCurrentMode() == LOCAL_MODE_TOUCH) {
-        return;
-    }
+    // Always trigger a ripple effect (touch overlay is always active)
+    localModes.triggerTouchRipple(touchIdx);
 
-    // Flash corresponding WS2812
+    // Flash corresponding WS2812 (brief visual feedback)
     leds.flashWS2812(touchIdx);
 
-    // Handle local mode switching
-    if (!localModes.isActive()) {
-        // Wake from idle or start: enter cycle mode
-        localModes.start(LOCAL_MODE_CYCLE);
-        config.localMode = LOCAL_MODE_CYCLE;
-    } else {
-        // Advance to next mode
+    // In cycle mode (255), single tap advances to next pattern
+    if (localModes.getCurrentMode() == LOCAL_MODE_CYCLE) {
         localModes.nextMode();
-        config.localMode = localModes.getCurrentMode();
+        // Don't save to config - runtime only
+    }
+    // In other modes, single tap just shows the ripple (no mode change)
+}
+
+// Called on long hold of 2+ sensors - handles navigation
+void onLongHold(uint8_t numSensors) {
+    if (numSensors < 2) return;
+
+    dualOut.printf("Long hold detected (%d sensors)\r\n", numSensors);
+
+    uint8_t currentMode = localModes.getCurrentMode();
+
+    // State machine navigation (runtime only, not saved to config)
+    if (currentMode == LOCAL_MODE_BLANK) {
+        // Mode 0 (touch-only) → Mode 255 (cycling patterns)
+        dualOut.println("Navigation: 0 (touch-only) -> 255 (cycle)");
+        localModes.start(LOCAL_MODE_CYCLE);
+    } else if (currentMode == LOCAL_MODE_CLOCK) {
+        // Clock → Mode 0 (touch-only)
+        dualOut.println("Navigation: 11 (clock) -> 0 (touch-only)");
+        localModes.start(LOCAL_MODE_BLANK);
+    } else {
+        // Any other mode (1-10, 255) → Clock
+        dualOut.printf("Navigation: %d -> 11 (clock)\r\n", currentMode);
+        localModes.start(LOCAL_MODE_CLOCK);
+    }
+
+    // Flash all WS2812s to indicate navigation
+    for (uint8_t i = 0; i < WS2812_NUM_LEDS; i++) {
+        leds.flashWS2812(i);
     }
 }
 
@@ -475,7 +505,9 @@ void UsbTerminal::cmdBrightness(const char* args) {
 void UsbTerminal::cmdMode(const char* args) {
     if (strlen(args) == 0) {
         dualOut.printf("Current mode: %d\r\n", config->localMode);
-        dualOut.println("Modes: 0=blank, 1=cylon, 2=rainbow, 3=fire, 4=sparkle, 5=chase, 255=cycle");
+        dualOut.println("Modes: 0=touch-only, 1=cylon, 2=rainbow, 3=fire, 4=sparkle, 5=chase,");
+        dualOut.println("       6=mitosis, 7=touch, 8-10=sinwave, 11=clock, 255=cycle");
+        dualOut.println("Touch: long-hold 2 globes to navigate (0->255->11->0)");
         return;
     }
 
@@ -746,15 +778,14 @@ void setup() {
     touch.setSensitivity(config.touchSensitivity);
     touch.setOnTouch(onTouchPress);
     touch.setOnTouchState(onTouchStateChange);
+    touch.setOnLongHold(onLongHold);
 
     // Give local modes access to touch handler for touch-reactive mode
     localModes.setTouchHandler(&touch);
     localModes.setCycleTime(config.cycleTime);
 
-    // Start local mode if configured
-    if (config.localMode != LOCAL_MODE_BLANK) {
-        localModes.start(config.localMode);
-    }
+    // Start local mode (always start, even mode 0 for touch overlay)
+    localModes.start(config.localMode);
 
     // Initialize WiFi first (required before UDP)
     if (strlen(config.wifiSsid) > 0) {

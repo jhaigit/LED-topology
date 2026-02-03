@@ -28,7 +28,10 @@ public:
         , lastUpdate(0)
         , modeStartTime(0)
         , cycleTimeMs(LOCAL_MODE_CYCLE_TIME)
-    {}
+        , touchOverlayEnabled(true)
+    {
+        initTouch();  // Always init touch ripple data
+    }
 
     // Set touch handler for touch-reactive modes
     void setTouchHandler(TouchHandler* handler) {
@@ -40,6 +43,23 @@ public:
         cycleTimeMs = (uint32_t)seconds * 1000;
     }
 
+    // Enable/disable touch overlay (ripple effects on top of all modes)
+    void setTouchOverlayEnabled(bool enabled) {
+        touchOverlayEnabled = enabled;
+    }
+
+    bool isTouchOverlayEnabled() const {
+        return touchOverlayEnabled;
+    }
+
+    // Trigger a ripple at a touch sensor position (called from touch callback)
+    void triggerTouchRipple(uint8_t touchIdx) {
+        if (touchIdx >= TOUCH_NUM_SENSORS) return;
+        uint16_t globePos = getGlobeRingPosition(touchIdx);
+        spawnRipple(globePos, nextRippleHue[touchIdx], 200);
+        nextRippleHue[touchIdx] += random8(30, 60);
+    }
+
     // Start or switch to a local mode
     void start(uint8_t mode) {
         currentMode = mode;
@@ -48,10 +68,10 @@ public:
         lastUpdate = millis();
         modeStartTime = millis();
 
+        // Mode 0 (blank) now means "touch overlay only" - still active for overlay
         if (mode == LOCAL_MODE_BLANK) {
-            active = false;
-            leds.clear();
-            leds.show();
+            active = true;  // Keep active for touch overlay
+            displayMode = LOCAL_MODE_BLANK;
         } else {
             active = true;
             if (mode == LOCAL_MODE_CYCLE) {
@@ -63,11 +83,6 @@ public:
             // Initialize mitosis mode
             if (displayMode == LOCAL_MODE_MITOSIS) {
                 initMitosis();
-            }
-
-            // Initialize touch mode
-            if (displayMode == LOCAL_MODE_TOUCH) {
-                initTouch();
             }
 
             // Initialize clock mode
@@ -117,20 +132,27 @@ public:
         uint32_t now = millis();
 
         // Get update interval for current mode
+        // Touch overlay needs fast updates, so use minimum of mode interval and 20ms
         uint32_t interval;
         switch (displayMode) {
+            case LOCAL_MODE_BLANK:      interval = 20; break;  // Touch overlay only
             case LOCAL_MODE_CYLON:      interval = 15; break;
             case LOCAL_MODE_RAINBOW:    interval = 20; break;
             case LOCAL_MODE_FIRE:       interval = 30; break;
             case LOCAL_MODE_SPARKLE:    interval = 30; break;
             case LOCAL_MODE_CHASE:      interval = 40; break;
             case LOCAL_MODE_MITOSIS:    interval = 25; break;
-            case LOCAL_MODE_TOUCH:      interval = 20; break;
+            case LOCAL_MODE_TOUCH:      interval = 20; break;  // Legacy dedicated touch mode
             case LOCAL_MODE_SINWAVE:    interval = 20; break;
             case LOCAL_MODE_SINWAVE_RGB:  interval = 20; break;
             case LOCAL_MODE_SINWAVE_RGB2: interval = 20; break;
-            case LOCAL_MODE_CLOCK:        interval = 100; break;  // 10 FPS is plenty
+            case LOCAL_MODE_CLOCK:        interval = 50; break;  // 20 FPS for smooth overlay
             default: interval = 50; break;
+        }
+
+        // If touch overlay is enabled, use faster interval for smooth ripples
+        if (touchOverlayEnabled && interval > 20) {
+            interval = 20;
         }
 
         if (now - lastUpdate < interval) return;
@@ -141,7 +163,7 @@ public:
             if (now - modeStartTime >= cycleTimeMs) {
                 modeStartTime = now;
                 displayMode++;
-                // Skip touch and clock modes in cycle
+                // Skip touch and clock modes in cycle (touch is now overlay, clock is separate)
                 while (displayMode == LOCAL_MODE_TOUCH || displayMode == LOCAL_MODE_CLOCK) {
                     displayMode++;
                 }
@@ -162,19 +184,33 @@ public:
             }
         }
 
-        // Run the current animation
+        // Run the current animation (or just clear for blank/touch-overlay-only mode)
         switch (displayMode) {
+            case LOCAL_MODE_BLANK:
+                // Touch overlay only - fade to black slowly
+                {
+                    CRGB* ring = leds.getRingLeds();
+                    for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
+                        ring[i].fadeToBlackBy(25);
+                    }
+                }
+                break;
             case LOCAL_MODE_CYLON:      updateCylon(); break;
             case LOCAL_MODE_RAINBOW:    updateRainbow(); break;
             case LOCAL_MODE_FIRE:       updateFire(); break;
             case LOCAL_MODE_SPARKLE:    updateSparkle(); break;
             case LOCAL_MODE_CHASE:      updateChase(); break;
             case LOCAL_MODE_MITOSIS:    updateMitosis(); break;
-            case LOCAL_MODE_TOUCH:      updateTouch(); break;
+            case LOCAL_MODE_TOUCH:      updateTouch(); break;  // Legacy dedicated mode
             case LOCAL_MODE_SINWAVE:    updateSinWave(); break;
             case LOCAL_MODE_SINWAVE_RGB:  updateSinWaveRGB(false); break;
             case LOCAL_MODE_SINWAVE_RGB2: updateSinWaveRGB(true); break;
             case LOCAL_MODE_CLOCK:        updateClock(); break;
+        }
+
+        // Draw touch overlay on top of any animation (except dedicated touch mode which handles its own)
+        if (touchOverlayEnabled && displayMode != LOCAL_MODE_TOUCH) {
+            updateTouchOverlay();
         }
 
         leds.show();
@@ -194,6 +230,7 @@ private:
     uint32_t lastUpdate;
     uint32_t modeStartTime;
     uint32_t cycleTimeMs;   // Milliseconds per mode when cycling
+    bool touchOverlayEnabled;  // Draw touch ripples on top of all animations
 
     // Fire effect heat map
     uint8_t heat[RING_NUM_PIXELS];
@@ -710,6 +747,58 @@ private:
         ripples[0].radius = 0;
         ripples[0].hue = hue;
         ripples[0].brightness = brightness;
+    }
+
+    // Update and draw touch overlay (ripples only, blended on top of existing animation)
+    // Called after main animation to overlay ripple effects
+    void updateTouchOverlay() {
+        CRGB* ring = leds.getRingLeds();
+        const float rippleSpeed = 2.5f;
+        const uint8_t rippleWidth = 8;
+
+        // Update and draw ripples
+        for (uint8_t r = 0; r < MAX_RIPPLES; r++) {
+            if (!ripples[r].active) continue;
+
+            // Expand ripple
+            ripples[r].radius += rippleSpeed;
+
+            // Fade brightness as it expands
+            if (ripples[r].brightness > 3) {
+                ripples[r].brightness -= 3;
+            } else {
+                ripples[r].active = false;
+                continue;
+            }
+
+            // Deactivate if too large
+            if (ripples[r].radius > RING_NUM_PIXELS / 3) {
+                ripples[r].active = false;
+                continue;
+            }
+
+            // Draw ripple ring (expanding outward in both directions)
+            int16_t innerRadius = (int16_t)(ripples[r].radius - rippleWidth / 2);
+            int16_t outerRadius = (int16_t)(ripples[r].radius + rippleWidth / 2);
+
+            for (int16_t dist = max((int16_t)0, innerRadius); dist <= outerRadius; dist++) {
+                // Distance from ideal radius determines brightness
+                float radiusDist = abs(dist - ripples[r].radius);
+                uint8_t brightness = ripples[r].brightness * (1.0f - radiusDist / (rippleWidth / 2.0f));
+                if (brightness < 5) continue;
+
+                CRGB rippleColor = CHSV(ripples[r].hue, 255, brightness);
+
+                // Draw at +dist and -dist from center
+                uint16_t posPlus = (ripples[r].centerPos + dist) % RING_NUM_PIXELS;
+                uint16_t posMinus = (ripples[r].centerPos - dist + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+
+                ring[posPlus] = blend(ring[posPlus], rippleColor, 180);
+                if (dist > 0) {  // Don't double-draw center
+                    ring[posMinus] = blend(ring[posMinus], rippleColor, 180);
+                }
+            }
+        }
     }
 
     // Initialize sin wave modes

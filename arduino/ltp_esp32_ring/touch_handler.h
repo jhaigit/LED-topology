@@ -3,6 +3,7 @@
  *
  * Manages 4 capacitive touch sensors with auto-calibration,
  * debouncing, and callback support for touch events.
+ * Supports long-press detection and multi-touch gestures.
  */
 
 #ifndef TOUCH_HANDLER_H
@@ -11,17 +12,24 @@
 #include <Arduino.h>
 #include "config.h"
 
-// Touch callback function type (idx, pressed)
+// Touch callback function types
 typedef void (*TouchCallback)(uint8_t touchIdx);
 typedef void (*TouchStateCallback)(uint8_t touchIdx, bool pressed);
+typedef void (*LongHoldCallback)(uint8_t numSensors);  // Called when long hold detected
+
+// Long hold configuration
+#define TOUCH_LONG_HOLD_MS      1500    // Time to trigger long hold (1.5 seconds)
+#define TOUCH_MULTI_HOLD_WINDOW 200     // Max time diff between sensors to count as simultaneous
 
 class TouchHandler {
 public:
     TouchHandler()
         : onTouchCallback(nullptr)
         , onTouchStateCallback(nullptr)
+        , onLongHoldCallback(nullptr)
         , calibrated(false)
         , sensitivity(TOUCH_THRESHOLD_RATIO)
+        , longHoldTriggered(false)
     {
         touchPins[0] = TOUCH_PIN_0;
         touchPins[1] = TOUCH_PIN_1;
@@ -33,6 +41,7 @@ public:
             thresholds[i] = 0;
             lastState[i] = false;
             lastTouchTime[i] = 0;
+            pressStartTime[i] = 0;
         }
     }
 
@@ -82,6 +91,14 @@ public:
                     lastState[i] = touched;
                     lastTouchTime[i] = now;
 
+                    if (touched) {
+                        // Press started - record time
+                        pressStartTime[i] = now;
+                    } else {
+                        // Release - clear press time
+                        pressStartTime[i] = 0;
+                    }
+
                     // Trigger state callback for both press and release
                     if (onTouchStateCallback) {
                         onTouchStateCallback(i, touched);
@@ -94,6 +111,45 @@ public:
                 }
             }
         }
+
+        // Check for long hold on multiple sensors
+        checkLongHold(now);
+    }
+
+    // Check for long hold gesture (multiple sensors held simultaneously)
+    void checkLongHold(uint32_t now) {
+        if (longHoldTriggered) {
+            // Already triggered, wait for release of all sensors
+            if (getHeldCount() == 0) {
+                longHoldTriggered = false;
+            }
+            return;
+        }
+
+        // Count how many sensors have been held long enough
+        uint8_t longHeldCount = 0;
+        uint32_t earliestPress = UINT32_MAX;
+        uint32_t latestPress = 0;
+
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            if (lastState[i] && pressStartTime[i] > 0) {
+                uint32_t holdTime = now - pressStartTime[i];
+                if (holdTime >= TOUCH_LONG_HOLD_MS) {
+                    longHeldCount++;
+                    if (pressStartTime[i] < earliestPress) earliestPress = pressStartTime[i];
+                    if (pressStartTime[i] > latestPress) latestPress = pressStartTime[i];
+                }
+            }
+        }
+
+        // Trigger callback if 2+ sensors have been held long enough
+        // and they were pressed within the multi-hold window of each other
+        if (longHeldCount >= 2 && onLongHoldCallback) {
+            if (latestPress - earliestPress <= TOUCH_MULTI_HOLD_WINDOW) {
+                longHoldTriggered = true;
+                onLongHoldCallback(longHeldCount);
+            }
+        }
     }
 
     // Set touch callback (press only, for local actions)
@@ -104,6 +160,33 @@ public:
     // Set touch state callback (press and release, for input events)
     void setOnTouchState(TouchStateCallback callback) {
         onTouchStateCallback = callback;
+    }
+
+    // Set long hold callback (for gesture navigation)
+    void setOnLongHold(LongHoldCallback callback) {
+        onLongHoldCallback = callback;
+    }
+
+    // Get number of currently held sensors
+    uint8_t getHeldCount() const {
+        uint8_t count = 0;
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            if (lastState[i]) count++;
+        }
+        return count;
+    }
+
+    // Check if long hold was just triggered (useful for suppressing other actions)
+    bool wasLongHoldTriggered() const {
+        return longHoldTriggered;
+    }
+
+    // Get how long a sensor has been held (0 if not held)
+    uint32_t getHoldTime(uint8_t idx) const {
+        if (idx >= TOUCH_NUM_SENSORS || !lastState[idx] || pressStartTime[idx] == 0) {
+            return 0;
+        }
+        return millis() - pressStartTime[idx];
     }
 
     // Set touch sensitivity (0.0-1.0, higher = more sensitive)
@@ -156,10 +239,13 @@ private:
     uint16_t thresholds[TOUCH_NUM_SENSORS];
     bool lastState[TOUCH_NUM_SENSORS];
     uint32_t lastTouchTime[TOUCH_NUM_SENSORS];
+    uint32_t pressStartTime[TOUCH_NUM_SENSORS];  // When each sensor was pressed (0 if not pressed)
     TouchCallback onTouchCallback;
     TouchStateCallback onTouchStateCallback;
+    LongHoldCallback onLongHoldCallback;
     bool calibrated;
     float sensitivity;
+    bool longHoldTriggered;  // Prevents repeated triggers until all released
 };
 
 #endif // TOUCH_HANDLER_H
