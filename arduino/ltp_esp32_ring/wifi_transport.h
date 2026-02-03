@@ -90,8 +90,9 @@ public:
         strncpy(this->hostname, hostname, sizeof(this->hostname) - 1);
         this->hostname[sizeof(this->hostname) - 1] = '\0';
 
-        WiFi.mode(WIFI_STA);
+        // Hostname must be set before WiFi.mode() for DHCP to use it
         WiFi.setHostname(hostname);
+        WiFi.mode(WIFI_STA);
         WiFi.begin(ssid, password);
 
         state = WifiState::CONNECTING;
