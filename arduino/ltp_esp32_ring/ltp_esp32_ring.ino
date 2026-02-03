@@ -339,6 +339,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdSave();
     } else if (strcmp(cmd, "reset") == 0) {
         cmdReset();
+    } else if (strcmp(cmd, "reboot") == 0) {
+        cmdReboot();
     } else if (strcmp(cmd, "touch") == 0) {
         cmdTouch();
     } else if (strcmp(cmd, "sensitivity") == 0) {
@@ -375,6 +377,7 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
     dualOut.println("  test                    - Run LED test pattern");
     dualOut.println("  save                    - Save config to NVS");
+    dualOut.println("  reboot                  - Reboot the device");
     dualOut.println("  reset                   - Factory reset");
     dualOut.println("  help                    - Show this help");
 }
@@ -529,6 +532,12 @@ void UsbTerminal::cmdSave() {
 void UsbTerminal::cmdReset() {
     dualOut.println("Resetting to factory defaults...");
     if (resetCallback) resetCallback();
+}
+
+void UsbTerminal::cmdReboot() {
+    dualOut.println("Rebooting...");
+    delay(100);  // Allow message to flush
+    ESP.restart();
 }
 
 void UsbTerminal::cmdTouch() {

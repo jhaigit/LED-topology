@@ -97,6 +97,7 @@ private:
     void cmdMode(const char* args);
     void cmdSave();
     void cmdReset();
+    void cmdReboot();
     void cmdTouch();
     void cmdSensitivity(const char* args);
     void cmdCalibrate();
