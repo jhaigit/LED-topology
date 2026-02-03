@@ -214,11 +214,8 @@ void onTouchPress(uint8_t touchIdx) {
     // Flash corresponding WS2812 (brief visual feedback)
     leds.flashWS2812(touchIdx);
 
-    // In cycle mode (255), single tap advances to next pattern
-    if (localModes.getCurrentMode() == LOCAL_MODE_CYCLE) {
-        localModes.nextMode();
-        // Don't save to config - runtime only
-    }
+    // In cycle mode (255), single tap advances to next pattern (staying in cycle)
+    localModes.advanceCyclePattern();
     // In other modes, single tap just shows the ripple (no mode change)
 }
 

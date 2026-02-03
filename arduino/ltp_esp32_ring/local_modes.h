@@ -125,6 +125,38 @@ public:
         start(next);
     }
 
+    // Advance to next pattern while staying in cycle mode
+    // Returns true if advanced, false if not in cycle mode
+    bool advanceCyclePattern() {
+        if (currentMode != LOCAL_MODE_CYCLE) return false;
+
+        // Advance display mode
+        displayMode++;
+        // Skip touch and clock modes
+        while (displayMode == LOCAL_MODE_TOUCH || displayMode == LOCAL_MODE_CLOCK) {
+            displayMode++;
+        }
+        if (displayMode >= LOCAL_MODE_COUNT) {
+            displayMode = LOCAL_MODE_CYLON;
+        }
+
+        // Reset timer so new pattern gets full cycle time
+        modeStartTime = millis();
+        position = 0;
+        leds.clear();
+
+        // Initialize modes that need it
+        if (displayMode == LOCAL_MODE_MITOSIS) {
+            initMitosis();
+        } else if (displayMode == LOCAL_MODE_SINWAVE ||
+                   displayMode == LOCAL_MODE_SINWAVE_RGB ||
+                   displayMode == LOCAL_MODE_SINWAVE_RGB2) {
+            initSinWave(displayMode == LOCAL_MODE_SINWAVE_RGB2);
+        }
+
+        return true;
+    }
+
     // Update animation (call from loop)
     void update() {
         if (!active) return;
