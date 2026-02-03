@@ -68,7 +68,7 @@
     display: flex;
     flex-direction: column;
     gap: 1rem;
-    max-width: 100%;
+    width: 100%;
 }
 
 .paint-toolbar {
@@ -114,9 +114,8 @@
     background: #000;
     border-radius: 8px;
     padding: 1rem;
-    overflow: auto;
-    display: flex;
-    justify-content: center;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 #paintCanvas {
@@ -201,13 +200,22 @@ async function init() {
         `${width}x${height} (${info.pixels} pixels) - ${info.type}`;
 
     // Calculate pixel size for display
-    const maxWidth = window.innerWidth - 100;
+    // Use most of the available viewport width
+    const maxWidth = window.innerWidth - 80;
     const maxHeight = window.innerHeight - 300;
-    pixelSize = Math.max(4, Math.min(
-        Math.floor(maxWidth / width),
-        Math.floor(maxHeight / height),
-        20
-    ));
+
+    // For 1D strips, prioritize fitting in width; for 2D, balance both
+    if (height === 1) {
+        // 1D strip: fit to width, allow reasonable height
+        pixelSize = Math.max(4, Math.min(Math.floor(maxWidth / width), 30));
+    } else {
+        // 2D matrix: balance width and height
+        pixelSize = Math.max(4, Math.min(
+            Math.floor(maxWidth / width),
+            Math.floor(maxHeight / height),
+            20
+        ));
+    }
 
     // Initialize pixel buffer
     pixels = new Array(width * height).fill(null).map(() => [0, 0, 0]);
