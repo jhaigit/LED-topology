@@ -126,6 +126,10 @@ public:
             return;
         }
 
+        // Count how many sensors are currently held
+        uint8_t heldCount = getHeldCount();
+        if (heldCount < 2) return;  // Quick exit if not enough sensors held
+
         // Count how many sensors have been held long enough
         uint8_t longHeldCount = 0;
         uint32_t earliestPress = UINT32_MAX;
@@ -142,12 +146,29 @@ public:
             }
         }
 
+        // Debug: periodically show long hold progress when 2+ sensors held
+        static uint32_t lastDebug = 0;
+        if (heldCount >= 2 && now - lastDebug >= 500) {
+            lastDebug = now;
+            dualOut.printf("LongHold: %d held, %d long enough, callback=%s\r\n",
+                          heldCount, longHeldCount, onLongHoldCallback ? "set" : "NULL");
+        }
+
         // Trigger callback if 2+ sensors have been held long enough
         // and they were pressed within the multi-hold window of each other
         if (longHeldCount >= 2 && onLongHoldCallback) {
-            if (latestPress - earliestPress <= TOUCH_MULTI_HOLD_WINDOW) {
+            uint32_t pressDiff = latestPress - earliestPress;
+            if (pressDiff <= TOUCH_MULTI_HOLD_WINDOW) {
                 longHoldTriggered = true;
                 onLongHoldCallback(longHeldCount);
+            } else {
+                // Debug: show why it didn't trigger
+                static uint32_t lastWindowDebug = 0;
+                if (now - lastWindowDebug >= 1000) {
+                    lastWindowDebug = now;
+                    dualOut.printf("LongHold: press diff %lu > window %d\r\n",
+                                  pressDiff, TOUCH_MULTI_HOLD_WINDOW);
+                }
             }
         }
     }
