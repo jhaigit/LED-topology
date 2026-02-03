@@ -19,7 +19,7 @@ typedef void (*LongHoldCallback)(uint8_t numSensors);  // Called when long hold 
 
 // Long hold configuration
 #define TOUCH_LONG_HOLD_MS      1500    // Time to trigger long hold (1.5 seconds)
-#define TOUCH_MULTI_HOLD_WINDOW 200     // Max time diff between sensors to count as simultaneous
+#define TOUCH_MULTI_HOLD_WINDOW 1000    // Max time diff between sensors (1 second)
 
 class TouchHandler {
 public:
