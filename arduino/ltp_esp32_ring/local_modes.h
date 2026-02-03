@@ -790,8 +790,10 @@ private:
 
         // Spawn continuous ripples while sensors are held
         if (touchHandler) {
+            uint8_t touchedCount = 0;
             for (uint8_t t = 0; t < TOUCH_NUM_SENSORS; t++) {
                 if (touchHandler->isTouched(t)) {
+                    touchedCount++;
                     // ~6% chance per frame to spawn a ripple while held
                     if (random8() < 15) {
                         uint16_t globePos = getGlobeRingPosition(t);
@@ -799,6 +801,12 @@ private:
                         nextRippleHue[t] += random8(20, 50);
                     }
                 }
+            }
+            // Debug: show if touch detection drops out
+            static uint8_t lastTouchedCount = 0;
+            if (touchedCount != lastTouchedCount) {
+                dualOut.printf("TouchOverlay: %d sensors touched\r\n", touchedCount);
+                lastTouchedCount = touchedCount;
             }
         }
 
