@@ -80,6 +80,11 @@ public:
                 displayMode = mode;
             }
 
+            // Initialize chase mode
+            if (displayMode == LOCAL_MODE_CHASE) {
+                chaseCount = random8(1, 6);  // 1 to 5 chasers
+            }
+
             // Initialize mitosis mode
             if (displayMode == LOCAL_MODE_MITOSIS) {
                 initMitosis();
@@ -267,6 +272,9 @@ private:
     // Fire effect heat map
     uint8_t heat[RING_NUM_PIXELS];
 
+    // Chase mode data
+    uint8_t chaseCount;  // Number of chasers (1-5), randomized on mode start
+
     // Mitosis mode data
     static const uint8_t MAX_CIRCLERS = 8;
     struct Circler {
@@ -436,11 +444,20 @@ private:
         // Clear ring
         fill_solid(ring, RING_NUM_PIXELS, CRGB::Black);
 
-        // Draw chase pattern with gradient tail
-        for (uint8_t i = 0; i < chaseLength; i++) {
-            uint16_t pos = (position + i) % RING_NUM_PIXELS;
-            uint8_t brightness = 255 - i * 30;
-            ring[pos] = CHSV(hue, 255, brightness);
+        // Draw multiple chasers evenly spaced around the ring
+        uint16_t spacing = RING_NUM_PIXELS / chaseCount;
+        for (uint8_t c = 0; c < chaseCount; c++) {
+            uint16_t chaserBase = (position + c * spacing) % RING_NUM_PIXELS;
+            uint8_t chaserHue = hue + c * (256 / chaseCount);  // Different hue per chaser
+
+            // Draw chase pattern with gradient tail
+            for (uint8_t i = 0; i < chaseLength; i++) {
+                uint16_t pos = (chaserBase + i) % RING_NUM_PIXELS;
+                uint8_t brightness = 255 - i * 30;
+                // Blend if another chaser already drew here
+                CRGB newColor = CHSV(chaserHue, 255, brightness);
+                ring[pos] = blend(ring[pos], newColor, 180);
+            }
         }
 
         position = (position + 1) % RING_NUM_PIXELS;
