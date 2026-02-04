@@ -386,11 +386,15 @@ private:
         uint16_t topP1 = (top + 1) % RING_NUM_PIXELS;
         heat[top] = (heat[topM1] + heat[topP1]) / 2;
 
-        // Blend heat at the bottom for smooth transitions
-        uint16_t botM1 = (bottom - 1 + RING_NUM_PIXELS) % RING_NUM_PIXELS;
-        uint16_t botP1 = (bottom + 1) % RING_NUM_PIXELS;
-        uint8_t avgBot = (heat[botM1] + heat[botP1]) / 2;
-        heat[bottom] = (heat[bottom] + avgBot) / 2;
+        // Blend heat across the bottom zone to smooth discontinuity between the two sides
+        // Wider blend zone (±4 pixels) with graduated mixing
+        for (int8_t offset = -4; offset <= 4; offset++) {
+            uint16_t pos = (bottom + offset + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+            uint16_t opposite = (bottom - offset + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+            // Blend more strongly near center, less at edges
+            uint8_t blendAmount = (4 - abs(offset)) * 40;  // 160 at center, 40 at edges
+            heat[pos] = blend8(heat[pos], heat[opposite], blendAmount);
+        }
 
         // Randomly ignite sparks at the bottom
         if (random8() < sparking) {
