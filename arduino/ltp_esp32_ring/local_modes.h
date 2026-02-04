@@ -369,14 +369,21 @@ private:
             heat[RING_NUM_PIXELS - 2] = (heat[RING_NUM_PIXELS - 1] + heat[RING_NUM_PIXELS - 1]) / 2;
         }
 
-        // Randomly ignite sparks at both ends
+        // Blend heat at the wrap point (pixels 0 and 201 are adjacent on the ring)
+        // This smooths the discontinuity at the bottom where both fire sources meet
+        uint8_t blend0 = (heat[0] * 2 + heat[RING_NUM_PIXELS - 1]) / 3;
+        uint8_t blend1 = (heat[RING_NUM_PIXELS - 1] * 2 + heat[0]) / 3;
+        heat[0] = blend0;
+        heat[RING_NUM_PIXELS - 1] = blend1;
+        // Also blend the adjacent pixels for smoother transition
+        heat[1] = (heat[1] * 3 + heat[RING_NUM_PIXELS - 1]) / 4;
+        heat[RING_NUM_PIXELS - 2] = (heat[RING_NUM_PIXELS - 2] * 3 + heat[0]) / 4;
+
+        // Randomly ignite sparks at the bottom (wrap point) - shared zone
         if (random8() < sparking) {
-            uint8_t y = random8(7);
-            heat[y] = qadd8(heat[y], random8(160, 255));
-        }
-        if (random8() < sparking) {
-            uint8_t y = random8(7);
-            uint16_t pos = RING_NUM_PIXELS - 1 - y;
+            // Spark in a zone that spans the wrap point
+            int8_t offset = random8(10) - 5;  // -5 to +4
+            uint16_t pos = (offset + RING_NUM_PIXELS) % RING_NUM_PIXELS;
             heat[pos] = qadd8(heat[pos], random8(160, 255));
         }
 
