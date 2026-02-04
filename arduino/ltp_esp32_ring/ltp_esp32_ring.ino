@@ -195,11 +195,9 @@ void checkIdleTimeout() {
 
     if (!isIdle && elapsed >= config.idleTimeout) {
         isIdle = true;
-        // Go dark when idle
-        localModes.stop();
-        leds.clear();
-        leds.show();
-        dualOut.println("Idle timeout: LEDs off");
+        // Go to mode 0 (touch-only) - requires long hold to get back to cycle
+        dualOut.println("Idle timeout: switching to mode 0 (touch-only)");
+        localModes.start(LOCAL_MODE_BLANK);
     }
 }
 
