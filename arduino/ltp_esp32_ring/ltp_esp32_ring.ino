@@ -769,6 +769,7 @@ void UsbTerminal::cmdTest() {
 
 void setup() {
     Serial.begin(SERIAL_BAUD);
+    Serial.setTxTimeoutMs(10);  // Prevent Serial blocking when USB disconnected
     delay(100);
 
     dualOut.println();

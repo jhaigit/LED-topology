@@ -27,7 +27,10 @@ public:
     }
 
     size_t write(uint8_t c) override {
-        Serial.write(c);
+        // Only write to Serial if TX buffer has space (prevents blocking when USB disconnected)
+        if (Serial.availableForWrite() > 0) {
+            Serial.write(c);
+        }
         if (telnetClient && telnetClient->connected()) {
             telnetClient->write(c);
         }
@@ -35,7 +38,10 @@ public:
     }
 
     size_t write(const uint8_t* buffer, size_t size) override {
-        Serial.write(buffer, size);
+        // Only write to Serial if TX buffer has space (prevents blocking when USB disconnected)
+        if (Serial.availableForWrite() > 0) {
+            Serial.write(buffer, size);
+        }
         if (telnetClient && telnetClient->connected()) {
             telnetClient->write(buffer, size);
         }
