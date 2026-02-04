@@ -339,15 +339,17 @@ private:
         hue++;  // Rotate the whole rainbow
     }
 
-    // Fire: bidirectional fire effect (flames rise from bottom/top toward middle)
+    // Fire: bidirectional fire effect (flames rise from bottom toward top)
+    // Bottom is between globes 0 and 3, top is between globes 1 and 2
     void updateFire() {
         const uint8_t cooling = 55;
         const uint8_t sparking = 120;
 
         CRGB* ring = leds.getRingLeds();
 
-        // Process ring as two halves with fire rising from each end toward the middle
-        uint16_t halfLen = RING_NUM_PIXELS / 2;  // 101 for 202 pixels
+        uint16_t bottom = getFireBottomPosition();
+        uint16_t top = (bottom + RING_NUM_PIXELS / 2) % RING_NUM_PIXELS;
+        uint16_t halfLen = RING_NUM_PIXELS / 2;
 
         // Cool down every cell
         for (uint16_t i = 0; i < RING_NUM_PIXELS; i++) {
@@ -355,35 +357,37 @@ private:
             heat[i] = (heat[i] > cooldown) ? heat[i] - cooldown : 0;
         }
 
-        // Heat rises (from each end toward middle)
-        // First half: heat rises from pixel 0 toward halfLen (0 -> 100)
-        for (int16_t i = halfLen; i >= 2; i--) {
-            heat[i] = (heat[i - 1] + heat[i - 2] + heat[i - 2]) / 3;
+        // Heat rises from bottom toward top along both sides of the ring
+        // Side 1: bottom -> top going clockwise
+        for (int16_t dist = halfLen - 1; dist >= 2; dist--) {
+            uint16_t pos = (bottom + dist) % RING_NUM_PIXELS;
+            uint16_t src1 = (bottom + dist - 1) % RING_NUM_PIXELS;
+            uint16_t src2 = (bottom + dist - 2) % RING_NUM_PIXELS;
+            heat[pos] = (heat[src1] + heat[src2] + heat[src2]) / 3;
         }
-        // Second half: heat rises from end toward middle (201 -> 101)
-        for (int16_t i = halfLen + 1; i <= RING_NUM_PIXELS - 3; i++) {
-            heat[i] = (heat[i + 1] + heat[i + 2] + heat[i + 2]) / 3;
-        }
-        // Handle edge pixels near the end
-        if (RING_NUM_PIXELS >= 2) {
-            heat[RING_NUM_PIXELS - 2] = (heat[RING_NUM_PIXELS - 1] + heat[RING_NUM_PIXELS - 1]) / 2;
+        // Side 2: bottom -> top going counter-clockwise
+        for (int16_t dist = halfLen - 1; dist >= 2; dist--) {
+            uint16_t pos = (bottom - dist + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+            uint16_t src1 = (bottom - dist + 1 + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+            uint16_t src2 = (bottom - dist + 2 + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+            heat[pos] = (heat[src1] + heat[src2] + heat[src2]) / 3;
         }
 
-        // Blend heat at the wrap point (pixels 0 and 201 are adjacent on the ring)
-        // This smooths the discontinuity at the bottom where both fire sources meet
-        uint8_t blend0 = (heat[0] * 2 + heat[RING_NUM_PIXELS - 1]) / 3;
-        uint8_t blend1 = (heat[RING_NUM_PIXELS - 1] * 2 + heat[0]) / 3;
-        heat[0] = blend0;
-        heat[RING_NUM_PIXELS - 1] = blend1;
-        // Also blend the adjacent pixels for smoother transition
-        heat[1] = (heat[1] * 3 + heat[RING_NUM_PIXELS - 1]) / 4;
-        heat[RING_NUM_PIXELS - 2] = (heat[RING_NUM_PIXELS - 2] * 3 + heat[0]) / 4;
+        // Blend heat at the top where both sides meet
+        uint16_t topM1 = (top - 1 + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+        uint16_t topP1 = (top + 1) % RING_NUM_PIXELS;
+        heat[top] = (heat[topM1] + heat[topP1]) / 2;
 
-        // Randomly ignite sparks at the bottom (wrap point) - shared zone
+        // Blend heat at the bottom for smooth transitions
+        uint16_t botM1 = (bottom - 1 + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+        uint16_t botP1 = (bottom + 1) % RING_NUM_PIXELS;
+        uint8_t avgBot = (heat[botM1] + heat[botP1]) / 2;
+        heat[bottom] = (heat[bottom] + avgBot) / 2;
+
+        // Randomly ignite sparks at the bottom
         if (random8() < sparking) {
-            // Spark in a zone that spans the wrap point
-            int8_t offset = random8(10) - 5;  // -5 to +4
-            uint16_t pos = (offset + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+            int8_t sparkOffset = random8(10) - 5;  // -5 to +4 pixels from bottom
+            uint16_t pos = (bottom + sparkOffset + RING_NUM_PIXELS) % RING_NUM_PIXELS;
             heat[pos] = qadd8(heat[pos], random8(160, 255));
         }
 
@@ -661,6 +665,18 @@ private:
         uint8_t offset = leds.getWS2812Offset();
         uint16_t spacing = (globeIdx * RING_NUM_PIXELS + WS2812_NUM_LEDS / 2) / WS2812_NUM_LEDS;
         return (offset + spacing) % RING_NUM_PIXELS;
+    }
+
+    // Get the "bottom" of the ring - midpoint between globe 0 and globe 3
+    // This is where fire sparks should originate
+    uint16_t getFireBottomPosition() {
+        uint16_t globe0 = getGlobeRingPosition(0);
+        uint16_t globe3 = getGlobeRingPosition(3);
+        // Midpoint going from globe 3 to globe 0 (the short way, ~50 pixels)
+        // Globe 3 is about 25 pixels before globe 0 (wrapping around)
+        // So midpoint is about 12-13 pixels before globe 0
+        uint16_t gap = (globe0 - globe3 + RING_NUM_PIXELS) % RING_NUM_PIXELS;
+        return (globe3 + gap / 2) % RING_NUM_PIXELS;
     }
 
     // Touch-reactive mode: ripples emanate from globe positions based on touch
