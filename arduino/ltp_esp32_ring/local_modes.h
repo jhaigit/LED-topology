@@ -29,6 +29,7 @@ public:
         , modeStartTime(0)
         , cycleTimeMs(LOCAL_MODE_CYCLE_TIME)
         , touchOverlayEnabled(true)
+        , chaseCount(1)
     {
         initTouch();  // Always init touch ripple data
     }
@@ -151,7 +152,9 @@ public:
         leds.clear();
 
         // Initialize modes that need it
-        if (displayMode == LOCAL_MODE_MITOSIS) {
+        if (displayMode == LOCAL_MODE_CHASE) {
+            chaseCount = random8(1, 6);  // 1 to 5 chasers
+        } else if (displayMode == LOCAL_MODE_MITOSIS) {
             initMitosis();
         } else if (displayMode == LOCAL_MODE_SINWAVE ||
                    displayMode == LOCAL_MODE_SINWAVE_RGB ||
@@ -211,7 +214,9 @@ public:
                 leds.clear();
 
                 // Initialize modes that need it
-                if (displayMode == LOCAL_MODE_MITOSIS) {
+                if (displayMode == LOCAL_MODE_CHASE) {
+                    chaseCount = random8(1, 6);  // 1 to 5 chasers
+                } else if (displayMode == LOCAL_MODE_MITOSIS) {
                     initMitosis();
                 } else if (displayMode == LOCAL_MODE_SINWAVE ||
                            displayMode == LOCAL_MODE_SINWAVE_RGB ||
