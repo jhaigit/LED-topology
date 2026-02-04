@@ -16,6 +16,7 @@
 
 #include <Preferences.h>
 #include <ArduinoJson.h>
+#include "esp_task_wdt.h"
 #include "config.h"
 #include "telnet_server.h"
 #include "ring_driver.h"
@@ -941,4 +942,8 @@ void loop() {
     if (telnet.update()) {
         terminal.processCommand(telnet.getLine());
     }
+
+    // Feed watchdog and yield to prevent reset when USB disconnected
+    esp_task_wdt_reset();
+    yield();
 }
