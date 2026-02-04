@@ -55,6 +55,9 @@ TelnetServer telnet;
 // Device ID (generated from MAC)
 char deviceId[48];
 
+// Last reset reason (captured at boot)
+esp_reset_reason_t lastResetReason;
+
 // Status LED
 bool statusLedState = false;
 uint32_t lastStatusBlink = 0;
@@ -396,6 +399,8 @@ void UsbTerminal::cmdStatus() {
     dualOut.println("=== Device Status ===");
     dualOut.printf("Name: %s\r\n", config->deviceName);
     dualOut.printf("Device ID: %s\r\n", deviceId);
+    dualOut.printf("Last Reset: %s\r\n", getResetReasonStr(lastResetReason));
+    dualOut.printf("Uptime: %lu sec\r\n", millis() / 1000);
     dualOut.printf("WiFi SSID: %s\r\n", config->wifiSsid);
 
     if (transport) {
@@ -769,22 +774,20 @@ void UsbTerminal::cmdTest() {
 // Arduino Setup & Loop
 // ============================================================================
 
-// Print the reason for the last reset
-void printResetReason() {
-    esp_reset_reason_t reason = esp_reset_reason();
-    Serial.print("Reset reason: ");
+// Get reset reason as string
+const char* getResetReasonStr(esp_reset_reason_t reason) {
     switch (reason) {
-        case ESP_RST_POWERON:   Serial.println("Power-on"); break;
-        case ESP_RST_EXT:       Serial.println("External reset"); break;
-        case ESP_RST_SW:        Serial.println("Software reset"); break;
-        case ESP_RST_PANIC:     Serial.println("Exception/panic"); break;
-        case ESP_RST_INT_WDT:   Serial.println("Interrupt watchdog"); break;
-        case ESP_RST_TASK_WDT:  Serial.println("Task watchdog"); break;
-        case ESP_RST_WDT:       Serial.println("Other watchdog"); break;
-        case ESP_RST_DEEPSLEEP: Serial.println("Deep sleep wake"); break;
-        case ESP_RST_BROWNOUT:  Serial.println("Brownout"); break;
-        case ESP_RST_SDIO:      Serial.println("SDIO"); break;
-        default:                Serial.printf("Unknown (%d)\n", reason); break;
+        case ESP_RST_POWERON:   return "Power-on";
+        case ESP_RST_EXT:       return "External reset";
+        case ESP_RST_SW:        return "Software reset";
+        case ESP_RST_PANIC:     return "Exception/panic";
+        case ESP_RST_INT_WDT:   return "Interrupt watchdog";
+        case ESP_RST_TASK_WDT:  return "Task watchdog";
+        case ESP_RST_WDT:       return "Other watchdog";
+        case ESP_RST_DEEPSLEEP: return "Deep sleep wake";
+        case ESP_RST_BROWNOUT:  return "Brownout";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "Unknown";
     }
 }
 
@@ -792,7 +795,9 @@ void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(100);
 
-    printResetReason();
+    // Capture and print reset reason
+    lastResetReason = esp_reset_reason();
+    Serial.printf("Reset reason: %s\n", getResetReasonStr(lastResetReason));
 
     dualOut.println();
     dualOut.println("LTP ESP32 Ring Controller (Sink Interface) starting...");
