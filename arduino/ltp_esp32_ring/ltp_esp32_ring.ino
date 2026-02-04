@@ -17,6 +17,7 @@
 #include <Preferences.h>
 #include <ArduinoJson.h>
 #include "esp_task_wdt.h"
+#include "esp_system.h"
 #include "config.h"
 #include "telnet_server.h"
 #include "ring_driver.h"
@@ -768,9 +769,30 @@ void UsbTerminal::cmdTest() {
 // Arduino Setup & Loop
 // ============================================================================
 
+// Print the reason for the last reset
+void printResetReason() {
+    esp_reset_reason_t reason = esp_reset_reason();
+    Serial.print("Reset reason: ");
+    switch (reason) {
+        case ESP_RST_POWERON:   Serial.println("Power-on"); break;
+        case ESP_RST_EXT:       Serial.println("External reset"); break;
+        case ESP_RST_SW:        Serial.println("Software reset"); break;
+        case ESP_RST_PANIC:     Serial.println("Exception/panic"); break;
+        case ESP_RST_INT_WDT:   Serial.println("Interrupt watchdog"); break;
+        case ESP_RST_TASK_WDT:  Serial.println("Task watchdog"); break;
+        case ESP_RST_WDT:       Serial.println("Other watchdog"); break;
+        case ESP_RST_DEEPSLEEP: Serial.println("Deep sleep wake"); break;
+        case ESP_RST_BROWNOUT:  Serial.println("Brownout"); break;
+        case ESP_RST_SDIO:      Serial.println("SDIO"); break;
+        default:                Serial.printf("Unknown (%d)\n", reason); break;
+    }
+}
+
 void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(100);
+
+    printResetReason();
 
     dualOut.println();
     dualOut.println("LTP ESP32 Ring Controller (Sink Interface) starting...");
