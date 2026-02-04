@@ -172,7 +172,10 @@ void resetActivityTimer() {
     lastActivityTime = millis();
     if (isIdle) {
         isIdle = false;
-        dualOut.println("Activity: waking from idle");
+        // Restart local modes with the mode it was in before idle
+        uint8_t prevMode = localModes.getCurrentMode();
+        dualOut.printf("Activity: waking from idle, resuming mode %d\r\n", prevMode);
+        localModes.start(prevMode);
     }
 }
 
