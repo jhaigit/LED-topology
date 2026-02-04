@@ -180,6 +180,16 @@ void checkIdleTimeout() {
     if (config.idleTimeout == 0) return;
 
     uint32_t elapsed = (millis() - lastActivityTime) / 1000;
+
+    // Debug: periodically show idle timer status
+    static uint32_t lastIdleDebug = 0;
+    if (millis() - lastIdleDebug >= 30000) {  // Every 30 seconds
+        lastIdleDebug = millis();
+        dualOut.printf("Idle check: %lu/%d sec, mode=%d, active=%d\r\n",
+                      elapsed, config.idleTimeout,
+                      localModes.getCurrentMode(), localModes.isActive());
+    }
+
     if (!isIdle && elapsed >= config.idleTimeout) {
         isIdle = true;
         // Go dark when idle
