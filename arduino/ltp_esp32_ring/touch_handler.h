@@ -21,6 +21,13 @@ typedef void (*LongHoldCallback)(uint8_t numSensors);  // Called when long hold 
 #define TOUCH_LONG_HOLD_MS      1500    // Time to trigger long hold (1.5 seconds)
 #define TOUCH_MULTI_HOLD_WINDOW 1000    // Max time diff between sensors (1 second)
 
+// Histogram configuration
+#define TOUCH_HIST_BINS         20      // Number of histogram bins
+#define TOUCH_HIST_BIN_WIDTH    5       // Width of each bin (values 0-4 in bin 0, etc.)
+
+// History buffer configuration
+#define TOUCH_HISTORY_SIZE      64      // Samples per sensor in circular buffer
+
 class TouchHandler {
 public:
     TouchHandler()
@@ -30,6 +37,7 @@ public:
         , calibrated(false)
         , sensitivity(TOUCH_THRESHOLD_RATIO)
         , longHoldTriggered(false)
+        , smoothingAlpha(1.0f)          // Default: no smoothing (raw values)
     {
         touchPins[0] = TOUCH_PIN_0;
         touchPins[1] = TOUCH_PIN_1;
@@ -39,10 +47,15 @@ public:
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
             baselines[i] = 0;
             thresholds[i] = 0;
+            smoothedValues[i] = 0;
             lastState[i] = false;
             lastTouchTime[i] = 0;
             pressStartTime[i] = 0;
+            historyIdx[i] = 0;
+            snapshotValid[i] = false;
         }
+        resetHistograms();
+        clearHistory();
     }
 
     void begin() {
@@ -82,8 +95,24 @@ public:
         uint32_t now = millis();
 
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
-            uint16_t value = touchRead(touchPins[i]);
-            bool touched = value < thresholds[i];
+            uint16_t rawValue = touchRead(touchPins[i]);
+
+            // Record raw value in histogram
+            recordHistogram(i, rawValue);
+
+            // Record in circular history buffer
+            recordHistory(i, rawValue);
+
+            // Apply exponential smoothing
+            // smoothed = alpha * raw + (1 - alpha) * smoothed
+            if (smoothingAlpha >= 1.0f) {
+                smoothedValues[i] = rawValue;
+            } else {
+                smoothedValues[i] = smoothingAlpha * rawValue + (1.0f - smoothingAlpha) * smoothedValues[i];
+            }
+
+            // Use smoothed value for threshold comparison
+            bool touched = smoothedValues[i] < thresholds[i];
 
             // Debounce check
             if (touched != lastState[i]) {
@@ -92,8 +121,9 @@ public:
                     lastTouchTime[i] = now;
 
                     if (touched) {
-                        // Press started - record time
+                        // Press started - record time and capture history snapshot
                         pressStartTime[i] = now;
+                        captureSnapshot(i);
                     } else {
                         // Release - clear press time
                         pressStartTime[i] = 0;
@@ -254,10 +284,133 @@ public:
 
     bool isCalibrated() const { return calibrated; }
 
+    // ========== Exponential Smoothing ==========
+
+    // Set smoothing alpha (0.0 = heavy smoothing, 1.0 = no smoothing/raw only)
+    void setSmoothingAlpha(float alpha) {
+        smoothingAlpha = constrain(alpha, 0.01f, 1.0f);
+        dualOut.printf("Touch smoothing alpha set to %.2f\r\n", smoothingAlpha);
+    }
+
+    float getSmoothingAlpha() const { return smoothingAlpha; }
+
+    // Get smoothed value (for debugging)
+    float getSmoothedValue(uint8_t idx) const {
+        if (idx >= TOUCH_NUM_SENSORS) return 0;
+        return smoothedValues[idx];
+    }
+
+    // ========== Histograms ==========
+
+    // Reset all histograms
+    void resetHistograms() {
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            for (uint8_t b = 0; b < TOUCH_HIST_BINS; b++) {
+                histograms[i][b] = 0;
+            }
+            histogramSamples[i] = 0;
+        }
+    }
+
+    // Print histogram for one sensor
+    void printHistogram(uint8_t idx) {
+        if (idx >= TOUCH_NUM_SENSORS) return;
+
+        dualOut.printf("Touch %d histogram (%lu samples):\r\n", idx, histogramSamples[idx]);
+
+        // Find max count for scaling
+        uint32_t maxCount = 1;
+        for (uint8_t b = 0; b < TOUCH_HIST_BINS; b++) {
+            if (histograms[idx][b] > maxCount) maxCount = histograms[idx][b];
+        }
+
+        // Print each bin with bar
+        for (uint8_t b = 0; b < TOUCH_HIST_BINS; b++) {
+            uint16_t low = b * TOUCH_HIST_BIN_WIDTH;
+            uint16_t high = low + TOUCH_HIST_BIN_WIDTH - 1;
+            uint32_t count = histograms[idx][b];
+
+            // Scale bar to max 30 chars
+            uint8_t barLen = (count * 30) / maxCount;
+
+            dualOut.printf("  %3d-%3d: %6lu |", low, high, count);
+            for (uint8_t j = 0; j < barLen; j++) dualOut.print('#');
+            dualOut.println();
+        }
+    }
+
+    // Print all histograms
+    void printAllHistograms() {
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            printHistogram(i);
+            dualOut.println();
+        }
+    }
+
+    // ========== History Buffer ==========
+
+    // Clear all history buffers
+    void clearHistory() {
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            for (uint8_t j = 0; j < TOUCH_HISTORY_SIZE; j++) {
+                historyBuffer[i][j] = 0;
+                snapshotBuffer[i][j] = 0;
+            }
+            historyIdx[i] = 0;
+            snapshotValid[i] = false;
+        }
+    }
+
+    // Check if snapshot is available for sensor
+    bool hasSnapshot(uint8_t idx) const {
+        if (idx >= TOUCH_NUM_SENSORS) return false;
+        return snapshotValid[idx];
+    }
+
+    // Print snapshot for one sensor (samples leading up to press trigger)
+    void printSnapshot(uint8_t idx) {
+        if (idx >= TOUCH_NUM_SENSORS) return;
+
+        if (!snapshotValid[idx]) {
+            dualOut.printf("Touch %d: No snapshot available (touch sensor to capture)\r\n", idx);
+            return;
+        }
+
+        dualOut.printf("Touch %d snapshot (last %d samples before press, threshold=%d):\r\n",
+                      idx, TOUCH_HISTORY_SIZE, thresholds[idx]);
+
+        // Print in chronological order (oldest first)
+        // snapshotIdx[idx] points to where next write would go, so oldest is at snapshotIdx
+        for (uint8_t j = 0; j < TOUCH_HISTORY_SIZE; j++) {
+            uint8_t pos = (snapshotIdx[idx] + j) % TOUCH_HISTORY_SIZE;
+            uint16_t val = snapshotBuffer[idx][pos];
+
+            // Mark values below threshold
+            char marker = (val < thresholds[idx]) ? '*' : ' ';
+
+            // Print 8 values per line
+            if (j % 8 == 0) {
+                if (j > 0) dualOut.println();
+                dualOut.printf("  [%2d]: ", j);
+            }
+            dualOut.printf("%4d%c ", val, marker);
+        }
+        dualOut.println();
+    }
+
+    // Print all snapshots
+    void printAllSnapshots() {
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            printSnapshot(i);
+            dualOut.println();
+        }
+    }
+
 private:
     uint8_t touchPins[TOUCH_NUM_SENSORS];
     uint16_t baselines[TOUCH_NUM_SENSORS];
     uint16_t thresholds[TOUCH_NUM_SENSORS];
+    float smoothedValues[TOUCH_NUM_SENSORS];    // Exponentially smoothed values
     bool lastState[TOUCH_NUM_SENSORS];
     uint32_t lastTouchTime[TOUCH_NUM_SENSORS];
     uint32_t pressStartTime[TOUCH_NUM_SENSORS];  // When each sensor was pressed (0 if not pressed)
@@ -267,6 +420,41 @@ private:
     bool calibrated;
     float sensitivity;
     bool longHoldTriggered;  // Prevents repeated triggers until all released
+    float smoothingAlpha;    // Smoothing factor (1.0 = no smoothing)
+
+    // Histogram data
+    uint32_t histograms[TOUCH_NUM_SENSORS][TOUCH_HIST_BINS];
+    uint32_t histogramSamples[TOUCH_NUM_SENSORS];
+
+    // Circular history buffer
+    uint16_t historyBuffer[TOUCH_NUM_SENSORS][TOUCH_HISTORY_SIZE];
+    uint8_t historyIdx[TOUCH_NUM_SENSORS];      // Next write position
+
+    // Snapshot buffer (captured on press trigger)
+    uint16_t snapshotBuffer[TOUCH_NUM_SENSORS][TOUCH_HISTORY_SIZE];
+    uint8_t snapshotIdx[TOUCH_NUM_SENSORS];     // Index at time of capture
+    bool snapshotValid[TOUCH_NUM_SENSORS];
+
+    // Record a value in the histogram
+    void recordHistogram(uint8_t idx, uint16_t value) {
+        uint8_t bin = value / TOUCH_HIST_BIN_WIDTH;
+        if (bin >= TOUCH_HIST_BINS) bin = TOUCH_HIST_BINS - 1;
+        histograms[idx][bin]++;
+        histogramSamples[idx]++;
+    }
+
+    // Record a value in the circular history buffer
+    void recordHistory(uint8_t idx, uint16_t value) {
+        historyBuffer[idx][historyIdx[idx]] = value;
+        historyIdx[idx] = (historyIdx[idx] + 1) % TOUCH_HISTORY_SIZE;
+    }
+
+    // Capture current history to snapshot buffer
+    void captureSnapshot(uint8_t idx) {
+        memcpy(snapshotBuffer[idx], historyBuffer[idx], sizeof(historyBuffer[idx]));
+        snapshotIdx[idx] = historyIdx[idx];
+        snapshotValid[idx] = true;
+    }
 };
 
 #endif // TOUCH_HANDLER_H

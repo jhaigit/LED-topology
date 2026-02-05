@@ -105,6 +105,9 @@ private:
     void cmdThreshold(const char* args);
     void cmdTimezone(const char* args);
     void cmdTest();
+    void cmdSmoothing(const char* args);
+    void cmdTouchHist(const char* args);
+    void cmdTouchSnap(const char* args);
 };
 
 // Implementation in main .ino file to access config structure

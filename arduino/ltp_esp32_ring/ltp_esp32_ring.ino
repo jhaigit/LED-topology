@@ -368,6 +368,12 @@ void UsbTerminal::processCommand(const char* line) {
         cmdTimezone(args);
     } else if (strcmp(cmd, "test") == 0) {
         cmdTest();
+    } else if (strcmp(cmd, "smoothing") == 0) {
+        cmdSmoothing(args);
+    } else if (strcmp(cmd, "touchhist") == 0) {
+        cmdTouchHist(args);
+    } else if (strcmp(cmd, "touchsnap") == 0) {
+        cmdTouchSnap(args);
     } else {
         dualOut.printf("Unknown command: %s\r\n", cmd);
         dualOut.println("Type 'help' for available commands");
@@ -384,8 +390,11 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  status                  - Show current status");
     dualOut.println("  touch                   - Show touch sensor values");
     dualOut.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
+    dualOut.println("  smoothing <0.01-1.0>    - Set touch smoothing (1.0=off, lower=more smoothing)");
     dualOut.println("  calibrate               - Recalibrate touch sensors (do not touch during)");
     dualOut.println("  touchmon [seconds]      - Monitor touch values continuously (default 10s)");
+    dualOut.println("  touchhist [reset|0-3]   - Show touch histograms (reset to clear)");
+    dualOut.println("  touchsnap [0-3]         - Show pre-trigger sample snapshot");
     dualOut.println("  threshold <0-3> <value> - Manually set threshold for a sensor");
     dualOut.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
     dualOut.println("  test                    - Run LED test pattern");
@@ -558,11 +567,13 @@ void UsbTerminal::cmdReboot() {
 void UsbTerminal::cmdTouch() {
     dualOut.println("Touch sensor values:");
     if (touch) {
-        dualOut.printf("Sensitivity: %.2f\r\n", touch->getSensitivity());
+        dualOut.printf("Sensitivity: %.2f, Smoothing: %.2f\r\n",
+                      touch->getSensitivity(), touch->getSmoothingAlpha());
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
-            dualOut.printf("  Touch %d: value=%d, baseline=%d, threshold=%d, touched=%s\r\n",
-                          i, touch->getRawValue(i), touch->getBaseline(i),
-                          touch->getThreshold(i), touch->isTouched(i) ? "YES" : "no");
+            dualOut.printf("  Touch %d: raw=%d, smooth=%.1f, baseline=%d, threshold=%d, %s\r\n",
+                          i, touch->getRawValue(i), touch->getSmoothedValue(i),
+                          touch->getBaseline(i), touch->getThreshold(i),
+                          touch->isTouched(i) ? "TOUCHED" : "");
         }
     }
 }
@@ -617,8 +628,9 @@ void UsbTerminal::cmdTouchMon(const char* args) {
         if (duration > 300) duration = 300;
     }
 
-    dualOut.printf("Monitoring touch sensors for %d seconds...\r\n", duration);
-    dualOut.println("Legend: value (baseline) [threshold] <TOUCHED if below threshold>");
+    dualOut.printf("Monitoring touch sensors for %d seconds (smoothing=%.2f)...\r\n",
+                  duration, touch->getSmoothingAlpha());
+    dualOut.println("Legend: raw/smooth [threshold] * = touched");
     dualOut.println("Press any key to stop early.\r\n");
 
     uint32_t startTime = millis();
@@ -636,15 +648,15 @@ void UsbTerminal::cmdTouchMon(const char* args) {
         // Print every 200ms
         if (millis() - lastPrint >= 200) {
             lastPrint = millis();
-            dualOut.printf("T0: %4d (%4d) [%4d]%s  T1: %4d (%4d) [%4d]%s  T2: %4d (%4d) [%4d]%s  T3: %4d (%4d) [%4d]%s\r\n",
-                touch->getRawValue(0), touch->getBaseline(0), touch->getThreshold(0),
-                touch->isTouched(0) ? " *" : "  ",
-                touch->getRawValue(1), touch->getBaseline(1), touch->getThreshold(1),
-                touch->isTouched(1) ? " *" : "  ",
-                touch->getRawValue(2), touch->getBaseline(2), touch->getThreshold(2),
-                touch->isTouched(2) ? " *" : "  ",
-                touch->getRawValue(3), touch->getBaseline(3), touch->getThreshold(3),
-                touch->isTouched(3) ? " *" : "  ");
+            dualOut.printf("T0:%3d/%3.0f[%3d]%s T1:%3d/%3.0f[%3d]%s T2:%3d/%3.0f[%3d]%s T3:%3d/%3.0f[%3d]%s\r\n",
+                touch->getRawValue(0), touch->getSmoothedValue(0), touch->getThreshold(0),
+                touch->isTouched(0) ? "*" : " ",
+                touch->getRawValue(1), touch->getSmoothedValue(1), touch->getThreshold(1),
+                touch->isTouched(1) ? "*" : " ",
+                touch->getRawValue(2), touch->getSmoothedValue(2), touch->getThreshold(2),
+                touch->isTouched(2) ? "*" : " ",
+                touch->getRawValue(3), touch->getSmoothedValue(3), touch->getThreshold(3),
+                touch->isTouched(3) ? "*" : " ");
         }
 
         // Still run normal updates so touches work
@@ -768,6 +780,78 @@ void UsbTerminal::cmdTest() {
     leds->show();
     localModes.start(config->localMode);
     dualOut.println("Test complete");
+}
+
+void UsbTerminal::cmdSmoothing(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        dualOut.printf("Current smoothing alpha: %.2f\r\n", touch->getSmoothingAlpha());
+        dualOut.println("  1.0 = no smoothing (raw values only)");
+        dualOut.println("  0.5 = moderate smoothing");
+        dualOut.println("  0.1 = heavy smoothing");
+        dualOut.println("Usage: smoothing <0.01-1.0>");
+        return;
+    }
+
+    float alpha = atof(args);
+    if (alpha < 0.01 || alpha > 1.0) {
+        dualOut.println("Alpha must be 0.01-1.0");
+        return;
+    }
+
+    touch->setSmoothingAlpha(alpha);
+}
+
+void UsbTerminal::cmdTouchHist(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        // Show all histograms
+        touch->printAllHistograms();
+        return;
+    }
+
+    if (strcmp(args, "reset") == 0) {
+        touch->resetHistograms();
+        dualOut.println("Touch histograms reset");
+        return;
+    }
+
+    // Show specific sensor histogram
+    int sensor = atoi(args);
+    if (sensor < 0 || sensor >= TOUCH_NUM_SENSORS) {
+        dualOut.printf("Sensor must be 0-%d, or 'reset' to clear\r\n", TOUCH_NUM_SENSORS - 1);
+        return;
+    }
+    touch->printHistogram(sensor);
+}
+
+void UsbTerminal::cmdTouchSnap(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        // Show all snapshots
+        touch->printAllSnapshots();
+        return;
+    }
+
+    // Show specific sensor snapshot
+    int sensor = atoi(args);
+    if (sensor < 0 || sensor >= TOUCH_NUM_SENSORS) {
+        dualOut.printf("Sensor must be 0-%d\r\n", TOUCH_NUM_SENSORS - 1);
+        return;
+    }
+    touch->printSnapshot(sensor);
 }
 
 // ============================================================================
