@@ -108,6 +108,7 @@ private:
     void cmdSmoothing(const char* args);
     void cmdTouchHist(const char* args);
     void cmdTouchSnap(const char* args);
+    void cmdBaseline(const char* args);
 };
 
 // Implementation in main .ino file to access config structure

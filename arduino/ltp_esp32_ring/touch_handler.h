@@ -28,6 +28,10 @@ typedef void (*LongHoldCallback)(uint8_t numSensors);  // Called when long hold 
 // History buffer configuration
 #define TOUCH_HISTORY_SIZE      64      // Samples per sensor in circular buffer
 
+// Adaptive baseline configuration
+#define TOUCH_BASELINE_ALPHA    0.001f  // How fast baseline adapts (very slow)
+#define TOUCH_BASELINE_MARGIN   1.2f    // Only adapt when reading > threshold * margin
+
 class TouchHandler {
 public:
     TouchHandler()
@@ -38,6 +42,8 @@ public:
         , sensitivity(TOUCH_THRESHOLD_RATIO)
         , longHoldTriggered(false)
         , smoothingAlpha(1.0f)          // Default: no smoothing (raw values)
+        , adaptiveBaseline(true)        // Default: adaptive baseline on
+        , baselineAlpha(TOUCH_BASELINE_ALPHA)
     {
         touchPins[0] = TOUCH_PIN_0;
         touchPins[1] = TOUCH_PIN_1;
@@ -48,6 +54,7 @@ public:
             baselines[i] = 0;
             thresholds[i] = 0;
             smoothedValues[i] = 0;
+            floatBaselines[i] = 0;
             lastState[i] = false;
             lastTouchTime[i] = 0;
             pressStartTime[i] = 0;
@@ -78,6 +85,7 @@ public:
             }
 
             baselines[i] = sum / TOUCH_CALIBRATION_SAMPLES;
+            floatBaselines[i] = baselines[i];
             thresholds[i] = (uint16_t)(baselines[i] * sensitivity);
 
             dualOut.printf("  Touch %d: baseline=%d, threshold=%d\r\n",
@@ -109,6 +117,18 @@ public:
                 smoothedValues[i] = rawValue;
             } else {
                 smoothedValues[i] = smoothingAlpha * rawValue + (1.0f - smoothingAlpha) * smoothedValues[i];
+            }
+
+            // Adaptive baseline: slowly track drift when sensor is clearly untouched
+            if (adaptiveBaseline && !lastState[i]) {
+                // Only adapt when reading is well above threshold (clearly not touched)
+                float margin = thresholds[i] * TOUCH_BASELINE_MARGIN;
+                if (smoothedValues[i] > margin) {
+                    floatBaselines[i] = floatBaselines[i] * (1.0f - baselineAlpha)
+                                      + smoothedValues[i] * baselineAlpha;
+                    baselines[i] = (uint16_t)(floatBaselines[i] + 0.5f);
+                    thresholds[i] = (uint16_t)(floatBaselines[i] * sensitivity);
+                }
             }
 
             // Use smoothed value for threshold comparison
@@ -245,12 +265,27 @@ public:
         sensitivity = constrain(sens, 0.1f, 0.95f);
         // Recalculate thresholds with new sensitivity
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
-            thresholds[i] = (uint16_t)(baselines[i] * sensitivity);
+            thresholds[i] = (uint16_t)(floatBaselines[i] * sensitivity);
         }
         dualOut.printf("Touch sensitivity set to %.2f\r\n", sensitivity);
     }
 
     float getSensitivity() const { return sensitivity; }
+
+    // Adaptive baseline control
+    void setAdaptiveBaseline(bool enabled) {
+        adaptiveBaseline = enabled;
+        dualOut.printf("Adaptive baseline: %s\r\n", enabled ? "ON" : "OFF");
+    }
+
+    bool isAdaptiveBaseline() const { return adaptiveBaseline; }
+
+    void setBaselineAlpha(float alpha) {
+        baselineAlpha = constrain(alpha, 0.0001f, 0.1f);
+        dualOut.printf("Baseline drift alpha set to %.4f\r\n", baselineAlpha);
+    }
+
+    float getBaselineAlpha() const { return baselineAlpha; }
 
     // Get current touch state for a sensor
     bool isTouched(uint8_t idx) const {
@@ -421,6 +456,9 @@ private:
     float sensitivity;
     bool longHoldTriggered;  // Prevents repeated triggers until all released
     float smoothingAlpha;    // Smoothing factor (1.0 = no smoothing)
+    bool adaptiveBaseline;   // Whether baseline tracks drift
+    float baselineAlpha;     // How fast baseline adapts
+    float floatBaselines[TOUCH_NUM_SENSORS];  // Float baselines for smooth tracking
 
     // Histogram data
     uint32_t histograms[TOUCH_NUM_SENSORS][TOUCH_HIST_BINS];

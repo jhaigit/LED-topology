@@ -381,6 +381,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdTouchHist(args);
     } else if (strcmp(cmd, "touchsnap") == 0) {
         cmdTouchSnap(args);
+    } else if (strcmp(cmd, "baseline") == 0) {
+        cmdBaseline(args);
     } else {
         dualOut.printf("Unknown command: %s\r\n", cmd);
         dualOut.println("Type 'help' for available commands");
@@ -398,6 +400,7 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  touch                   - Show touch sensor values");
     dualOut.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
     dualOut.println("  smoothing <0.01-1.0>    - Set touch smoothing (1.0=off, lower=more smoothing)");
+    dualOut.println("  baseline [on|off|alpha] - Adaptive baseline tracking (auto-adjusts thresholds)");
     dualOut.println("  calibrate               - Recalibrate touch sensors (do not touch during)");
     dualOut.println("  touchmon [seconds]      - Monitor touch values continuously (default 10s)");
     dualOut.println("  touchhist [reset|0-3]   - Show touch histograms (reset to clear)");
@@ -574,10 +577,11 @@ void UsbTerminal::cmdReboot() {
 void UsbTerminal::cmdTouch() {
     dualOut.println("Touch sensor values:");
     if (touch) {
-        dualOut.printf("Sensitivity: %.2f, Smoothing: %.2f\r\n",
-                      touch->getSensitivity(), touch->getSmoothingAlpha());
+        dualOut.printf("Sensitivity: %.2f, Smoothing: %.2f, Adaptive baseline: %s\r\n",
+                      touch->getSensitivity(), touch->getSmoothingAlpha(),
+                      touch->isAdaptiveBaseline() ? "ON" : "OFF");
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
-            dualOut.printf("  Touch %d: raw=%d, smooth=%.1f, baseline=%d, threshold=%d, %s\r\n",
+            dualOut.printf("  Touch %d: raw=%d, smooth=%.1f, base=%d, thresh=%d, %s\r\n",
                           i, touch->getRawValue(i), touch->getSmoothedValue(i),
                           touch->getBaseline(i), touch->getThreshold(i),
                           touch->isTouched(i) ? "TOUCHED" : "");
@@ -859,6 +863,34 @@ void UsbTerminal::cmdTouchSnap(const char* args) {
         return;
     }
     touch->printSnapshot(sensor);
+}
+
+void UsbTerminal::cmdBaseline(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        dualOut.printf("Adaptive baseline: %s (alpha=%.4f)\r\n",
+                      touch->isAdaptiveBaseline() ? "ON" : "OFF",
+                      touch->getBaselineAlpha());
+        dualOut.println("Usage: baseline on|off|<alpha 0.0001-0.1>");
+        return;
+    }
+
+    if (strcmp(args, "on") == 0) {
+        touch->setAdaptiveBaseline(true);
+    } else if (strcmp(args, "off") == 0) {
+        touch->setAdaptiveBaseline(false);
+    } else {
+        float alpha = atof(args);
+        if (alpha >= 0.0001 && alpha <= 0.1) {
+            touch->setBaselineAlpha(alpha);
+        } else {
+            dualOut.println("Alpha must be 0.0001-0.1 (or 'on'/'off')");
+        }
+    }
 }
 
 // ============================================================================
