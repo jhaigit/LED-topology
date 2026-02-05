@@ -23,7 +23,7 @@ typedef void (*LongHoldCallback)(uint8_t numSensors);  // Called when long hold 
 
 // Histogram configuration
 #define TOUCH_HIST_BINS         20      // Number of histogram bins
-#define TOUCH_HIST_BIN_WIDTH    5       // Width of each bin (values 0-4 in bin 0, etc.)
+#define TOUCH_HIST_BIN_WIDTH    25      // Width of each bin (0-24 in bin 0, 25-49 in bin 1, etc.)
 
 // History buffer configuration
 #define TOUCH_HISTORY_SIZE      64      // Samples per sensor in circular buffer
