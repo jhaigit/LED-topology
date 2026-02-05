@@ -219,10 +219,17 @@ void checkIdleTimeout() {
 
 // Called on touch press - handles ripple trigger and mode advancement in cycle
 void onTouchPress(uint8_t touchIdx) {
-    dualOut.printf("Touch %d pressed\r\n", touchIdx);
+    dualOut.printf("Touch %d pressed (mode=%d, active=%d)\r\n",
+                  touchIdx, localModes.getCurrentMode(), localModes.isActive());
 
     // Reset idle timer on any touch
     resetActivityTimer();
+
+    // Ensure local modes are active (defensive: recover from any state that cleared active)
+    if (!localModes.isActive()) {
+        dualOut.println("Touch: reactivating local modes");
+        localModes.start(localModes.getCurrentMode());
+    }
 
     // Always trigger a ripple effect (touch overlay is always active)
     localModes.triggerTouchRipple(touchIdx);
