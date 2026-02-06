@@ -105,6 +105,7 @@ void loadConfig() {
     config.touchBaselineAlpha = preferences.getFloat("touchBLAlpha", TOUCH_BASELINE_ALPHA);
     config.touchLongHoldMs = preferences.getUShort("longHoldMs", TOUCH_LONG_HOLD_MS_DEFAULT);
     config.touchHoldWindow = preferences.getUShort("holdWindow", TOUCH_MULTI_HOLD_WINDOW_DEFAULT);
+    config.touchHysteresis = preferences.getFloat("touchHyst", 0.05f);
     preferences.getString("timezone", config.timezone, sizeof(config.timezone));
     if (strlen(config.timezone) == 0) {
         strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
@@ -139,6 +140,7 @@ void saveConfig() {
     preferences.putFloat("touchBLAlpha", config.touchBaselineAlpha);
     preferences.putUShort("longHoldMs", config.touchLongHoldMs);
     preferences.putUShort("holdWindow", config.touchHoldWindow);
+    preferences.putFloat("touchHyst", config.touchHysteresis);
     preferences.putString("timezone", config.timezone);
     preferences.putUShort("cycleTime", config.cycleTime);
 
@@ -164,6 +166,7 @@ void resetConfig() {
     config.touchBaselineAlpha = TOUCH_BASELINE_ALPHA;
     config.touchLongHoldMs = TOUCH_LONG_HOLD_MS_DEFAULT;
     config.touchHoldWindow = TOUCH_MULTI_HOLD_WINDOW_DEFAULT;
+    config.touchHysteresis = 0.05f;
     strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
     config.cycleTime = 10;
 
@@ -400,6 +403,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdBaseline(args);
     } else if (strcmp(cmd, "longhold") == 0) {
         cmdLonghold(args);
+    } else if (strcmp(cmd, "hysteresis") == 0) {
+        cmdHysteresis(args);
     } else {
         dualOut.printf("Unknown command: %s\r\n", cmd);
         dualOut.println("Type 'help' for available commands");
@@ -416,6 +421,7 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  status                  - Show current status");
     dualOut.println("  touch                   - Show touch sensor values");
     dualOut.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
+    dualOut.println("  hysteresis <0.0-0.5>    - Set touch/release threshold spread (default 0.05)");
     dualOut.println("  smoothing <0.01-1.0>    - Set touch smoothing (1.0=off, lower=more smoothing)");
     dualOut.println("  baseline [on|off|alpha] - Adaptive baseline tracking (auto-adjusts thresholds)");
     dualOut.println("  calibrate               - Recalibrate touch sensors (do not touch during)");
@@ -595,8 +601,9 @@ void UsbTerminal::cmdReboot() {
 void UsbTerminal::cmdTouch() {
     dualOut.println("Touch sensor values:");
     if (touch) {
-        dualOut.printf("Sensitivity: %.2f, Smoothing: %.2f, Adaptive baseline: %s\r\n",
+        dualOut.printf("Sensitivity: %.2f, Smoothing: %.2f, Hysteresis: %.2f, Adaptive: %s\r\n",
                       touch->getSensitivity(), touch->getSmoothingAlpha(),
+                      touch->getHysteresis(),
                       touch->isAdaptiveBaseline() ? "ON" : "OFF");
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
             dualOut.printf("  Touch %d: raw=%d, smooth=%.1f, base=%d, thresh=%d, %s\r\n",
@@ -811,6 +818,32 @@ void UsbTerminal::cmdTest() {
     dualOut.println("Test complete");
 }
 
+void UsbTerminal::cmdHysteresis(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        dualOut.printf("Hysteresis: %.2f (release threshold = touch threshold * %.2f)\r\n",
+                      touch->getHysteresis(), 1.0f + touch->getHysteresis());
+        dualOut.println("  0.0  = no hysteresis (same threshold for touch and release)");
+        dualOut.println("  0.05 = 5% spread (default)");
+        dualOut.println("  0.10 = 10% spread");
+        dualOut.println("Usage: hysteresis <0.0-0.5>");
+        return;
+    }
+
+    float h = atof(args);
+    if (h < 0.0 || h > 0.5) {
+        dualOut.println("Hysteresis must be 0.0-0.5");
+        return;
+    }
+
+    touch->setHysteresis(h);
+    config->touchHysteresis = h;
+}
+
 void UsbTerminal::cmdSmoothing(const char* args) {
     if (!touch) {
         dualOut.println("Touch handler not available");
@@ -1003,6 +1036,7 @@ void setup() {
     touch.begin();
     touch.setSensitivity(config.touchSensitivity);
     touch.setSmoothingAlpha(config.touchSmoothing);
+    touch.setHysteresis(config.touchHysteresis);
     touch.setAdaptiveBaseline(config.touchAdaptiveBaseline);
     touch.setBaselineAlpha(config.touchBaselineAlpha);
     touch.setLongHoldMs(config.touchLongHoldMs);

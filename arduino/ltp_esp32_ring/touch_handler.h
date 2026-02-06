@@ -44,6 +44,7 @@ public:
         , longHoldMs(TOUCH_LONG_HOLD_MS_DEFAULT)
         , multiHoldWindow(TOUCH_MULTI_HOLD_WINDOW_DEFAULT)
         , smoothingAlpha(1.0f)          // Default: no smoothing (raw values)
+        , hysteresis(0.05f)            // Default: 5% spread between touch/release
         , adaptiveBaseline(true)        // Default: adaptive baseline on
         , baselineAlpha(TOUCH_BASELINE_ALPHA)
     {
@@ -133,8 +134,17 @@ public:
                 }
             }
 
-            // Use smoothed value for threshold comparison
-            bool touched = smoothedValues[i] < thresholds[i];
+            // Use smoothed value for threshold comparison with hysteresis
+            // Touch: value must drop below threshold
+            // Release: value must rise above threshold * (1 + hysteresis)
+            bool touched;
+            if (lastState[i]) {
+                // Currently touched - need higher value to release
+                touched = smoothedValues[i] < thresholds[i] * (1.0f + hysteresis);
+            } else {
+                // Currently not touched - need lower value to trigger
+                touched = smoothedValues[i] < thresholds[i];
+            }
 
             // Debounce check
             if (touched != lastState[i]) {
@@ -261,6 +271,15 @@ public:
         }
         return millis() - pressStartTime[idx];
     }
+
+    // Set hysteresis spread (0.0 = no hysteresis, 0.1 = 10% spread)
+    void setHysteresis(float h) {
+        hysteresis = constrain(h, 0.0f, 0.5f);
+        dualOut.printf("Touch hysteresis set to %.2f (release thresh = touch thresh * %.2f)\r\n",
+                      hysteresis, 1.0f + hysteresis);
+    }
+
+    float getHysteresis() const { return hysteresis; }
 
     // Set touch sensitivity (0.0-1.0, higher = more sensitive)
     void setSensitivity(float sens) {
@@ -475,6 +494,7 @@ private:
     uint32_t longHoldMs;     // Time to trigger long hold
     uint32_t multiHoldWindow; // Max time diff between sensor presses
     float smoothingAlpha;    // Smoothing factor (1.0 = no smoothing)
+    float hysteresis;        // Spread between touch/release thresholds (0.05 = 5%)
     bool adaptiveBaseline;   // Whether baseline tracks drift
     float baselineAlpha;     // How fast baseline adapts
     float floatBaselines[TOUCH_NUM_SENSORS];  // Float baselines for smooth tracking
