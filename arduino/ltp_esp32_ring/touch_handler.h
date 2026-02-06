@@ -21,6 +21,10 @@ typedef void (*LongHoldCallback)(uint8_t numSensors);  // Called when long hold 
 #define TOUCH_LONG_HOLD_MS_DEFAULT      1500    // Time to trigger long hold (1.5 seconds)
 #define TOUCH_MULTI_HOLD_WINDOW_DEFAULT 1000    // Max time diff between sensors (1 second)
 
+// Multi-tap defaults (configurable at runtime)
+#define TOUCH_MULTI_TAP_WINDOW_DEFAULT  500     // Max ms between taps on different sensors
+#define TOUCH_MULTI_TAP_COUNT_DEFAULT   2       // Number of different sensors needed
+
 // Histogram configuration
 #define TOUCH_HIST_BINS         20      // Number of histogram bins
 #define TOUCH_HIST_BIN_WIDTH    25      // Width of each bin (0-24 in bin 0, 25-49 in bin 1, etc.)
@@ -47,6 +51,9 @@ public:
         , hysteresis(0.05f)            // Default: 5% spread between touch/release
         , adaptiveBaseline(true)        // Default: adaptive baseline on
         , baselineAlpha(TOUCH_BASELINE_ALPHA)
+        , multiTapWindow(TOUCH_MULTI_TAP_WINDOW_DEFAULT)
+        , multiTapCount(TOUCH_MULTI_TAP_COUNT_DEFAULT)
+        , multiTapTriggered(false)
     {
         touchPins[0] = TOUCH_PIN_0;
         touchPins[1] = TOUCH_PIN_1;
@@ -61,6 +68,7 @@ public:
             lastState[i] = false;
             lastTouchTime[i] = 0;
             pressStartTime[i] = 0;
+            recentTapTime[i] = 0;
             historyIdx[i] = 0;
             snapshotValid[i] = false;
         }
@@ -156,6 +164,8 @@ public:
                         // Press started - record time and capture history snapshot
                         pressStartTime[i] = now;
                         captureSnapshot(i);
+                        // Record tap time for multi-tap detection
+                        recentTapTime[i] = now;
                     } else {
                         // Release - clear press time
                         pressStartTime[i] = 0;
@@ -169,6 +179,11 @@ public:
                     // Trigger legacy callback on touch only (for flash/mode switching)
                     if (touched && onTouchCallback) {
                         onTouchCallback(i);
+                    }
+
+                    // Check for multi-tap gesture (different sensors tapped within window)
+                    if (touched) {
+                        checkMultiTap(now);
                     }
                 }
             }
@@ -322,6 +337,21 @@ public:
     }
 
     uint32_t getMultiHoldWindow() const { return multiHoldWindow; }
+
+    // Multi-tap gesture control
+    void setMultiTapWindow(uint32_t ms) {
+        multiTapWindow = constrain(ms, 100, 5000);
+        dualOut.printf("Multi-tap window set to %lu ms\r\n", multiTapWindow);
+    }
+
+    uint32_t getMultiTapWindow() const { return multiTapWindow; }
+
+    void setMultiTapCount(uint8_t count) {
+        multiTapCount = constrain(count, 2, TOUCH_NUM_SENSORS);
+        dualOut.printf("Multi-tap count set to %d sensors\r\n", multiTapCount);
+    }
+
+    uint8_t getMultiTapCount() const { return multiTapCount; }
 
     // Get current touch state for a sensor
     bool isTouched(uint8_t idx) const {
@@ -499,6 +529,12 @@ private:
     float baselineAlpha;     // How fast baseline adapts
     float floatBaselines[TOUCH_NUM_SENSORS];  // Float baselines for smooth tracking
 
+    // Multi-tap gesture detection
+    uint32_t multiTapWindow;   // Max ms between taps on different sensors
+    uint8_t multiTapCount;     // Number of different sensors needed to trigger
+    bool multiTapTriggered;    // Prevents re-triggering until all released
+    uint32_t recentTapTime[TOUCH_NUM_SENSORS];  // When each sensor was last pressed
+
     // Histogram data
     uint32_t histograms[TOUCH_NUM_SENSORS][TOUCH_HIST_BINS];
     uint32_t histogramSamples[TOUCH_NUM_SENSORS];
@@ -511,6 +547,37 @@ private:
     uint16_t snapshotBuffer[TOUCH_NUM_SENSORS][TOUCH_HISTORY_SIZE];
     uint8_t snapshotIdx[TOUCH_NUM_SENSORS];     // Index at time of capture
     bool snapshotValid[TOUCH_NUM_SENSORS];
+
+    // Check for multi-tap gesture (different sensors tapped within window)
+    void checkMultiTap(uint32_t now) {
+        if (multiTapTriggered) {
+            // Already triggered, wait for all sensors released
+            if (getHeldCount() == 0) {
+                multiTapTriggered = false;
+            }
+            return;
+        }
+
+        // Count how many different sensors were tapped within the window
+        uint8_t tapCount = 0;
+        for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+            if (recentTapTime[i] > 0 && (now - recentTapTime[i]) <= multiTapWindow) {
+                tapCount++;
+            }
+        }
+
+        if (tapCount >= multiTapCount && onLongHoldCallback) {
+            multiTapTriggered = true;
+            dualOut.printf("Multi-tap detected (%d sensors within %lu ms)\r\n",
+                          tapCount, multiTapWindow);
+            onLongHoldCallback(tapCount);
+
+            // Clear tap times to prevent re-triggering
+            for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
+                recentTapTime[i] = 0;
+            }
+        }
+    }
 
     // Record a value in the histogram
     void recordHistogram(uint8_t idx, uint16_t value) {

@@ -207,6 +207,8 @@ struct DeviceConfig {
     uint16_t touchLongHoldMs;   // Time sensors must be held for long hold
     uint16_t touchHoldWindow;   // Max time between sensor presses for multi-hold
     float touchHysteresis;      // Spread between touch/release thresholds (0.0-0.5)
+    uint16_t touchMultiTapWindow; // Max ms between taps on different sensors
+    uint8_t touchMultiTapCount;   // Number of different sensors needed for multi-tap
     char timezone[48];          // POSIX TZ string (e.g. "PST8PDT,M3.2.0,M11.1.0")
     uint16_t cycleTime;         // Seconds per mode when cycling (default 10)
 };

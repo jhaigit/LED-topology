@@ -111,6 +111,7 @@ private:
     void cmdBaseline(const char* args);
     void cmdLonghold(const char* args);
     void cmdHysteresis(const char* args);
+    void cmdMultitap(const char* args);
 };
 
 // Implementation in main .ino file to access config structure

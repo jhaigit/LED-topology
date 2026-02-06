@@ -106,6 +106,8 @@ void loadConfig() {
     config.touchLongHoldMs = preferences.getUShort("longHoldMs", TOUCH_LONG_HOLD_MS_DEFAULT);
     config.touchHoldWindow = preferences.getUShort("holdWindow", TOUCH_MULTI_HOLD_WINDOW_DEFAULT);
     config.touchHysteresis = preferences.getFloat("touchHyst", 0.05f);
+    config.touchMultiTapWindow = preferences.getUShort("multiTapWin", TOUCH_MULTI_TAP_WINDOW_DEFAULT);
+    config.touchMultiTapCount = preferences.getUChar("multiTapCnt", TOUCH_MULTI_TAP_COUNT_DEFAULT);
     preferences.getString("timezone", config.timezone, sizeof(config.timezone));
     if (strlen(config.timezone) == 0) {
         strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
@@ -141,6 +143,8 @@ void saveConfig() {
     preferences.putUShort("longHoldMs", config.touchLongHoldMs);
     preferences.putUShort("holdWindow", config.touchHoldWindow);
     preferences.putFloat("touchHyst", config.touchHysteresis);
+    preferences.putUShort("multiTapWin", config.touchMultiTapWindow);
+    preferences.putUChar("multiTapCnt", config.touchMultiTapCount);
     preferences.putString("timezone", config.timezone);
     preferences.putUShort("cycleTime", config.cycleTime);
 
@@ -167,6 +171,8 @@ void resetConfig() {
     config.touchLongHoldMs = TOUCH_LONG_HOLD_MS_DEFAULT;
     config.touchHoldWindow = TOUCH_MULTI_HOLD_WINDOW_DEFAULT;
     config.touchHysteresis = 0.05f;
+    config.touchMultiTapWindow = TOUCH_MULTI_TAP_WINDOW_DEFAULT;
+    config.touchMultiTapCount = TOUCH_MULTI_TAP_COUNT_DEFAULT;
     strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
     config.cycleTime = 10;
 
@@ -228,11 +234,11 @@ void checkIdleTimeout() {
 // Touch Callbacks and Navigation State Machine
 // ============================================================================
 
-// Navigation state machine:
-// - Mode 0 (touch-only, default) → long hold 2 → Mode 255 (cycling)
-// - Mode 255 (cycling) → tap advances pattern, long hold 2 → Mode 11 (clock)
-// - Any pattern mode (1-10) → long hold 2 → Mode 11 (clock)
-// - Mode 11 (clock) → long hold 2 → Mode 0
+// Navigation state machine (triggered by long hold OR multi-tap):
+// - Mode 0 (touch-only, default) → long hold 2 / multi-tap → Mode 255 (cycling)
+// - Mode 255 (cycling) → tap advances pattern, long hold 2 / multi-tap → Mode 11 (clock)
+// - Any pattern mode (1-10) → long hold 2 / multi-tap → Mode 11 (clock)
+// - Mode 11 (clock) → long hold 2 / multi-tap → Mode 0
 // Navigation is runtime only - does not persist to config
 
 // Called on touch press - handles ripple trigger and mode advancement in cycle
@@ -405,6 +411,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdLonghold(args);
     } else if (strcmp(cmd, "hysteresis") == 0) {
         cmdHysteresis(args);
+    } else if (strcmp(cmd, "multitap") == 0) {
+        cmdMultitap(args);
     } else {
         dualOut.printf("Unknown command: %s\r\n", cmd);
         dualOut.println("Type 'help' for available commands");
@@ -423,12 +431,13 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  sensitivity <0.1-0.95>  - Set touch sensitivity (higher=more sensitive)");
     dualOut.println("  hysteresis <0.0-0.5>    - Set touch/release threshold spread (default 0.05)");
     dualOut.println("  smoothing <0.01-1.0>    - Set touch smoothing (1.0=off, lower=more smoothing)");
-    dualOut.println("  baseline [on|off|alpha] - Adaptive baseline tracking (auto-adjusts thresholds)");
+    dualOut.println("  baseline [on|off|alpha] - Adaptive baseline drift tracking (alpha=speed)");
     dualOut.println("  calibrate               - Recalibrate touch sensors (do not touch during)");
     dualOut.println("  touchmon [seconds]      - Monitor touch values continuously (default 10s)");
     dualOut.println("  touchhist [reset|0-3]   - Show touch histograms (reset to clear)");
     dualOut.println("  touchsnap [0-3]         - Show pre-trigger sample snapshot");
-    dualOut.println("  longhold [hold|window]  - Set long-hold timing (ms)");
+    dualOut.println("  longhold <ms> [window]  - Set long-hold timing (hold 2+ globes to navigate)");
+    dualOut.println("  multitap [window|count] - Set multi-tap gesture (tap different globes quickly)");
     dualOut.println("  threshold <0-3> <value> - Manually set threshold for a sensor");
     dualOut.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
     dualOut.println("  test                    - Run LED test pattern");
@@ -929,7 +938,9 @@ void UsbTerminal::cmdBaseline(const char* args) {
         dualOut.printf("Adaptive baseline: %s (alpha=%.4f)\r\n",
                       touch->isAdaptiveBaseline() ? "ON" : "OFF",
                       touch->getBaselineAlpha());
+        dualOut.println("Slowly adjusts thresholds to compensate for environmental drift.");
         dualOut.println("Usage: baseline on|off|<alpha 0.0001-0.1>");
+        dualOut.println("  alpha = drift tracking speed (lower=slower, default 0.001)");
         return;
     }
 
@@ -959,9 +970,10 @@ void UsbTerminal::cmdLonghold(const char* args) {
     if (strlen(args) == 0) {
         dualOut.printf("Long hold: %lu ms, Multi-hold window: %lu ms\r\n",
                       touch->getLongHoldMs(), touch->getMultiHoldWindow());
+        dualOut.println("Hold 2+ globes simultaneously to navigate (0->255->11->0)");
         dualOut.println("Usage: longhold <hold_ms> [window_ms]");
-        dualOut.println("  hold_ms   - Time sensors must be held (200-10000, default 1500)");
-        dualOut.println("  window_ms - Max time between sensor presses (100-5000, default 1000)");
+        dualOut.println("  hold_ms   - How long sensors must be held to trigger (200-10000, default 1500)");
+        dualOut.println("  window_ms - Max gap between pressing first and last sensor (100-5000, default 1000)");
         return;
     }
 
@@ -983,6 +995,42 @@ void UsbTerminal::cmdLonghold(const char* args) {
         config->touchHoldWindow = windowMs;
     } else if (parsed >= 2) {
         dualOut.println("Window must be 100-5000 ms");
+    }
+}
+
+void UsbTerminal::cmdMultitap(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        dualOut.printf("Multi-tap: window=%lu ms, count=%d sensors\r\n",
+                      touch->getMultiTapWindow(), touch->getMultiTapCount());
+        dualOut.println("Usage: multitap <window_ms> [count]");
+        dualOut.println("  window_ms - Max time between taps on different sensors (100-5000, default 500)");
+        dualOut.println("  count     - Number of different sensors needed (2-4, default 2)");
+        dualOut.println("Tap different globes within the window to navigate (same as long hold)");
+        return;
+    }
+
+    uint32_t windowMs = 0;
+    int count = 0;
+    int parsed = sscanf(args, "%lu %d", &windowMs, &count);
+
+    if (parsed >= 1 && windowMs >= 100 && windowMs <= 5000) {
+        touch->setMultiTapWindow(windowMs);
+        config->touchMultiTapWindow = windowMs;
+    } else if (parsed >= 1) {
+        dualOut.println("Window must be 100-5000 ms");
+        return;
+    }
+
+    if (parsed >= 2 && count >= 2 && count <= TOUCH_NUM_SENSORS) {
+        touch->setMultiTapCount(count);
+        config->touchMultiTapCount = count;
+    } else if (parsed >= 2) {
+        dualOut.printf("Count must be 2-%d\r\n", TOUCH_NUM_SENSORS);
     }
 }
 
@@ -1043,6 +1091,8 @@ void setup() {
     touch.setBaselineAlpha(config.touchBaselineAlpha);
     touch.setLongHoldMs(config.touchLongHoldMs);
     touch.setMultiHoldWindow(config.touchHoldWindow);
+    touch.setMultiTapWindow(config.touchMultiTapWindow);
+    touch.setMultiTapCount(config.touchMultiTapCount);
     touch.setOnTouch(onTouchPress);
     touch.setOnTouchState(onTouchStateChange);
     touch.setOnLongHold(onLongHold);
