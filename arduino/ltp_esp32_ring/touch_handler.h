@@ -17,9 +17,9 @@ typedef void (*TouchCallback)(uint8_t touchIdx);
 typedef void (*TouchStateCallback)(uint8_t touchIdx, bool pressed);
 typedef void (*LongHoldCallback)(uint8_t numSensors);  // Called when long hold detected
 
-// Long hold configuration
-#define TOUCH_LONG_HOLD_MS      1500    // Time to trigger long hold (1.5 seconds)
-#define TOUCH_MULTI_HOLD_WINDOW 1000    // Max time diff between sensors (1 second)
+// Long hold defaults (configurable at runtime)
+#define TOUCH_LONG_HOLD_MS_DEFAULT      1500    // Time to trigger long hold (1.5 seconds)
+#define TOUCH_MULTI_HOLD_WINDOW_DEFAULT 1000    // Max time diff between sensors (1 second)
 
 // Histogram configuration
 #define TOUCH_HIST_BINS         20      // Number of histogram bins
@@ -41,6 +41,8 @@ public:
         , calibrated(false)
         , sensitivity(TOUCH_THRESHOLD_RATIO)
         , longHoldTriggered(false)
+        , longHoldMs(TOUCH_LONG_HOLD_MS_DEFAULT)
+        , multiHoldWindow(TOUCH_MULTI_HOLD_WINDOW_DEFAULT)
         , smoothingAlpha(1.0f)          // Default: no smoothing (raw values)
         , adaptiveBaseline(true)        // Default: adaptive baseline on
         , baselineAlpha(TOUCH_BASELINE_ALPHA)
@@ -188,7 +190,7 @@ public:
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
             if (lastState[i] && pressStartTime[i] > 0) {
                 uint32_t holdTime = now - pressStartTime[i];
-                if (holdTime >= TOUCH_LONG_HOLD_MS) {
+                if (holdTime >= longHoldMs) {
                     longHeldCount++;
                     if (pressStartTime[i] < earliestPress) earliestPress = pressStartTime[i];
                     if (pressStartTime[i] > latestPress) latestPress = pressStartTime[i];
@@ -208,7 +210,7 @@ public:
         // and they were pressed within the multi-hold window of each other
         if (longHeldCount >= 2 && onLongHoldCallback) {
             uint32_t pressDiff = latestPress - earliestPress;
-            if (pressDiff <= TOUCH_MULTI_HOLD_WINDOW) {
+            if (pressDiff <= multiHoldWindow) {
                 longHoldTriggered = true;
                 onLongHoldCallback(longHeldCount);
             } else {
@@ -216,8 +218,8 @@ public:
                 static uint32_t lastWindowDebug = 0;
                 if (now - lastWindowDebug >= 1000) {
                     lastWindowDebug = now;
-                    dualOut.printf("LongHold: press diff %lu > window %d\r\n",
-                                  pressDiff, TOUCH_MULTI_HOLD_WINDOW);
+                    dualOut.printf("LongHold: press diff %lu > window %lu\r\n",
+                                  pressDiff, multiHoldWindow);
                 }
             }
         }
@@ -286,6 +288,21 @@ public:
     }
 
     float getBaselineAlpha() const { return baselineAlpha; }
+
+    // Long hold timing control
+    void setLongHoldMs(uint32_t ms) {
+        longHoldMs = constrain(ms, 200, 10000);
+        dualOut.printf("Long hold time set to %lu ms\r\n", longHoldMs);
+    }
+
+    uint32_t getLongHoldMs() const { return longHoldMs; }
+
+    void setMultiHoldWindow(uint32_t ms) {
+        multiHoldWindow = constrain(ms, 100, 5000);
+        dualOut.printf("Multi-hold window set to %lu ms\r\n", multiHoldWindow);
+    }
+
+    uint32_t getMultiHoldWindow() const { return multiHoldWindow; }
 
     // Get current touch state for a sensor
     bool isTouched(uint8_t idx) const {
@@ -455,6 +472,8 @@ private:
     bool calibrated;
     float sensitivity;
     bool longHoldTriggered;  // Prevents repeated triggers until all released
+    uint32_t longHoldMs;     // Time to trigger long hold
+    uint32_t multiHoldWindow; // Max time diff between sensor presses
     float smoothingAlpha;    // Smoothing factor (1.0 = no smoothing)
     bool adaptiveBaseline;   // Whether baseline tracks drift
     float baselineAlpha;     // How fast baseline adapts

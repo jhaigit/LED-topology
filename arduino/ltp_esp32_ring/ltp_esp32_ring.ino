@@ -383,6 +383,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdTouchSnap(args);
     } else if (strcmp(cmd, "baseline") == 0) {
         cmdBaseline(args);
+    } else if (strcmp(cmd, "longhold") == 0) {
+        cmdLonghold(args);
     } else {
         dualOut.printf("Unknown command: %s\r\n", cmd);
         dualOut.println("Type 'help' for available commands");
@@ -405,6 +407,7 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  touchmon [seconds]      - Monitor touch values continuously (default 10s)");
     dualOut.println("  touchhist [reset|0-3]   - Show touch histograms (reset to clear)");
     dualOut.println("  touchsnap [0-3]         - Show pre-trigger sample snapshot");
+    dualOut.println("  longhold [hold|window]  - Set long-hold timing (ms)");
     dualOut.println("  threshold <0-3> <value> - Manually set threshold for a sensor");
     dualOut.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
     dualOut.println("  test                    - Run LED test pattern");
@@ -890,6 +893,40 @@ void UsbTerminal::cmdBaseline(const char* args) {
         } else {
             dualOut.println("Alpha must be 0.0001-0.1 (or 'on'/'off')");
         }
+    }
+}
+
+void UsbTerminal::cmdLonghold(const char* args) {
+    if (!touch) {
+        dualOut.println("Touch handler not available");
+        return;
+    }
+
+    if (strlen(args) == 0) {
+        dualOut.printf("Long hold: %lu ms, Multi-hold window: %lu ms\r\n",
+                      touch->getLongHoldMs(), touch->getMultiHoldWindow());
+        dualOut.println("Usage: longhold <hold_ms> [window_ms]");
+        dualOut.println("  hold_ms   - Time sensors must be held (200-10000, default 1500)");
+        dualOut.println("  window_ms - Max time between sensor presses (100-5000, default 1000)");
+        return;
+    }
+
+    // Parse one or two values
+    uint32_t holdMs = 0;
+    uint32_t windowMs = 0;
+    int parsed = sscanf(args, "%lu %lu", &holdMs, &windowMs);
+
+    if (parsed >= 1 && holdMs >= 200 && holdMs <= 10000) {
+        touch->setLongHoldMs(holdMs);
+    } else if (parsed >= 1) {
+        dualOut.println("Hold time must be 200-10000 ms");
+        return;
+    }
+
+    if (parsed >= 2 && windowMs >= 100 && windowMs <= 5000) {
+        touch->setMultiHoldWindow(windowMs);
+    } else if (parsed >= 2) {
+        dualOut.println("Window must be 100-5000 ms");
     }
 }
 
