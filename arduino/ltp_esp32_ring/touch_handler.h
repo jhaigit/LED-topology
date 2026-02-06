@@ -43,6 +43,7 @@ public:
         , onTouchStateCallback(nullptr)
         , onLongHoldCallback(nullptr)
         , calibrated(false)
+        , calibratedAt(0)
         , sensitivity(TOUCH_THRESHOLD_RATIO)
         , longHoldTriggered(false)
         , longHoldMs(TOUCH_LONG_HOLD_MS_DEFAULT)
@@ -104,6 +105,7 @@ public:
         }
 
         calibrated = true;
+        calibratedAt = millis();
         dualOut.println("Touch calibration complete.");
     }
 
@@ -187,6 +189,11 @@ public:
                     }
                 }
             }
+        }
+
+        // Reset multi-tap triggered flag when all sensors released
+        if (multiTapTriggered && getHeldCount() == 0) {
+            multiTapTriggered = false;
         }
 
         // Check for long hold on multiple sensors
@@ -519,6 +526,7 @@ private:
     TouchStateCallback onTouchStateCallback;
     LongHoldCallback onLongHoldCallback;
     bool calibrated;
+    uint32_t calibratedAt;          // millis() when calibration completed
     float sensitivity;
     bool longHoldTriggered;  // Prevents repeated triggers until all released
     uint32_t longHoldMs;     // Time to trigger long hold
@@ -550,13 +558,10 @@ private:
 
     // Check for multi-tap gesture (different sensors tapped within window)
     void checkMultiTap(uint32_t now) {
-        if (multiTapTriggered) {
-            // Already triggered, wait for all sensors released
-            if (getHeldCount() == 0) {
-                multiTapTriggered = false;
-            }
-            return;
-        }
+        if (multiTapTriggered) return;
+
+        // Ignore during startup grace period (sensors may produce spurious readings)
+        if (now - calibratedAt < 2000) return;
 
         // Count how many different sensors were tapped within the window
         uint8_t tapCount = 0;
