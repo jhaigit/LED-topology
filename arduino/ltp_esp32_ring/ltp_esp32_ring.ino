@@ -437,7 +437,7 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  touchhist [reset|0-3]   - Show touch histograms (reset to clear)");
     dualOut.println("  touchsnap [0-3]         - Show pre-trigger sample snapshot");
     dualOut.println("  longhold <ms> [window]  - Set long-hold timing (hold 2+ globes to navigate)");
-    dualOut.println("  multitap [window|count] - Set multi-tap gesture (tap different globes quickly)");
+    dualOut.println("  multitap <ms> [count]   - Set multi-tap gesture (tap different globes quickly)");
     dualOut.println("  threshold <0-3> <value> - Manually set threshold for a sensor");
     dualOut.println("  timezone <tz_string>    - Set POSIX timezone (e.g. PST8PDT,M3.2.0,M11.1.0)");
     dualOut.println("  test                    - Run LED test pattern");
@@ -614,6 +614,9 @@ void UsbTerminal::cmdTouch() {
                       touch->getSensitivity(), touch->getSmoothingAlpha(),
                       touch->getHysteresis(),
                       touch->isAdaptiveBaseline() ? "ON" : "OFF");
+        dualOut.printf("Long hold: %lu ms (window %lu ms), Multi-tap: %lu ms (%d sensors)\r\n",
+                      touch->getLongHoldMs(), touch->getMultiHoldWindow(),
+                      touch->getMultiTapWindow(), touch->getMultiTapCount());
         for (uint8_t i = 0; i < TOUCH_NUM_SENSORS; i++) {
             dualOut.printf("  Touch %d: raw=%d, smooth=%.1f, base=%d, thresh=%d, %s\r\n",
                           i, touch->getRawValue(i), touch->getSmoothedValue(i),
