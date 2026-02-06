@@ -695,8 +695,10 @@ void UsbTerminal::cmdTouchMon(const char* args) {
                 touch->isTouched(3) ? "*" : " ");
         }
 
-        // Still run normal updates so touches work
+        // Still run normal updates so touches and LEDs keep working
         touch->update();
+        leds->updateFlash();
+        localModes.update();
         delay(10);
     }
     dualOut.println("\r\nMonitoring complete.");
