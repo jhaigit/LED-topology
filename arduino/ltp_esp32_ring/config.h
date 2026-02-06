@@ -201,6 +201,11 @@ struct DeviceConfig {
     uint8_t ws2812Offset;
     bool inputEventsEnabled;
     float touchSensitivity;     // Touch threshold ratio (0.1-0.95, higher=more sensitive)
+    float touchSmoothing;       // Exponential smoothing alpha (1.0=off, lower=more smoothing)
+    bool touchAdaptiveBaseline; // Whether baseline tracks drift
+    float touchBaselineAlpha;   // How fast baseline adapts
+    uint16_t touchLongHoldMs;   // Time sensors must be held for long hold
+    uint16_t touchHoldWindow;   // Max time between sensor presses for multi-hold
     char timezone[48];          // POSIX TZ string (e.g. "PST8PDT,M3.2.0,M11.1.0")
     uint16_t cycleTime;         // Seconds per mode when cycling (default 10)
 };

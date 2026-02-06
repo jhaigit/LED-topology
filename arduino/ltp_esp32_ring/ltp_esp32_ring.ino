@@ -100,6 +100,11 @@ void loadConfig() {
     config.ws2812Offset = preferences.getUChar("ws2812Offset", WS2812_DEFAULT_OFFSET);
     config.inputEventsEnabled = preferences.getBool("inputEvents", true);
     config.touchSensitivity = preferences.getFloat("touchSens", TOUCH_THRESHOLD_RATIO);
+    config.touchSmoothing = preferences.getFloat("touchSmooth", 1.0f);
+    config.touchAdaptiveBaseline = preferences.getBool("touchAdapt", true);
+    config.touchBaselineAlpha = preferences.getFloat("touchBLAlpha", TOUCH_BASELINE_ALPHA);
+    config.touchLongHoldMs = preferences.getUShort("longHoldMs", TOUCH_LONG_HOLD_MS_DEFAULT);
+    config.touchHoldWindow = preferences.getUShort("holdWindow", TOUCH_MULTI_HOLD_WINDOW_DEFAULT);
     preferences.getString("timezone", config.timezone, sizeof(config.timezone));
     if (strlen(config.timezone) == 0) {
         strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
@@ -129,6 +134,11 @@ void saveConfig() {
     preferences.putUChar("ws2812Offset", config.ws2812Offset);
     preferences.putBool("inputEvents", config.inputEventsEnabled);
     preferences.putFloat("touchSens", config.touchSensitivity);
+    preferences.putFloat("touchSmooth", config.touchSmoothing);
+    preferences.putBool("touchAdapt", config.touchAdaptiveBaseline);
+    preferences.putFloat("touchBLAlpha", config.touchBaselineAlpha);
+    preferences.putUShort("longHoldMs", config.touchLongHoldMs);
+    preferences.putUShort("holdWindow", config.touchHoldWindow);
     preferences.putString("timezone", config.timezone);
     preferences.putUShort("cycleTime", config.cycleTime);
 
@@ -149,6 +159,11 @@ void resetConfig() {
     config.ws2812Offset = WS2812_DEFAULT_OFFSET;
     config.inputEventsEnabled = true;
     config.touchSensitivity = TOUCH_THRESHOLD_RATIO;
+    config.touchSmoothing = 1.0f;
+    config.touchAdaptiveBaseline = true;
+    config.touchBaselineAlpha = TOUCH_BASELINE_ALPHA;
+    config.touchLongHoldMs = TOUCH_LONG_HOLD_MS_DEFAULT;
+    config.touchHoldWindow = TOUCH_MULTI_HOLD_WINDOW_DEFAULT;
     strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
     config.cycleTime = 10;
 
@@ -818,6 +833,7 @@ void UsbTerminal::cmdSmoothing(const char* args) {
     }
 
     touch->setSmoothingAlpha(alpha);
+    config->touchSmoothing = alpha;
 }
 
 void UsbTerminal::cmdTouchHist(const char* args) {
@@ -884,12 +900,15 @@ void UsbTerminal::cmdBaseline(const char* args) {
 
     if (strcmp(args, "on") == 0) {
         touch->setAdaptiveBaseline(true);
+        config->touchAdaptiveBaseline = true;
     } else if (strcmp(args, "off") == 0) {
         touch->setAdaptiveBaseline(false);
+        config->touchAdaptiveBaseline = false;
     } else {
         float alpha = atof(args);
         if (alpha >= 0.0001 && alpha <= 0.1) {
             touch->setBaselineAlpha(alpha);
+            config->touchBaselineAlpha = alpha;
         } else {
             dualOut.println("Alpha must be 0.0001-0.1 (or 'on'/'off')");
         }
@@ -918,6 +937,7 @@ void UsbTerminal::cmdLonghold(const char* args) {
 
     if (parsed >= 1 && holdMs >= 200 && holdMs <= 10000) {
         touch->setLongHoldMs(holdMs);
+        config->touchLongHoldMs = holdMs;
     } else if (parsed >= 1) {
         dualOut.println("Hold time must be 200-10000 ms");
         return;
@@ -925,6 +945,7 @@ void UsbTerminal::cmdLonghold(const char* args) {
 
     if (parsed >= 2 && windowMs >= 100 && windowMs <= 5000) {
         touch->setMultiHoldWindow(windowMs);
+        config->touchHoldWindow = windowMs;
     } else if (parsed >= 2) {
         dualOut.println("Window must be 100-5000 ms");
     }
@@ -981,6 +1002,11 @@ void setup() {
     // Initialize touch sensors
     touch.begin();
     touch.setSensitivity(config.touchSensitivity);
+    touch.setSmoothingAlpha(config.touchSmoothing);
+    touch.setAdaptiveBaseline(config.touchAdaptiveBaseline);
+    touch.setBaselineAlpha(config.touchBaselineAlpha);
+    touch.setLongHoldMs(config.touchLongHoldMs);
+    touch.setMultiHoldWindow(config.touchHoldWindow);
     touch.setOnTouch(onTouchPress);
     touch.setOnTouchState(onTouchStateChange);
     touch.setOnLongHold(onLongHold);
