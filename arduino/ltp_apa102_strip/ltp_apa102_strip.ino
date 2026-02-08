@@ -760,6 +760,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             response[respLen++] = CAPS_BRIGHTNESS | CAPS_EXTENDED;
             response[respLen++] = CAPS_PIXEL_READBACK | CAPS_EEPROM | CAPS_INPUTS;
             response[respLen++] = NUM_CONTROLS;
+            response[respLen++] = NUM_INPUTS;
             // Device name
             {
                 const char* name = DEVICE_NAME;

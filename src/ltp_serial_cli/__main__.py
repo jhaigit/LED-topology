@@ -13,7 +13,12 @@ import sys
 import time
 
 from .device import LtpDevice
-from .exceptions import LtpError
+from .exceptions import LtpError, LtpTimeoutError
+from .protocol import (
+    CTRL_BOOL, CTRL_UINT8, CTRL_UINT16, CTRL_INT8, CTRL_INT16, CTRL_ACTION,
+    CTRL_FLAG_READONLY, CTRL_FLAG_VOLATILE, CTRL_FLAG_ACTION,
+    INPUT_BUTTON, INPUT_TOUCH, INPUT_SWITCH,
+)
 
 
 def cmd_info(device: LtpDevice, args: argparse.Namespace):
@@ -41,6 +46,58 @@ def cmd_info(device: LtpDevice, args: argparse.Namespace):
         for strip in info.strips:
             print(f"  [{strip.strip_id}] {strip.pixel_count} pixels, {strip.led_type_name}, {strip.color_format_name}")
             print(f"      Pins: data={strip.data_pin}, clock={strip.clock_pin}")
+
+    # Controls
+    try:
+        controls = device.get_controls()
+        if controls:
+            type_names = {
+                CTRL_BOOL: "bool", CTRL_UINT8: "u8", CTRL_UINT16: "u16",
+                CTRL_INT8: "i8", CTRL_INT16: "i16", CTRL_ACTION: "action",
+            }
+            print(f"\nControls:")
+            for c in controls:
+                tname = type_names.get(c["type"], f"0x{c['type']:02X}")
+                flags = []
+                if c["flags"] & CTRL_FLAG_READONLY:
+                    flags.append("ro")
+                if c["flags"] & CTRL_FLAG_VOLATILE:
+                    flags.append("volatile")
+                if c["flags"] & CTRL_FLAG_ACTION:
+                    flags.append("action")
+                flag_str = f" [{','.join(flags)}]" if flags else ""
+                if c["type"] == CTRL_ACTION:
+                    print(f"  [{c['id']:3d}] {c['name']}: {c['description']}{flag_str}")
+                else:
+                    print(f"  [{c['id']:3d}] {c['name']} = {c['value']} ({tname}, {c['min']}..{c['max']}) {c['description']}{flag_str}")
+    except (LtpError, LtpTimeoutError):
+        pass
+
+    # Inputs
+    try:
+        inputs = device.get_inputs()
+        if inputs:
+            input_type_names = {
+                INPUT_BUTTON: "button", INPUT_TOUCH: "touch", INPUT_SWITCH: "switch",
+            }
+            print(f"\nInputs:")
+            for inp in inputs:
+                tname = input_type_names.get(inp["type"], f"type={inp['type']}")
+                val = "ON" if inp["value"] else "off"
+                print(f"  [{inp['id']}] {inp['name']} ({tname}): {val}")
+    except (LtpError, LtpTimeoutError):
+        pass
+
+    # Build info
+    try:
+        build = device.get_build_info()
+        if build:
+            print(f"\nBuild:")
+            print(f"  Firmware: {build.firmware_name}")
+            print(f"  Commit: {build.git_commit}")
+            print(f"  Date: {build.build_date}")
+    except (LtpError, LtpTimeoutError):
+        pass
 
 
 def cmd_status(device: LtpDevice, args: argparse.Namespace):

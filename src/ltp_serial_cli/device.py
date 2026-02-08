@@ -44,6 +44,7 @@ from .protocol import (
     CTRL_ID_AUTO_SHOW,
     CTRL_ID_FRAME_ACK,
     CAPS_EXTENDED,
+    CAPS_INPUTS,
     CAPS_SUBMATRIX,
     LED_TYPE_NAMES,
     COLOR_FORMAT_NAMES,
@@ -987,8 +988,13 @@ class LtpDevice:
             control_count=p[10],
         )
 
-        # Parse device name (null-terminated string starting at offset 11)
+        # Input count follows control_count when CAPS_INPUTS is set
         offset = 11
+        if info.capabilities2 & CAPS_INPUTS and len(p) > offset:
+            info.input_count = p[offset]
+            offset += 1
+
+        # Parse device name (null-terminated string)
         name_end = offset
         while name_end < len(p) and p[name_end] != 0:
             name_end += 1
