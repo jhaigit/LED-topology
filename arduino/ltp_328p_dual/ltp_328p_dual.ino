@@ -56,39 +56,49 @@ void ws2812Init() {
     ws2812PinMask = digitalPinToBitMask(WS2812_DATA_PIN);
 }
 
-// Send a single byte out the WS2812 pin with precise timing.
+// Send a single byte out the WS2812 pin with cycle-accurate timing.
 // Must be called with interrupts already disabled.
-// Timing for WS2812 at 16 MHz (62.5 ns per cycle):
-//   T0H: 350ns (6 cycles), T0L: 800ns (13 cycles)
-//   T1H: 700ns (11 cycles), T1L: 600ns (10 cycles)
+// Full inline assembly for 16 MHz AVR (62.5 ns per cycle):
+//   T0H: 312ns (5 cy), T1H: 812ns (13 cy), period: 1.31µs (21 cy)
+// Based on the Adafruit NeoPixel approach: test the data bit during the
+// HIGH period and conditionally keep the pin HIGH (1-bit) or drop it
+// LOW (0-bit) at a fixed cycle count.
+static inline void ws2812SendByte(uint8_t b, uint8_t pinHigh, uint8_t pinLow,
+                                   volatile uint8_t* port)
+    __attribute__((always_inline));
+
 static inline void ws2812SendByte(uint8_t b, uint8_t pinHigh, uint8_t pinLow,
                                    volatile uint8_t* port) {
-    for (uint8_t bit = 0; bit < 8; bit++) {
-        if (b & 0x80) {
-            *port = pinHigh;
-            __asm__ __volatile__(
-                "nop\n\t" "nop\n\t" "nop\n\t" "nop\n\t"
-                "nop\n\t" "nop\n\t" "nop\n\t" "nop\n\t"
-                "nop\n\t"
-            );
-            *port = pinLow;
-            __asm__ __volatile__(
-                "nop\n\t" "nop\n\t" "nop\n\t" "nop\n\t"
-                "nop\n\t"
-            );
-        } else {
-            *port = pinHigh;
-            __asm__ __volatile__(
-                "nop\n\t" "nop\n\t" "nop\n\t"
-            );
-            *port = pinLow;
-            __asm__ __volatile__(
-                "nop\n\t" "nop\n\t" "nop\n\t" "nop\n\t"
-                "nop\n\t" "nop\n\t" "nop\n\t" "nop\n\t"
-            );
-        }
-        b <<= 1;
-    }
+    uint8_t cnt, next;
+    asm volatile(
+        "   ldi  %[cnt], 8"          "\n\t"
+        "   mov  %[next], %[lo]"     "\n\t"
+        "L_%=:"                       "\n\t"
+        "   st   %a[port], %[hi]"    "\n\t" // T=0  pin HIGH
+        "   sbrc %[byte], 7"         "\n\t" // T=2  test data bit
+        "   mov  %[next], %[hi]"     "\n\t" // T=3  1-bit: keep HIGH
+        "   dec  %[cnt]"             "\n\t" // T=4
+        "   st   %a[port], %[next]"  "\n\t" // T=5  0:LOW, 1:stays HIGH
+        "   mov  %[next], %[lo]"     "\n\t" // T=7  reset for next bit
+        "   breq E_%="               "\n\t" // T=8  exit if last bit
+        "   rol  %[byte]"            "\n\t" // T=9  shift to next bit
+        "   rjmp .+0"                "\n\t" // T=10 delay 2
+        "   nop"                     "\n\t" // T=12
+        "   st   %a[port], %[lo]"    "\n\t" // T=13 pin LOW
+        "   rjmp .+0"                "\n\t" // T=15 delay 2
+        "   rjmp .+0"                "\n\t" // T=17 delay 2
+        "   rjmp L_%="               "\n\t" // T=19 loop (-> T=21)
+        "E_%=:"                       "\n\t"
+        "   rjmp .+0"                "\n\t" // T=10 delay 2
+        "   nop"                     "\n\t" // T=12
+        "   st   %a[port], %[lo]"    "\n\t" // T=13 pin LOW (final)
+        : [byte]  "+r" (b),
+          [cnt]   "=&d" (cnt),
+          [next]  "=&r" (next)
+        : [port]  "e" (port),
+          [hi]    "r" (pinHigh),
+          [lo]    "r" (pinLow)
+    );
 }
 
 // Send pixel data from an RGB buffer as WS2812 GRB with brightness scaling.
