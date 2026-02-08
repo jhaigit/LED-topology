@@ -47,9 +47,7 @@
 #define FIRMWARE_NAME       "ltp-octo-v2"
 
 // Maximum payload size (Teensy 3.2 has 64KB RAM)
-// LTP_MAX_PAYLOAD must be defined before including ltp_protocol.h
-#define LTP_MAX_PAYLOAD     4096
-#define MAX_PAYLOAD_SIZE    LTP_MAX_PAYLOAD
+#define MAX_PAYLOAD_SIZE    4096
 
 // ============================================================================
 // MODE CONFIGURATION - Uncomment ONE mode

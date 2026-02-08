@@ -33,7 +33,8 @@
 LedDriverOcto leds;
 
 // Protocol handler
-LtpProtocol protocol(Serial, MAX_PAYLOAD_SIZE);
+static uint8_t protocolBuffer[MAX_PAYLOAD_SIZE];
+LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 
 // EEPROM configuration
 #define CONFIG_MAGIC        0x4C54  // "LT" - magic number for validation

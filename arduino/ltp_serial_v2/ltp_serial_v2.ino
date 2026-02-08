@@ -14,10 +14,9 @@
  *   - Serial: USB (115200 baud default)
  */
 
-// Maximum payload size - MUST be defined before including ltp_protocol.h
+// Maximum payload size
 // 160 pixels * 3 bytes = 480 bytes for full frame
-#define LTP_MAX_PAYLOAD     512
-#define MAX_PAYLOAD_SIZE    LTP_MAX_PAYLOAD
+#define MAX_PAYLOAD_SIZE    512
 
 #include <EEPROM.h>
 #if defined(__AVR__)
@@ -55,7 +54,8 @@
 LedDriverLPD8806 leds(NUM_PIXELS, DATA_PIN, CLOCK_PIN, USE_HARDWARE_SPI);
 
 // Protocol handler
-LtpProtocol protocol(Serial, MAX_PAYLOAD_SIZE);
+static uint8_t protocolBuffer[MAX_PAYLOAD_SIZE];
+LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 
 // EEPROM configuration
 #define CONFIG_MAGIC        0x4C54  // "LT" - magic number for validation

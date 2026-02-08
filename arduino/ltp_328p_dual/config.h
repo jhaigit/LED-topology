@@ -20,7 +20,7 @@
 
 // Maximum pixels that can fit in RAM.
 // ATmega328P has 2KB RAM. Budget:
-//   ~256 bytes protocol buffer (LTP_MAX_PAYLOAD)
+//   ~256 bytes protocol buffer (MAX_PAYLOAD_SIZE)
 //   ~160 bytes fire effect heat map
 //   ~300 bytes control defs, config, inputs, stats, stack
 //   Remaining ~1300 bytes for pixel buffer (3 bytes/pixel)
@@ -75,9 +75,7 @@
 #define FIRMWARE_NAME       "ltp-328p-dual"
 
 // Maximum payload size (ATmega328P has 2KB RAM - keep small)
-// LTP_MAX_PAYLOAD must be defined before including ltp_protocol.h
-#define LTP_MAX_PAYLOAD     256
-#define MAX_PAYLOAD_SIZE    LTP_MAX_PAYLOAD
+#define MAX_PAYLOAD_SIZE    256
 
 // ============================================================================
 // IDLE TIMEOUT

@@ -12,12 +12,6 @@
 
 // Protocol constants
 #define LTP_START_BYTE      0xAA
-// LTP_MAX_PAYLOAD can be overridden before including this header
-// For AVR (Arduino Uno): use 256 or less
-// For ARM (Teensy, ESP32): can use up to 4096
-#ifndef LTP_MAX_PAYLOAD
-#define LTP_MAX_PAYLOAD     512  // Default for moderate RAM boards
-#endif
 #define LTP_PROTOCOL_MAJOR  2
 #define LTP_PROTOCOL_MINOR  0
 
@@ -205,7 +199,7 @@ struct LtpPacket {
     uint8_t flags;
     uint16_t length;
     uint8_t cmd;
-    uint8_t payload[LTP_MAX_PAYLOAD];
+    uint8_t* payload;
     uint8_t checksum;
 
     void clear() {
@@ -219,7 +213,7 @@ struct LtpPacket {
 // Protocol handler class
 class LtpProtocol {
 public:
-    LtpProtocol(Stream& serial, uint16_t maxPayload = 512);
+    LtpProtocol(Stream& serial, uint8_t* buffer, uint16_t maxPayload);
 
     // Process incoming bytes, returns true when complete packet received
     bool processInput();

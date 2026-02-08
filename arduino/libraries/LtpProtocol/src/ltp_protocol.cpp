@@ -4,15 +4,16 @@
 
 #include "ltp_protocol.h"
 
-LtpProtocol::LtpProtocol(Stream& serial, uint16_t maxPayload)
+LtpProtocol::LtpProtocol(Stream& serial, uint8_t* buffer, uint16_t maxPayload)
     : serial(serial)
     , state(ParserState::WAIT_START)
     , payloadIndex(0)
     , runningChecksum(0)
-    , maxPayload(min(maxPayload, (uint16_t)LTP_MAX_PAYLOAD))
+    , maxPayload(maxPayload)
     , lastByteTime(0)
 {
     rxPacket.clear();
+    rxPacket.payload = buffer;
 }
 
 void LtpProtocol::reset() {

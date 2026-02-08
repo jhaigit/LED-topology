@@ -141,7 +141,8 @@ static void apa102SendByte(uint8_t b) {
 // PROTOCOL HANDLER
 // ============================================================================
 
-LtpProtocol protocol(Serial, MAX_PAYLOAD_SIZE);
+static uint8_t protocolBuffer[MAX_PAYLOAD_SIZE];
+LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 
 // ============================================================================
 // EEPROM CONFIGURATION
