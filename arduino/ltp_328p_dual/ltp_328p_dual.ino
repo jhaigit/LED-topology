@@ -977,6 +977,15 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
                 }
                 response[respLen++] = 0;
             }
+            // Matrix dimensions (4 bytes: width_lo, width_hi, height_lo, height_hi)
+            {
+                uint16_t mw = config.matrixWidth;
+                uint16_t mh = (mw > 1) ? numPixels / mw : 0;
+                response[respLen++] = mw & 0xFF;
+                response[respLen++] = mw >> 8;
+                response[respLen++] = mh & 0xFF;
+                response[respLen++] = mh >> 8;
+            }
             break;
 
         case INFO_VERSION:
@@ -1360,8 +1369,7 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
             protocol.sendAck(CMD_SET_CONTROL);
             delay(100);
             #if defined(__AVR__)
-            wdt_enable(WDTO_15MS);
-            while (1) {}
+            asm volatile ("jmp 0");
             #endif
             return;
 
@@ -1453,8 +1461,19 @@ void handleGetPixels(const uint8_t* payload, uint16_t length) {
     // Stream response directly to avoid dynamic allocation on tiny AVR
     streamBegin(CMD_PIXEL_RESPONSE, totalLen);
     for (uint8_t i = 0; i < 5; i++) streamByte(response[i]);
-    const uint8_t* px = pixelBuffer + start * 3;
-    for (uint16_t i = 0; i < count * 3; i++) streamByte(px[i]);
+    if (config.matrixWidth <= 1) {
+        // Fast path: no matrix mapping, pixels are contiguous
+        const uint8_t* px = pixelBuffer + start * 3;
+        for (uint16_t i = 0; i < count * 3; i++) streamByte(px[i]);
+    } else {
+        // Matrix mode: read through mapPixel for logical order
+        for (uint16_t i = 0; i < count; i++) {
+            uint16_t phys = mapPixel(start + i) * 3;
+            streamByte(pixelBuffer[phys + 0]);
+            streamByte(pixelBuffer[phys + 1]);
+            streamByte(pixelBuffer[phys + 2]);
+        }
+    }
     streamEnd();
 }
 
