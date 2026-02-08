@@ -89,18 +89,42 @@ class VirtualSource(ABC):
             BooleanControl(
                 id="reverse",
                 name="Reverse",
-                description="Reverse animation direction",
+                description="Reverse scroll/animation direction",
                 value=False,
                 group="animation",
             )
         )
         self._controls.register(
             BooleanControl(
-                id="mirror",
-                name="Mirror",
-                description="Mirror pattern around center",
+                id="mirror_h",
+                name="Mirror H",
+                description="Flip left-right",
                 value=False,
-                group="animation",
+                group="output",
+            )
+        )
+        self._controls.register(
+            BooleanControl(
+                id="mirror_v",
+                name="Mirror V",
+                description="Flip top-bottom",
+                value=False,
+                group="output",
+            )
+        )
+        self._controls.register(
+            EnumControl(
+                id="rotate",
+                name="Rotate",
+                description="Rotate output",
+                value="none",
+                options=[
+                    {"value": "none", "label": "None"},
+                    {"value": "90", "label": "90\u00b0"},
+                    {"value": "180", "label": "180\u00b0"},
+                    {"value": "270", "label": "270\u00b0"},
+                ],
+                group="output",
             )
         )
 
@@ -157,16 +181,50 @@ class VirtualSource(ABC):
     def _apply_base_transforms(
         self, pixels: np.ndarray, time_elapsed: float
     ) -> np.ndarray:
-        """Apply base transforms (brightness, mirror, etc.)."""
+        """Apply base transforms (brightness, rotate, mirror)."""
         # Apply brightness
         brightness = self.get_control("brightness")
         if brightness < 1.0:
             pixels = (pixels * brightness).astype(np.uint8)
 
-        # Apply mirror
-        if self.get_control("mirror"):
-            half = len(pixels) // 2
-            pixels[half:] = pixels[: len(pixels) - half][::-1]
+        # Get 2D dimensions
+        dims = self.config.output_dimensions
+        if len(dims) >= 2:
+            width, height = dims[0], dims[1]
+        else:
+            width = dims[0]
+            height = 1
+
+        num_pixels = len(pixels)
+        if width * height != num_pixels:
+            width = num_pixels
+            height = 1
+
+        rotate = self.get_control("rotate")
+        mirror_h = self.get_control("mirror_h")
+        mirror_v = self.get_control("mirror_v")
+
+        if rotate != "none" or mirror_h or mirror_v:
+            # Reshape to 2D for spatial transforms
+            grid = pixels.reshape(height, width, 3)
+
+            # Apply rotate first (rot90 rotates CCW, invert k for CW)
+            if rotate == "90":
+                grid = np.rot90(grid, k=3)
+            elif rotate == "180":
+                grid = np.rot90(grid, k=2)
+            elif rotate == "270":
+                grid = np.rot90(grid, k=1)
+
+            # Apply mirror_h (flip columns)
+            if mirror_h:
+                grid = grid[:, ::-1, :]
+
+            # Apply mirror_v (flip rows)
+            if mirror_v:
+                grid = grid[::-1, :, :]
+
+            pixels = grid.reshape(-1, 3)
 
         return pixels
 

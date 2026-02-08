@@ -184,9 +184,9 @@ class TextSource(VirtualSource):
                 name="Scroll Speed",
                 description="Pixels per second",
                 value=30.0,
-                min=1.0,
+                min=0.1,
                 max=200.0,
-                step=1.0,
+                step=0.1,
                 group="animation",
             )
         )
@@ -404,7 +404,6 @@ class TextSource(VirtualSource):
         scroll_mode_str = self.get_control("scroll_mode")
         scroll_mode = ScrollDirection(scroll_mode_str)
         scroll_speed = self.get_control("scroll_speed")
-        speed_multiplier = self.get_control("speed")
 
         # Word wrap handling
         word_wrap = self.get_control("word_wrap")
@@ -429,8 +428,8 @@ class TextSource(VirtualSource):
                 total_distance = metrics.height + (height if self.get_control("scroll_gap") else 0)
 
             if total_distance > 0:
-                # Pixels scrolled = time * speed * multiplier
-                pixels_scrolled = time_elapsed * scroll_speed * speed_multiplier
+                # time_elapsed already includes speed via get_time_elapsed()
+                pixels_scrolled = time_elapsed * scroll_speed
                 scroll_position = (pixels_scrolled % total_distance) / total_distance
             else:
                 scroll_position = 0.0

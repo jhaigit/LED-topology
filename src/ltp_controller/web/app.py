@@ -1022,14 +1022,12 @@ def create_app(
             width = dims[0]
             height = 1
 
-        # Render a frame
-        import time
+        # Render a frame with all transforms (speed, reverse, brightness, mirror)
         num_pixels = width * height
-        time_elapsed = time.time() - source._start_time if source._start_time else 0.0
         try:
-            frame = source.render(num_pixels, time_elapsed)
+            frame = source.render_frame(num_pixels)
             pixels = frame.tolist() if hasattr(frame, 'tolist') else list(frame)
-        except Exception as e:
+        except Exception:
             # Return empty preview on error
             pixels = []
 
