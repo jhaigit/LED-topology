@@ -26,6 +26,7 @@
 #include <EEPROM.h>
 #if defined(__AVR__)
 #include <avr/wdt.h>
+#include <avr/pgmspace.h>
 #endif
 #include "config.h"
 #include <ltp_protocol.h>
@@ -217,9 +218,11 @@ InputState inputs[NUM_INPUTS] = {
     { BUTTON_2_PIN, INPUT_BUTTON, !BUTTON_ACTIVE_LOW, false, false, false, 0 }
 };
 
-const char* inputNames[NUM_INPUTS] = {
-    "Button1",
-    "Button2"
+static const char inputName0[] PROGMEM = "Button1";
+static const char inputName1[] PROGMEM = "Button2";
+static const char* const inputNames[NUM_INPUTS] PROGMEM = {
+    inputName0,
+    inputName1
 };
 
 // ============================================================================
@@ -262,30 +265,43 @@ bool heartbeatState = false;
 // CONTROL DEFINITIONS
 // ============================================================================
 
+// Control name/description strings in PROGMEM to save RAM
+static const char cn0[] PROGMEM = "brightness";   static const char cd0[] PROGMEM = "0-255";
+static const char cn1[] PROGMEM = "gamma";         static const char cd1[] PROGMEM = "x10, 10=1.0";
+static const char cn2[] PROGMEM = "idle_timeout";  static const char cd2[] PROGMEM = "secs, 0=off";
+static const char cn3[] PROGMEM = "auto_show";     static const char cd3[] PROGMEM = "show after cmds";
+static const char cn4[] PROGMEM = "frame_ack";     static const char cd4[] PROGMEM = "ack frames";
+static const char cn5[] PROGMEM = "status_interval"; static const char cd5[] PROGMEM = "ms, 0=off";
+static const char cn6[] PROGMEM = "local_mode";    static const char cd6[] PROGMEM = "0=off, 255=cycle";
+static const char cn7[] PROGMEM = "cycle_time";    static const char cd7[] PROGMEM = "mode cycle, secs";
+static const char cn8[] PROGMEM = "num_pixels";    static const char cd8[] PROGMEM = "pixel count";
+static const char cn9[] PROGMEM = "active_strip";  static const char cd9[] PROGMEM = "0=WS2812, 1=APA102";
+static const char cn10[] PROGMEM = "save";         static const char cd10[] PROGMEM = "save to EEPROM";
+static const char cn11[] PROGMEM = "reboot";       static const char cd11[] PROGMEM = "restart";
+
 struct ControlDef {
     uint8_t id;
     uint8_t type;
     uint8_t flags;
     int16_t minVal;
     int16_t maxVal;
-    const char* name;
-    const char* description;
+    const char* name;        // PROGMEM pointer
+    const char* description; // PROGMEM pointer
 };
 
-static const ControlDef controlDefs[NUM_CONTROLS] = {
-    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        "brightness",    "0-255" },
-    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,         "gamma",         "x10, 10=1.0" },
-    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767,      "idle_timeout",  "secs, 0=off" },
-    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show", "show after cmds" },
-    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack", "ack frames" },
-    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval", "ms, 0=off" },
-    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        "local_mode",    "0=off, 255=cycle" },
-    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,       "cycle_time",    "mode cycle, secs" },
-    { CTRL_ID_NUM_PIXELS,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, "num_pixels",    "active pixel count" },
-    { CTRL_ID_ACTIVE_STRIP,    CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     1,          "active_strip",  "0=WS2812, 1=APA102" },
-    // Action controls
-    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save",   "save to EEPROM" },
-    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot", "restart" },
+static const ControlDef controlDefs[NUM_CONTROLS] PROGMEM = {
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        cn0, cd0 },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,         cn1, cd1 },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767,      cn2, cd2 },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn3, cd3 },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn4, cd4 },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, cn5, cd5 },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        cn6, cd6 },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,       cn7, cd7 },
+    { CTRL_ID_NUM_PIXELS,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, cn8, cd8 },
+    { CTRL_ID_ACTIVE_STRIP,    CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     1,          cn9, cd9 },
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn10, cd10 },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn11, cd11 },
 };
 
 uint16_t getControlValue(uint8_t controlId, uint8_t* valueSize) {
@@ -494,11 +510,13 @@ void updateInputs() {
 }
 
 void sendInputEvent(uint8_t inputId, bool state) {
-    const char* name = inputNames[inputId];
-    uint8_t nameLen = strlen(name);
-    if (nameLen > 15) nameLen = 15;
+    char nameBuf[16];
+    const char* namePtr = (const char*)pgm_read_ptr(&inputNames[inputId]);
+    strncpy_P(nameBuf, namePtr, 15);
+    nameBuf[15] = 0;
+    uint8_t nameLen = strlen(nameBuf);
 
-    uint8_t payload[6 + 1 + nameLen];
+    uint8_t payload[22]; // 6 + 1 + 15 max
     payload[0] = inputId;
     payload[1] = inputs[inputId].type;
     uint16_t timestamp = millis() & 0xFFFF;
@@ -506,7 +524,7 @@ void sendInputEvent(uint8_t inputId, bool state) {
     payload[3] = timestamp >> 8;
     payload[4] = state ? 1 : 0;
     payload[5] = nameLen;
-    memcpy(payload + 6, name, nameLen);
+    memcpy(payload + 6, nameBuf, nameLen);
 
     protocol.sendPacket(CMD_INPUT_EVENT, payload, 6 + 1 + nameLen);
 }
@@ -778,6 +796,93 @@ void sendHello() {
     protocol.sendPacket(CMD_HELLO, payload, 12);
 }
 
+// Streaming packet send - writes directly to Serial byte by byte
+// to avoid large stack buffers on ATmega328P.
+static uint8_t streamChecksum;
+
+static void streamBegin(uint8_t cmd, uint16_t length) {
+    streamChecksum = 0;
+    Serial.write(LTP_START_BYTE);
+    uint8_t txFlags = FLAG_RESPONSE;
+    Serial.write(txFlags);
+    streamChecksum ^= txFlags;
+    Serial.write((uint8_t)(length & 0xFF));
+    streamChecksum ^= (uint8_t)(length & 0xFF);
+    Serial.write((uint8_t)(length >> 8));
+    streamChecksum ^= (uint8_t)(length >> 8);
+    Serial.write(cmd);
+    streamChecksum ^= cmd;
+}
+
+static void streamByte(uint8_t b) {
+    Serial.write(b);
+    streamChecksum ^= b;
+}
+
+static void streamEnd() {
+    Serial.write(streamChecksum);
+}
+
+// Send INFO_CONTROLS response by streaming directly to Serial.
+// Reads controlDefs from PROGMEM. Uses ~30 bytes of stack.
+static void sendInfoControls() {
+    // Pass 1: compute total payload length
+    uint16_t totalLen = 1; // NUM_CONTROLS byte
+    for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
+        totalLen += 7; // id + type + flags + min(2) + max(2)
+        uint8_t valueSize;
+        uint8_t id = pgm_read_byte(&controlDefs[i].id);
+        getControlValue(id, &valueSize);
+        totalLen += valueSize;
+        const char* name = (const char*)pgm_read_ptr(&controlDefs[i].name);
+        totalLen += strlen_P(name) + 1;
+        const char* desc = (const char*)pgm_read_ptr(&controlDefs[i].description);
+        totalLen += strlen_P(desc) + 1;
+    }
+
+    // Pass 2: stream the packet
+    streamBegin(CMD_INFO_RESPONSE, totalLen);
+    streamByte(NUM_CONTROLS);
+
+    for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
+        uint8_t id = pgm_read_byte(&controlDefs[i].id);
+        uint8_t type = pgm_read_byte(&controlDefs[i].type);
+        uint8_t ctrlFlags = pgm_read_byte(&controlDefs[i].flags);
+        int16_t minVal = (int16_t)pgm_read_word(&controlDefs[i].minVal);
+        int16_t maxVal = (int16_t)pgm_read_word(&controlDefs[i].maxVal);
+
+        streamByte(id);
+        streamByte(type);
+        streamByte(ctrlFlags);
+        streamByte(minVal & 0xFF);
+        streamByte((minVal >> 8) & 0xFF);
+        streamByte(maxVal & 0xFF);
+        streamByte((maxVal >> 8) & 0xFF);
+
+        uint8_t valueSize;
+        uint16_t value = getControlValue(id, &valueSize);
+        streamByte(value & 0xFF);
+        if (valueSize > 1) {
+            streamByte((value >> 8) & 0xFF);
+        }
+
+        const char* name = (const char*)pgm_read_ptr(&controlDefs[i].name);
+        char c;
+        while ((c = pgm_read_byte(name++)) != 0) {
+            streamByte(c);
+        }
+        streamByte(0);
+
+        const char* desc = (const char*)pgm_read_ptr(&controlDefs[i].description);
+        while ((c = pgm_read_byte(desc++)) != 0) {
+            streamByte(c);
+        }
+        streamByte(0);
+    }
+
+    streamEnd();
+}
+
 void handleGetInfo(const uint8_t* payload, uint16_t length) {
     if (length < 1) {
         protocol.sendNak(CMD_GET_INFO, ERR_INVALID_LENGTH);
@@ -785,7 +890,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
     }
 
     uint8_t infoType = payload[0];
-    uint8_t response[350];
+    uint8_t response[64];
     uint16_t respLen = 0;
 
     switch (infoType) {
@@ -916,34 +1021,8 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             break;
 
         case INFO_CONTROLS:
-            response[respLen++] = NUM_CONTROLS;
-            for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
-                const ControlDef& ctrl = controlDefs[i];
-                response[respLen++] = ctrl.id;
-                response[respLen++] = ctrl.type;
-                response[respLen++] = ctrl.flags;
-                response[respLen++] = ctrl.minVal & 0xFF;
-                response[respLen++] = (ctrl.minVal >> 8) & 0xFF;
-                response[respLen++] = ctrl.maxVal & 0xFF;
-                response[respLen++] = (ctrl.maxVal >> 8) & 0xFF;
-                uint8_t valueSize;
-                uint16_t value = getControlValue(ctrl.id, &valueSize);
-                response[respLen++] = value & 0xFF;
-                if (valueSize > 1) {
-                    response[respLen++] = (value >> 8) & 0xFF;
-                }
-                const char* name = ctrl.name;
-                while (*name && respLen < sizeof(response) - 2) {
-                    response[respLen++] = *name++;
-                }
-                response[respLen++] = 0;
-                const char* desc = ctrl.description;
-                while (*desc && respLen < sizeof(response) - 1) {
-                    response[respLen++] = *desc++;
-                }
-                response[respLen++] = 0;
-            }
-            break;
+            sendInfoControls();
+            return;
 
         default:
             protocol.sendNak(CMD_GET_INFO, ERR_INVALID_PARAM);
@@ -968,14 +1047,16 @@ void handleGetInput(const uint8_t* payload, uint16_t length) {
         response[offset++] = 0;
 
         for (uint8_t i = 0; i < NUM_INPUTS; i++) {
-            const char* name = inputNames[i];
-            uint8_t nameLen = strlen(name);
-            if (nameLen > 15) nameLen = 15;
+            char nameBuf[16];
+            const char* nameP = (const char*)pgm_read_ptr(&inputNames[i]);
+            strncpy_P(nameBuf, nameP, 15);
+            nameBuf[15] = 0;
+            uint8_t nameLen = strlen(nameBuf);
             response[offset++] = i;
             response[offset++] = inputs[i].type;
             response[offset++] = inputs[i].currentState ? 1 : 0;
             response[offset++] = nameLen;
-            memcpy(response + offset, name, nameLen);
+            memcpy(response + offset, nameBuf, nameLen);
             offset += nameLen;
         }
 
@@ -986,10 +1067,13 @@ void handleGetInput(const uint8_t* payload, uint16_t length) {
         response[1] = inputs[inputId].type;
         response[2] = inputs[inputId].currentState ? 1 : 0;
         response[3] = 0;
-        const char* name = inputNames[inputId];
-        uint8_t nameLen = strlen(name);
+        char nameBuf[16];
+        const char* nameP = (const char*)pgm_read_ptr(&inputNames[inputId]);
+        strncpy_P(nameBuf, nameP, 15);
+        nameBuf[15] = 0;
+        uint8_t nameLen = strlen(nameBuf);
         if (nameLen > 4) nameLen = 4;
-        memcpy(response + 4, name, nameLen);
+        memcpy(response + 4, nameBuf, nameLen);
         protocol.sendPacket(CMD_INPUT_RESPONSE, response, 4 + nameLen);
     } else {
         protocol.sendNak(CMD_GET_INPUT, ERR_INVALID_PARAM);
@@ -1279,17 +1363,12 @@ void handleGetPixels(const uint8_t* payload, uint16_t length) {
     // We can send in one shot since pixel data is contiguous in pixelBuffer
     uint16_t totalLen = 5 + count * 3;
 
-    // Assemble into a temp buffer (limited by MAX_PAYLOAD_SIZE)
-    uint8_t* resp = new uint8_t[totalLen];
-    if (!resp) {
-        protocol.sendNak(CMD_GET_PIXELS, ERR_BUFFER_OVERFLOW);
-        return;
-    }
-    memcpy(resp, response, 5);
-    memcpy(resp + 5, pixelBuffer + start * 3, count * 3);
-
-    protocol.sendPacket(CMD_PIXEL_RESPONSE, resp, totalLen);
-    delete[] resp;
+    // Stream response directly to avoid dynamic allocation on tiny AVR
+    streamBegin(CMD_PIXEL_RESPONSE, totalLen);
+    for (uint8_t i = 0; i < 5; i++) streamByte(response[i]);
+    const uint8_t* px = pixelBuffer + start * 3;
+    for (uint16_t i = 0; i < count * 3; i++) streamByte(px[i]);
+    streamEnd();
 }
 
 void processPacket(const LtpPacket& pkt) {

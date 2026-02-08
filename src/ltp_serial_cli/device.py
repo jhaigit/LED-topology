@@ -308,7 +308,7 @@ class LtpDevice:
         if wait_for_hello:
             # Wait for HELLO or request it
             try:
-                packet = self._wait_for_response(CMD_HELLO, timeout=2.0)
+                packet = self._wait_for_response(CMD_HELLO, timeout=self.timeout)
                 self._info = self._parse_hello(packet)
             except LtpTimeoutError:
                 # Send GET_INFO to request device info

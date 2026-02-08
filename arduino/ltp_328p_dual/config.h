@@ -26,7 +26,8 @@
 //   Remaining ~1300 bytes for pixel buffer (3 bytes/pixel)
 // Use 3 bytes/pixel for the shared buffer. Both WS2812 and APA102
 // are driven from this single RGB buffer with conversion at show time.
-#define MAX_PIXELS          150
+// With 80 pixels: 240 bytes for pixel buffer, leaving adequate stack.
+#define MAX_PIXELS          80
 
 // Default pixel count (can be changed via control)
 #define DEFAULT_NUM_PIXELS  60

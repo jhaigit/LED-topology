@@ -236,7 +236,7 @@ def main():
     )
     parser.add_argument("port", help="Serial port (e.g., /dev/ttyUSB0, COM3)")
     parser.add_argument("-b", "--baudrate", type=int, default=115200, help="Baud rate")
-    parser.add_argument("-t", "--timeout", type=float, default=2.0, help="Timeout (seconds)")
+    parser.add_argument("-t", "--timeout", type=float, default=4.0, help="Timeout (seconds)")
     parser.add_argument("-d", "--debug", action="store_true", help="Show packets sent/received")
 
     subparsers = parser.add_subparsers(dest="command", help="Command")
