@@ -306,15 +306,29 @@ class LtpDevice:
         self._reader_thread.start()
 
         if wait_for_hello:
-            # Wait for HELLO or request it
+            # Wait for HELLO as a device-ready signal (DTR reset triggers
+            # bootloader; HELLO confirms sketch is running). Content is not
+            # used — full info is always fetched via GET_INFO below.
             try:
-                packet = self._wait_for_response(CMD_HELLO, timeout=self.timeout)
-                self._info = self._parse_hello(packet)
+                self._wait_for_response(CMD_HELLO, timeout=self.timeout)
             except LtpTimeoutError:
-                # Send GET_INFO to request device info
-                self._send(LtpProtocol.build_get_info(INFO_ALL))
-                packet = self._wait_for_response(CMD_INFO_RESPONSE)
-                self._info = self._parse_info_response(packet)
+                pass  # Device may already be running; proceed to query
+
+            # Request full device info with retries
+            retries = 3
+            last_error = None
+            for attempt in range(retries):
+                try:
+                    self._send(LtpProtocol.build_get_info(INFO_ALL))
+                    packet = self._wait_for_response(CMD_INFO_RESPONSE)
+                    self._info = self._parse_info_response(packet)
+                    break
+                except LtpTimeoutError as e:
+                    last_error = e
+            else:
+                raise LtpTimeoutError(
+                    f"Failed to get device info after {retries} attempts"
+                ) from last_error
 
             # Get strip info
             if self._info and self._info.strip_count > 0:
