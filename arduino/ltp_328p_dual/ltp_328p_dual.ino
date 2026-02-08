@@ -159,7 +159,7 @@ LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 // ============================================================================
 
 #define CONFIG_MAGIC        0x4C44  // "LD" - magic for dual strip
-#define CONFIG_VERSION      1
+#define CONFIG_VERSION      2
 #define EEPROM_CONFIG_ADDR  0
 
 // Local display modes
@@ -175,6 +175,8 @@ LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 // Custom control IDs (after standard ones)
 #define CTRL_ID_NUM_PIXELS    8
 #define CTRL_ID_ACTIVE_STRIP  9
+#define CTRL_ID_MATRIX_WIDTH  10
+#define CTRL_ID_MATRIX_LAYOUT 11
 
 struct Config {
     uint16_t magic;
@@ -190,6 +192,8 @@ struct Config {
     // Dual-strip specific
     uint16_t numPixels;         // Active pixel count (1..MAX_PIXELS)
     uint8_t activeStrip;        // STRIP_ID_WS2812 or STRIP_ID_APA102
+    uint8_t matrixWidth;        // 1=linear strip (default), >1=matrix width
+    uint8_t matrixLayout;       // bitmask: SUBMATRIX_SERPENTINE | VERTICAL_FIRST | ORIGIN_BOTTOM
     bool inputEventsEnabled;
 } config = {
     CONFIG_MAGIC,
@@ -204,6 +208,8 @@ struct Config {
     10,                         // cycleTime
     DEFAULT_NUM_PIXELS,
     DEFAULT_ACTIVE_STRIP,
+    1,                          // matrixWidth (1=linear)
+    0,                          // matrixLayout (no flags)
     true                        // inputEventsEnabled
 };
 
@@ -287,8 +293,10 @@ static const char cn6[] PROGMEM = "local_mode";    static const char cd6[] PROGM
 static const char cn7[] PROGMEM = "cycle_time";    static const char cd7[] PROGMEM = "mode cycle, secs";
 static const char cn8[] PROGMEM = "num_pixels";    static const char cd8[] PROGMEM = "pixel count";
 static const char cn9[] PROGMEM = "active_strip";  static const char cd9[] PROGMEM = "0=WS2812, 1=APA102";
-static const char cn10[] PROGMEM = "save";         static const char cd10[] PROGMEM = "save to EEPROM";
-static const char cn11[] PROGMEM = "reboot";       static const char cd11[] PROGMEM = "restart";
+static const char cn10[] PROGMEM = "matrix_width";  static const char cd10[] PROGMEM = "1=strip, >1=matrix";
+static const char cn11[] PROGMEM = "matrix_layout"; static const char cd11[] PROGMEM = "layout flags";
+static const char cn12[] PROGMEM = "save";          static const char cd12[] PROGMEM = "save to EEPROM";
+static const char cn13[] PROGMEM = "reboot";        static const char cd13[] PROGMEM = "restart";
 
 struct ControlDef {
     uint8_t id;
@@ -311,8 +319,10 @@ static const ControlDef controlDefs[NUM_CONTROLS] PROGMEM = {
     { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,       cn7, cd7 },
     { CTRL_ID_NUM_PIXELS,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, cn8, cd8 },
     { CTRL_ID_ACTIVE_STRIP,    CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     1,          cn9, cd9 },
-    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn10, cd10 },
-    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn11, cd11 },
+    { CTRL_ID_MATRIX_WIDTH,    CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, cn10, cd10 },
+    { CTRL_ID_MATRIX_LAYOUT,   CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     7,          cn11, cd11 },
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn12, cd12 },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn13, cd13 },
 };
 
 uint16_t getControlValue(uint8_t controlId, uint8_t* valueSize) {
@@ -328,6 +338,8 @@ uint16_t getControlValue(uint8_t controlId, uint8_t* valueSize) {
         case CTRL_ID_CYCLE_TIME:      *valueSize = 2; return config.cycleTime;
         case CTRL_ID_NUM_PIXELS:      *valueSize = 2; return config.numPixels;
         case CTRL_ID_ACTIVE_STRIP:    return config.activeStrip;
+        case CTRL_ID_MATRIX_WIDTH:    return config.matrixWidth;
+        case CTRL_ID_MATRIX_LAYOUT:   return config.matrixLayout;
         case CTRL_ID_SAVE_CONFIG:
         case CTRL_ID_REBOOT:          return 0;
         default:                      return 0;
@@ -343,9 +355,38 @@ static uint8_t scale8(uint8_t value, uint8_t bright) {
     return ((uint16_t)value * (uint16_t)(bright + 1)) >> 8;
 }
 
+// Map a logical pixel index to a physical buffer index using matrix geometry.
+// When matrixWidth=1 (default), this is an identity mapping (col=idx, row=0).
+static inline uint16_t mapPixel(uint16_t idx) __attribute__((always_inline));
+static inline uint16_t mapPixel(uint16_t idx) {
+    uint8_t w = config.matrixWidth;
+    if (w <= 1) return idx;
+
+    uint8_t flags = config.matrixLayout;
+    uint16_t row, col;
+
+    if (flags & SUBMATRIX_VERTICAL_FIRST) {
+        uint16_t h = numPixels / w;
+        col = idx / h;
+        row = idx % h;
+        if (flags & SUBMATRIX_ORIGIN_BOTTOM) row = h - 1 - row;
+        if ((flags & SUBMATRIX_SERPENTINE) && (col & 1)) row = h - 1 - row;
+        return col * h + row;
+    } else {
+        col = idx % w;
+        row = idx / w;
+        if (flags & SUBMATRIX_ORIGIN_BOTTOM) {
+            uint16_t h = numPixels / w;
+            row = h - 1 - row;
+        }
+        if ((flags & SUBMATRIX_SERPENTINE) && (row & 1)) col = w - 1 - col;
+        return row * w + col;
+    }
+}
+
 void setPixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b) {
     if (idx >= numPixels) return;
-    uint16_t offset = idx * 3;
+    uint16_t offset = mapPixel(idx) * 3;
     pixelBuffer[offset + 0] = r;
     pixelBuffer[offset + 1] = g;
     pixelBuffer[offset + 2] = b;
@@ -353,7 +394,7 @@ void setPixel(uint16_t idx, uint8_t r, uint8_t g, uint8_t b) {
 
 void getPixel(uint16_t idx, uint8_t& r, uint8_t& g, uint8_t& b) {
     if (idx >= numPixels) { r = g = b = 0; return; }
-    uint16_t offset = idx * 3;
+    uint16_t offset = mapPixel(idx) * 3;
     r = pixelBuffer[offset + 0];
     g = pixelBuffer[offset + 1];
     b = pixelBuffer[offset + 2];
@@ -457,6 +498,14 @@ void loadConfig() {
         config.activeStrip = DEFAULT_ACTIVE_STRIP;
     }
     numPixels = config.numPixels;
+    // Validate matrix geometry
+    if (config.matrixWidth < 1 || config.matrixWidth > MAX_PIXELS ||
+        numPixels % config.matrixWidth != 0) {
+        config.matrixWidth = 1;
+    }
+    if (config.matrixLayout > 7) {
+        config.matrixLayout = 0;
+    }
 }
 
 void resetConfig() {
@@ -472,6 +521,8 @@ void resetConfig() {
     config.cycleTime = 10;
     config.numPixels = DEFAULT_NUM_PIXELS;
     config.activeStrip = DEFAULT_ACTIVE_STRIP;
+    config.matrixWidth = 1;
+    config.matrixLayout = 0;
     config.inputEventsEnabled = true;
     numPixels = config.numPixels;
     saveConfig();
@@ -1252,6 +1303,10 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
                     showLeds();
                     config.numPixels = newCount;
                     numPixels = newCount;
+                    // Reset matrix width if it no longer divides numPixels
+                    if (config.matrixWidth > 1 && numPixels % config.matrixWidth != 0) {
+                        config.matrixWidth = 1;
+                    }
                     clearLeds();
                 } else {
                     protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
@@ -1272,6 +1327,25 @@ void handleSetControl(const uint8_t* payload, uint16_t length) {
                     // Show current buffer on new strip
                     showLeds();
                 }
+            } else {
+                protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
+                return;
+            }
+            break;
+
+        case CTRL_ID_MATRIX_WIDTH:
+            if (payload[1] >= 1 && payload[1] <= MAX_PIXELS &&
+                numPixels % payload[1] == 0) {
+                config.matrixWidth = payload[1];
+            } else {
+                protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
+                return;
+            }
+            break;
+
+        case CTRL_ID_MATRIX_LAYOUT:
+            if (payload[1] <= 7) {
+                config.matrixLayout = payload[1];
             } else {
                 protocol.sendNak(CMD_SET_CONTROL, ERR_INVALID_PARAM);
                 return;
@@ -1333,6 +1407,8 @@ void handleGetControl(const uint8_t* payload, uint16_t length) {
             response[respLen++] = config.numPixels >> 8;
             break;
         case CTRL_ID_ACTIVE_STRIP:    response[respLen++] = config.activeStrip; break;
+        case CTRL_ID_MATRIX_WIDTH:    response[respLen++] = config.matrixWidth; break;
+        case CTRL_ID_MATRIX_LAYOUT:   response[respLen++] = config.matrixLayout; break;
         case CTRL_ID_SAVE_CONFIG:
         case CTRL_ID_REBOOT:          response[respLen++] = 0; break;
         default:

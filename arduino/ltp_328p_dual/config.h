@@ -87,6 +87,6 @@
 // NUMBER OF CONTROLS
 // ============================================================================
 
-#define NUM_CONTROLS        12
+#define NUM_CONTROLS        14
 
 #endif // LTP_328P_DUAL_CONFIG_H
