@@ -50,9 +50,23 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
-// Confirmation dialog
-function confirmAction(message) {
-    return confirm(message);
+// Confirmation dialog (styled modal, returns a Promise<boolean>)
+let _confirmResolve = null;
+
+function ltpConfirmClose(result) {
+    document.getElementById('confirmModal').style.display = 'none';
+    if (_confirmResolve) {
+        _confirmResolve(result);
+        _confirmResolve = null;
+    }
+}
+
+function confirmAction(message, {title = 'Confirm', okLabel = 'Delete'} = {}) {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmMessage').textContent = message;
+    document.getElementById('confirmOkBtn').textContent = okLabel;
+    document.getElementById('confirmModal').style.display = 'flex';
+    return new Promise(resolve => { _confirmResolve = resolve; });
 }
 
 // Save config button handler

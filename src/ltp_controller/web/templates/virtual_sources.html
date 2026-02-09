@@ -306,8 +306,8 @@ function stopSource(id) {
         .then(() => location.reload());
 }
 
-function deleteSource(id) {
-    if (confirm('Are you sure you want to delete this virtual source?')) {
+async function deleteSource(id) {
+    if (await confirmAction('Are you sure you want to delete this virtual source?')) {
         fetch(`/api/virtual-sources/${id}`, { method: 'DELETE' })
             .then(() => location.reload());
     }

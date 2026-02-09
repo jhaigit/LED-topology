@@ -553,6 +553,21 @@ h2 {
     border: 1px solid var(--accent);
 }
 
+/* Confirm Modal */
+.confirm-body {
+    padding: 1.5rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    padding: 1rem 1.5rem;
+    border-top: 1px solid var(--border);
+}
+
 /* Footer */
 .footer {
     background: var(--bg-secondary);

@@ -35,6 +35,23 @@
         <p>LED Topology Protocol Controller v0.1.0</p>
     </footer>
 
+    <!-- Confirm dialog (shared across all pages) -->
+    <div id="confirmModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h2 id="confirmTitle">Confirm</h2>
+                <button class="close-btn" onclick="ltpConfirmClose(false)">&times;</button>
+            </div>
+            <div class="confirm-body">
+                <p id="confirmMessage"></p>
+            </div>
+            <div class="confirm-actions">
+                <button class="btn" onclick="ltpConfirmClose(false)">Cancel</button>
+                <button class="btn btn-danger" id="confirmOkBtn" onclick="ltpConfirmClose(true)">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>

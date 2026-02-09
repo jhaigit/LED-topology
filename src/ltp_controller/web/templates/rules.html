@@ -472,8 +472,8 @@ function editRule(ruleId) {
         });
 }
 
-function deleteRule(ruleId) {
-    if (!confirm('Delete this rule?')) return;
+async function deleteRule(ruleId) {
+    if (!await confirmAction('Delete this rule?')) return;
 
     fetch(`/api/rules/${ruleId}`, { method: 'DELETE' })
         .then(r => r.json())
