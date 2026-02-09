@@ -504,7 +504,7 @@ function onFontChange() {
 async function paintText() {
     const text = document.getElementById('paintText').value;
     if (!text) {
-        alert('Please enter text to paint');
+        showToast('Please enter text to paint', 'warning');
         return;
     }
 
@@ -540,11 +540,11 @@ async function paintText() {
             // Refresh canvas from sink
             await refreshFromSink();
         } else {
-            alert('Error painting text: ' + (data.error || 'Unknown error'));
+            showToast('Error painting text: ' + (data.error || 'Unknown error'), 'error');
         }
     } catch (err) {
         console.error('Failed to paint text:', err);
-        alert('Failed to paint text');
+        showToast('Failed to paint text', 'error');
     }
 }
 

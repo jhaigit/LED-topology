@@ -481,7 +481,7 @@ async function deleteRule(ruleId) {
             if (data.status === 'ok') {
                 location.reload();
             } else {
-                alert('Error: ' + (data.error || 'Unknown error'));
+                showToast('Error: ' + (data.error || 'Unknown error'), 'error');
             }
         });
 }
@@ -492,7 +492,7 @@ function toggleRule(ruleId, enabled) {
         .then(r => r.json())
         .then(data => {
             if (data.status !== 'ok') {
-                alert('Error: ' + (data.error || 'Unknown error'));
+                showToast('Error: ' + (data.error || 'Unknown error'), 'error');
                 location.reload();
             }
         });
@@ -697,7 +697,7 @@ function submitRule(event) {
     });
 
     if (actions.length === 0) {
-        alert('Please add at least one action');
+        showToast('Please add at least one action', 'warning');
         return;
     }
 
@@ -725,13 +725,13 @@ function submitRule(event) {
     .then(r => r.json())
     .then(data => {
         if (data.error) {
-            alert('Error: ' + data.error);
+            showToast('Error: ' + data.error, 'error');
         } else {
             location.reload();
         }
     })
     .catch(err => {
-        alert('Error: ' + err.message);
+        showToast('Error: ' + err.message, 'error');
     });
 }
 </script>

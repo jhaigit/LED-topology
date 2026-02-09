@@ -254,7 +254,7 @@ function createSource(event) {
         if (data.id) {
             location.reload();
         } else {
-            alert('Error creating source: ' + (data.error || 'Unknown error'));
+            showToast('Error creating source: ' + (data.error || 'Unknown error'), 'error');
         }
     });
 }

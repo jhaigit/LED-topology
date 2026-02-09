@@ -246,7 +246,7 @@ function createRoute(event) {
         if (data.id) {
             location.reload();
         } else {
-            alert('Error creating route: ' + (data.error || 'Unknown error'));
+            showToast('Error creating route: ' + (data.error || 'Unknown error'), 'error');
         }
     });
 }
