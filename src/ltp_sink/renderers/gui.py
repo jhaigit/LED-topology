@@ -46,6 +46,7 @@ class GuiConfig(RendererConfig):
     pixel_size: int = 0  # 0 = auto-fit
     gap: int = 1
     title: str = "LTP Sink"
+    font_size: int = 14
     stats_update_ms: int = 500
     min_window_width: int = 640
     min_window_height: int = 400
@@ -79,6 +80,10 @@ class GuiRenderer(Renderer):
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
+        # FPS tracking
+        self._last_frame_time = 0.0
+        self._fps_samples: list[float] = []
+
         # Stats cache
         self._cached_stats: dict[str, Any] = {}
         self._last_stats_time = 0.0
@@ -109,6 +114,15 @@ class GuiRenderer(Renderer):
 
     def render(self, pixels: np.ndarray, dimensions: tuple[int, ...]) -> None:
         super().render(pixels, dimensions)
+        now = time.monotonic()
+        if self._last_frame_time > 0:
+            dt = now - self._last_frame_time
+            if dt > 0:
+                self._fps_samples.append(1.0 / dt)
+                if len(self._fps_samples) > 30:
+                    self._fps_samples.pop(0)
+                self._fps = sum(self._fps_samples) / len(self._fps_samples)
+        self._last_frame_time = now
         with self._lock:
             self._latest_pixels = pixels.copy()
             self._latest_dimensions = dimensions
@@ -127,16 +141,16 @@ class GuiRenderer(Renderer):
         pygame.init()
         pygame.freetype.init()
 
-        win_w = max(self.config.min_window_width, 800)
-        win_h = max(self.config.min_window_height, 600)
-        screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
+        init_w = max(self.config.min_window_width, 800)
+        init_h = max(self.config.min_window_height, 600)
+        screen = pygame.display.set_mode((init_w, init_h), pygame.RESIZABLE)
         pygame.display.set_caption(self.config.title)
         clock = pygame.time.Clock()
 
-        font_size = 14
-        font = pygame.freetype.SysFont("monospace", font_size)
-        font_small = pygame.freetype.SysFont("monospace", 12)
-        font_label = pygame.freetype.SysFont("monospace", 13)
+        fs = self.config.font_size
+        font = pygame.freetype.SysFont("monospace", fs)
+        font_small = pygame.freetype.SysFont("monospace", max(8, fs - 2))
+        font_label = pygame.freetype.SysFont("monospace", max(8, fs - 1))
 
         # Button rects (recalculated on resize)
         btn_rects: list[pygame.Rect] = []
@@ -147,22 +161,20 @@ class GuiRenderer(Renderer):
                 if event.type == pygame.QUIT:
                     self._stop_event.set()
                     break
-                elif event.type == pygame.VIDEORESIZE:
-                    win_w, win_h = event.w, event.h
-                    screen = pygame.display.set_mode(
-                        (win_w, win_h), pygame.RESIZABLE
-                    )
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     self._handle_click(event.pos, btn_rects)
 
             if self._stop_event.is_set():
                 break
 
+            # Query current window size every frame (handles resize reliably)
+            screen = pygame.display.get_surface()
+            win_w, win_h = screen.get_size()
+
             # --- Fetch latest data ---
             with self._lock:
                 pixels = self._latest_pixels
                 dimensions = self._latest_dimensions
-                has_new = self._has_new_frame
                 self._has_new_frame = False
 
             # Update stats periodically
@@ -177,7 +189,7 @@ class GuiRenderer(Renderer):
 
             # Layout: pixel area (top), inputs (middle), stats (bottom)
             margin = 10
-            stats_height = self._calc_stats_height(font_size)
+            stats_height = self._calc_stats_height(fs)
             input_height = self._calc_input_height() if self._input_defs else 0
 
             pixel_area = pygame.Rect(
@@ -325,7 +337,10 @@ class GuiRenderer(Renderer):
                 )
 
     def _calc_input_height(self) -> int:
-        return 50 if self._input_defs else 0
+        if not self._input_defs:
+            return 0
+        fs = self.config.font_size
+        return fs + max(20, fs)
 
     def _draw_input_panel(
         self,
@@ -341,9 +356,29 @@ class GuiRenderer(Renderer):
         if n == 0:
             return []
 
-        btn_w = min(120, max(60, (area.width - 20 - 8 * (n - 1)) // n))
-        btn_h = 30
-        total_w = btn_w * n + 8 * (n - 1)
+        # Measure each label to size buttons from content
+        pad_x = max(12, self.config.font_size)
+        gap = max(8, self.config.font_size // 2)
+        labels = []
+        max_label_w = 0
+        for inp in self._input_defs:
+            label = inp.get("name", "Input")
+            itype = inp.get("type", "button")
+            # Account for " ON" suffix on switches
+            measure = label + " ON" if itype == "switch" else label
+            label_rect = font.get_rect(measure)
+            max_label_w = max(max_label_w, label_rect.width)
+            labels.append(label)
+
+        btn_w = max_label_w + pad_x * 2
+        btn_h = font.get_sized_height() + pad_x
+        total_w = btn_w * n + gap * (n - 1)
+
+        # Shrink if doesn't fit
+        if total_w > area.width - 20:
+            btn_w = max(40, (area.width - 20 - gap * (n - 1)) // n)
+            total_w = btn_w * n + gap * (n - 1)
+
         start_x = area.x + (area.width - total_w) // 2
         start_y = area.y + (area.height - btn_h) // 2
 
@@ -351,7 +386,7 @@ class GuiRenderer(Renderer):
         mouse_pos = pygame.mouse.get_pos()
 
         for i, inp in enumerate(self._input_defs):
-            x = start_x + i * (btn_w + 8)
+            x = start_x + i * (btn_w + gap)
             rect = pygame.Rect(x, start_y, btn_w, btn_h)
             rects.append(rect)
 
@@ -369,7 +404,7 @@ class GuiRenderer(Renderer):
 
             pygame.draw.rect(screen, color, rect, border_radius=4)
 
-            label = inp.get("name", f"Input {i}")
+            label = labels[i]
             if itype == "switch" and active:
                 label += " ON"
             surf, text_rect = font.render(label, COLOR_BTN_TEXT)
@@ -413,7 +448,8 @@ class GuiRenderer(Renderer):
 
     def _calc_stats_height(self, font_size: int) -> int:
         rows = 5
-        return rows * (font_size + 6) + 20
+        line_h = font_size + max(4, font_size // 3)
+        return rows * line_h + 16
 
     def _draw_stats_panel(
         self,
@@ -431,18 +467,26 @@ class GuiRenderer(Renderer):
             screen.blit(surf, (area.x + 10, area.y + 10))
             return
 
-        line_h = 16
+        line_h = font.get_sized_height() + 4
         col_w = area.width // 2
         x1 = area.x + 12
         x2 = area.x + col_w + 12
         y = area.y + 8
+
+        # Measure the widest label to set the value column offset
+        all_labels = [
+            "Jitter min/avg/max:", "Data Packets:", "Packets/sec:",
+            "Data Bytes:", "Throughput:", "FPS:", "Frames:",
+            "Jitter stddev:", "Control msgs:", "Streams:",
+        ]
+        val_offset = max(font.get_rect(lb).width for lb in all_labels) + 8
 
         def draw_stat(x: int, y_pos: int, label: str, value: str,
                        val_color: tuple[int, int, int] = COLOR_TEXT_VALUE) -> None:
             surf_l, _ = font.render(label, COLOR_TEXT_LABEL)
             screen.blit(surf_l, (x, y_pos))
             surf_v, _ = font.render(value, val_color)
-            screen.blit(surf_v, (x + 130, y_pos))
+            screen.blit(surf_v, (x + val_offset, y_pos))
 
         # Row 1
         draw_stat(x1, y, "Data Packets:", f"{s.get('data_packets', 0):,}")
@@ -473,8 +517,8 @@ class GuiRenderer(Renderer):
         # Row 3
         fps = s.get("fps", 0)
         fps_color = COLOR_GOOD if fps > 10 else (COLOR_WARN if fps > 0 else COLOR_TEXT_DIM)
-        draw_stat(x1, y, "FPS:", f"{fps:.1f}", fps_color)
-        draw_stat(x2, y, "Frames:", f"{s.get('frame_count', 0):,}")
+        draw_stat(x1, y, "Frames:", f"{s.get('frame_count', 0):,}")
+        draw_stat(x2, y, "FPS:", f"{fps:.1f}", fps_color)
         y += line_h
 
         # Row 4 - Jitter

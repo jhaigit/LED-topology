@@ -89,6 +89,12 @@ def parse_args() -> argparse.Namespace:
         help="Terminal renderer style (default: block)",
     )
     parser.add_argument(
+        "--font-size",
+        type=int,
+        default=14,
+        help="GUI renderer font size (default: 14)",
+    )
+    parser.add_argument(
         "--control-port",
         type=int,
         default=0,
@@ -199,6 +205,8 @@ def config_from_args(args: argparse.Namespace) -> SinkConfig:
     renderer_config = {}
     if args.renderer == "terminal":
         renderer_config["style"] = args.style
+    elif args.renderer == "gui":
+        renderer_config["font_size"] = args.font_size
 
     # Parse inputs
     inputs: list[dict[str, str]] = []
