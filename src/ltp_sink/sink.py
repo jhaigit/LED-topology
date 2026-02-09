@@ -220,6 +220,16 @@ class Sink:
         self._data_receiver: DataReceiver | None = None
         self._stream_manager = StreamManager()
 
+        # Statistics
+        self._stats = SinkStats()
+
+        # Inputs (must be initialized before renderer setup)
+        self._inputs = self.config.inputs
+        self._input_values: dict[int, Any] = {}
+        for i, inp in enumerate(self._inputs):
+            itype = inp.get("type", "button")
+            self._input_values[i] = False if itype in ("button", "switch") else 0
+
         # Renderer
         self._renderer: Renderer | None = None
         self._setup_renderer()
@@ -230,16 +240,6 @@ class Sink:
             (self.config.pixels, self.config.color_format.bytes_per_pixel),
             dtype=np.uint8,
         )
-
-        # Statistics
-        self._stats = SinkStats()
-
-        # Inputs
-        self._inputs = self.config.inputs
-        self._input_values: dict[int, Any] = {}
-        for i, inp in enumerate(self._inputs):
-            itype = inp.get("type", "button")
-            self._input_values[i] = False if itype in ("button", "switch") else 0
 
     def _setup_controls(self) -> None:
         """Set up device controls."""
