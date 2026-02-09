@@ -107,6 +107,11 @@ def parse_args() -> argparse.Namespace:
         help="Enable verbose logging",
     )
     parser.add_argument(
+        "--inputs",
+        type=str,
+        help='Define inputs: "Button1,Button2,Switch1:switch" (comma-separated, optional :type)',
+    )
+    parser.add_argument(
         "--list-renderers",
         action="store_true",
         help="List available renderers and exit",
@@ -161,6 +166,9 @@ def load_config(path: Path) -> SinkConfig:
         if renderer_config:
             config_dict["renderer_config"] = renderer_config
 
+    if "inputs" in data:
+        config_dict["inputs"] = data["inputs"]
+
     return SinkConfig(**config_dict)
 
 
@@ -192,6 +200,19 @@ def config_from_args(args: argparse.Namespace) -> SinkConfig:
     if args.renderer == "terminal":
         renderer_config["style"] = args.style
 
+    # Parse inputs
+    inputs: list[dict[str, str]] = []
+    if args.inputs:
+        for part in args.inputs.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                name, itype = part.rsplit(":", 1)
+                inputs.append({"name": name.strip(), "type": itype.strip()})
+            else:
+                inputs.append({"name": part, "type": "button"})
+
     return SinkConfig(
         name=args.name,
         description=args.description,
@@ -204,6 +225,7 @@ def config_from_args(args: argparse.Namespace) -> SinkConfig:
         data_port=args.data_port,
         renderer_type=args.renderer,
         renderer_config=renderer_config,
+        inputs=inputs,
     )
 
 
@@ -268,6 +290,9 @@ def main() -> int:
     print(f"  Dimensions: {config.dimensions}")
     print(f"  Color format: {config.color_format.name}")
     print(f"  Renderer: {config.renderer_type}")
+    if config.inputs:
+        names = [inp["name"] for inp in config.inputs]
+        print(f"  Inputs: {', '.join(names)}")
     print()
 
     # Run

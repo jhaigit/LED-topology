@@ -9,3 +9,11 @@ __all__ = [
     "TerminalRenderer",
     "TerminalConfig",
 ]
+
+# Lazy imports for optional dependencies
+try:
+    from ltp_sink.renderers.gui import GuiRenderer, GuiConfig
+
+    __all__ += ["GuiRenderer", "GuiConfig"]
+except ImportError:
+    pass
