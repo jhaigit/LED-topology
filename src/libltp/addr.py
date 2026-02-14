@@ -1,7 +1,6 @@
 """Address utilities for IPv4/IPv6 dual-stack support."""
 
 import socket
-import sys
 
 
 def is_ipv6(address: str) -> bool:
@@ -57,35 +56,14 @@ def format_address_port(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
-def _can_bind_dual_stack() -> bool:
-    """Test whether :: sockets accept IPv4 by default.
-
-    asyncio.start_server and create_datagram_endpoint do NOT set
-    IPV6_V6ONLY, so we must check the kernel default (net.ipv6.bindv6only).
-    If it's 1, :: sockets only accept IPv6 and IPv4 connections are refused.
-    """
-    try:
-        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        v6only = sock.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
-        sock.close()
-        return v6only == 0
-    except (OSError, AttributeError):
-        return False
-
-
-# Cache the result at import time so we don't probe on every call
-_DUAL_STACK_AVAILABLE: bool = sys.platform == "linux" and _can_bind_dual_stack()
-
-
 def dual_stack_bind_address() -> str:
-    """Return the appropriate wildcard bind address for dual-stack.
+    """Return the wildcard bind address for servers.
 
-    Returns "::" on Linux when IPv6 dual-stack is confirmed to work
-    (IPv6 enabled and IPV6_V6ONLY can be set to 0). Falls back to
-    "0.0.0.0" otherwise.
+    Returns "0.0.0.0" (IPv4). CPython's asyncio.start_server explicitly
+    sets IPV6_V6ONLY=1 on IPv6 sockets, so binding to "::" only accepts
+    IPv6 connections — IPv4 clients get ECONNREFUSED. Until we pre-create
+    sockets with IPV6_V6ONLY=0, IPv4 is the safe default.
     """
-    if _DUAL_STACK_AVAILABLE:
-        return "::"
     return "0.0.0.0"
 
 
