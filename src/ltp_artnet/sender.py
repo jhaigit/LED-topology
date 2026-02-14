@@ -85,6 +85,7 @@ class ArtNetSender:
         if self._socket is not None:
             return
 
+        # Art-Net is inherently IPv4 (broadcast-based protocol) - do not change to IPv6
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
         # Enable broadcast

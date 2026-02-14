@@ -83,6 +83,8 @@ class DiscoveredDevice:
     description: str
     properties: dict[str, str] = field(default_factory=dict)
     addresses: list[str] = field(default_factory=list)
+    ipv4_addresses: list[str] = field(default_factory=list)
+    ipv6_addresses: list[str] = field(default_factory=list)
 
     @property
     def is_sink(self) -> bool:
@@ -582,6 +584,18 @@ class ServiceBrowser:
             except socket.gaierror as e:
                 logger.warning(f"Could not resolve {info.server} to IPv4: {e}")
 
+        # If no IPv6 from mDNS, try to resolve the hostname to get IPv6
+        if not ipv6_addresses and info.server:
+            try:
+                hostname = info.server.rstrip(".")
+                results = socket.getaddrinfo(hostname, None, socket.AF_INET6, socket.SOCK_STREAM)
+                if results:
+                    resolved_ip = results[0][4][0]
+                    ipv6_addresses = [resolved_ip]
+                    logger.debug(f"Resolved {hostname} to IPv6 {resolved_ip}")
+            except socket.gaierror:
+                pass  # IPv6 resolution failure is not a warning
+
         # Prefer IPv4, fall back to IPv6
         addresses = ipv4_addresses if ipv4_addresses else ipv6_addresses
         logger.debug(f"Addresses for {name}: IPv4={ipv4_addresses}, IPv6={ipv6_addresses}, using={addresses}")
@@ -599,6 +613,8 @@ class ServiceBrowser:
             description=properties.get("desc", ""),
             properties=properties,
             addresses=addresses,
+            ipv4_addresses=ipv4_addresses,
+            ipv6_addresses=ipv6_addresses,
         )
 
         is_new = name not in self._devices

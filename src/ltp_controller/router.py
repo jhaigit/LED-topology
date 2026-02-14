@@ -19,6 +19,7 @@ from libltp import (
     stream_setup,
     subscribe,
 )
+from libltp.addr import dual_stack_bind_address, format_address_port, get_local_ip as _get_local_ip_util
 from libltp.types import ColorFormat, Encoding, ScaleMode, StreamAction
 
 from ltp_controller.controller import Controller, DeviceState
@@ -431,7 +432,7 @@ class RoutingEngine:
 
         # Start data receiver FIRST to get the port for callback
         source_dims = self._get_dimensions(source)
-        route._receiver = DataReceiver("0.0.0.0", 0)
+        route._receiver = DataReceiver(dual_stack_bind_address(), 0)
 
         def on_data(packet: DataPacket) -> None:
             self._handle_packet(route, packet, source_dims, sink_dims)
@@ -449,7 +450,7 @@ class RoutingEngine:
         await route._source_client.connect()
 
         # Subscribe to source with callback address
-        logger.info(f"Subscribing to source with callback {local_ip}:{receiver_port}")
+        logger.info(f"Subscribing to source with callback {format_address_port(local_ip, receiver_port)}")
         sub_req = subscribe(
             0, source_dims, "rgb", 30,
             callback_host=local_ip,
@@ -812,23 +813,7 @@ class RoutingEngine:
 
     def _get_local_ip(self, remote_host: str) -> str:
         """Get local IP address that can reach the remote host."""
-        import socket
-
-        try:
-            # Create a socket to determine our local IP that routes to the remote host
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.settimeout(0)
-            # Doesn't actually connect, just figures out routing
-            sock.connect((remote_host, 1))
-            local_ip = sock.getsockname()[0]
-            sock.close()
-            return local_ip
-        except Exception:
-            # Fallback to getting hostname IP
-            try:
-                return socket.gethostbyname(socket.gethostname())
-            except Exception:
-                return "127.0.0.1"
+        return _get_local_ip_util(remote_host)
 
     def _get_dimensions(self, device: DeviceState) -> list[int]:
         """Get pixel dimensions from device."""

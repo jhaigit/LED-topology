@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from libltp import ControlClient, Message, MessageType
+from libltp.addr import format_address_port
 
 from ltp_controller.controller import Controller, DeviceState
 
@@ -143,7 +144,7 @@ class SinkConnectionPool:
                     connected=True,
                 )
                 self._connections[sink_id] = conn
-                logger.info(f"Pool: Connected to sink {sink.name} ({sink.host}:{sink.port})")
+                logger.info(f"Pool: Connected to sink {sink.name} ({format_address_port(sink.host, sink.port)})")
 
             except Exception as e:
                 logger.warning(f"Pool: Failed to connect to sink {sink.name}: {e}")

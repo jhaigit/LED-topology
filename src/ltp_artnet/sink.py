@@ -344,6 +344,7 @@ class ArtNetSink:
         )
 
         # Create UDP socket for ArtPoll
+        # Art-Net is inherently IPv4 (broadcast-based protocol) - do not change to IPv6
         self._artpoll_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._artpoll_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._artpoll_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)

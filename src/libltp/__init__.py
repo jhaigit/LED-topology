@@ -4,6 +4,15 @@ This package provides the core functionality for implementing LTP sources,
 sinks, and controllers.
 """
 
+from libltp.addr import (
+    address_family,
+    dual_stack_bind_address,
+    format_address_port,
+    get_local_ip,
+    is_ipv4,
+    is_ipv6,
+    normalize_ipv6,
+)
 from libltp.controls import (
     ActionControl,
     ArrayControl,
@@ -107,6 +116,14 @@ from libltp.types import (
 __version__ = "0.1.0"
 
 __all__ = [
+    # Address utilities
+    "address_family",
+    "dual_stack_bind_address",
+    "format_address_port",
+    "get_local_ip",
+    "is_ipv4",
+    "is_ipv6",
+    "normalize_ipv6",
     # Types
     "Channel",
     "ChannelArray",

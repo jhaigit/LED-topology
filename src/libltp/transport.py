@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Union
 
 import numpy as np
 
+from libltp.addr import address_family, dual_stack_bind_address, format_address_port, normalize_ipv6
 from libltp.protocol import DataPacket, Message, ProtocolError
 from libltp.types import ColorFormat, Encoding, ErrorCode, MAX_PACKET_SIZE
 
@@ -32,7 +33,7 @@ class ControlConnection:
         self.writer = writer
         self.handler = handler
         self._closed = False
-        self._peer: tuple[str, int] | None = None
+        self._peer: tuple | None = None
 
         # Get peer info
         try:
@@ -44,7 +45,7 @@ class ControlConnection:
     def peer(self) -> str:
         """Get peer address string."""
         if self._peer:
-            return f"{self._peer[0]}:{self._peer[1]}"
+            return format_address_port(self._peer[0], self._peer[1])
         return "unknown"
 
     @property
@@ -134,11 +135,11 @@ class ControlServer:
 
     def __init__(
         self,
-        host: str = "0.0.0.0",
+        host: str | None = None,
         port: int = 0,
         handler: MessageHandler | None = None,
     ):
-        self.host = host
+        self.host = host if host is not None else dual_stack_bind_address()
         self.port = port
         self.handler = handler
 
@@ -190,7 +191,7 @@ class ControlServer:
         self._server = await asyncio.start_server(
             self._handle_client, self.host, self.port
         )
-        logger.info(f"Control server listening on {self.host}:{self.actual_port}")
+        logger.info(f"Control server listening on {format_address_port(self.host, self.actual_port)}")
 
     async def stop(self) -> None:
         """Stop the server."""
@@ -310,10 +311,11 @@ class DataSender:
         class Protocol(asyncio.DatagramProtocol):
             pass
 
+        target_host = normalize_ipv6(self.host)
         self._transport, self._protocol = await loop.create_datagram_endpoint(
-            Protocol, remote_addr=(self.host, self.port)
+            Protocol, remote_addr=(target_host, self.port)
         )
-        logger.info(f"Data sender targeting {self.host}:{self.port}")
+        logger.info(f"Data sender targeting {format_address_port(target_host, self.port)}")
 
     async def stop(self) -> None:
         """Stop the sender."""
@@ -351,8 +353,8 @@ class DataSender:
 class DataReceiver:
     """UDP receiver for pixel data."""
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 0):
-        self.host = host
+    def __init__(self, host: str | None = None, port: int = 0):
+        self.host = host if host is not None else dual_stack_bind_address()
         self.port = port
         self.handler: DataHandler | None = None
 
@@ -373,20 +375,23 @@ class DataReceiver:
         receiver = self
 
         class DataReceiverProtocol(asyncio.DatagramProtocol):
-            def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+            def datagram_received(self, data: bytes, addr: tuple) -> None:
                 try:
                     packet = DataPacket.from_bytes(data)
                     if receiver.handler:
                         receiver.handler(packet)
                 except ProtocolError as e:
-                    logger.warning(f"Invalid packet from {addr}: {e}")
+                    logger.warning(f"Invalid packet from {format_address_port(addr[0], addr[1])}: {e}")
                 except Exception as e:
-                    logger.error(f"Error processing packet from {addr}: {e}")
+                    logger.error(f"Error processing packet from {format_address_port(addr[0], addr[1])}: {e}")
 
+        family = address_family(self.host)
         self._transport, self._protocol = await loop.create_datagram_endpoint(
-            DataReceiverProtocol, local_addr=(self.host, self.port)
+            DataReceiverProtocol,
+            local_addr=(self.host, self.port),
+            family=family,
         )
-        logger.info(f"Data receiver listening on {self.host}:{self.actual_port}")
+        logger.info(f"Data receiver listening on {format_address_port(self.host, self.actual_port)}")
 
     async def stop(self) -> None:
         """Stop the receiver."""
