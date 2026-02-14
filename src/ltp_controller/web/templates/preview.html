@@ -17,7 +17,7 @@
         </div>
         <div class="preview-info">
             <span>
-                {%- set ns = namespace(source_name=route.source_id[:8] ~ '...', sink_name=route.sink_id[:8] ~ '...') -%}
+                {%- set ns = namespace(source_name=route.source_id, sink_name=route.sink_id) -%}
                 {%- for source in sources if source.id == route.source_id -%}
                     {%- set ns.source_name = source.name -%}
                 {%- endfor -%}

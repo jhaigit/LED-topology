@@ -24,7 +24,7 @@
         <div class="device-details">
             <div class="detail-row">
                 <span class="label">ID:</span>
-                <span class="value id-value">{{ ss.id[:8] }}...</span>
+                <span class="value id-value">{{ ss.id }}</span>
             </div>
             <div class="detail-row">
                 <span class="label">Channels:</span>
@@ -332,10 +332,6 @@ if (sourceIds.length > 0) {
 .page-header .subtitle {
     margin: 0.25rem 0 0 0;
     color: var(--text-secondary, #888);
-}
-.id-value {
-    font-family: monospace;
-    font-size: 0.85em;
 }
 .channel-preview {
     margin: 0.5rem 0;

@@ -34,7 +34,7 @@
                 <span class="label">When:</span>
                 <span class="trigger-desc">
                     Input <strong>{{ rule.trigger.input_id }}</strong>
-                    on sink <strong>{{ rule.trigger.sink_id[:8] }}...</strong>
+                    on sink <strong class="id-value">{{ rule.trigger.sink_id }}</strong>
                     {% if rule.trigger.comparison == 'changed_to' %}changes to{% endif %}
                     {% if rule.trigger.comparison == 'changed_from' %}changes from{% endif %}
                     {% if rule.trigger.comparison == 'eq' %}equals{% endif %}
@@ -47,11 +47,11 @@
                 <ul>
                     {% for action in rule.actions %}
                     <li>
-                        {% if action.type == 'set_control' %}Set <strong>{{ action.control_id }}</strong> to <strong>{{ action.value }}</strong> on <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
-                        {% if action.type == 'enable_route' %}Enable route <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
-                        {% if action.type == 'disable_route' %}Disable route <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
-                        {% if action.type == 'enable_source' %}Enable source <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
-                        {% if action.type == 'disable_source' %}Disable source <strong>{{ action.target_id[:8] }}...</strong>{% endif %}
+                        {% if action.type == 'set_control' %}Set <strong>{{ action.control_id }}</strong> to <strong>{{ action.value }}</strong> on <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'enable_route' %}Enable route <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'disable_route' %}Disable route <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'enable_source' %}Enable source <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'disable_source' %}Disable source <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
                     </li>
                     {% endfor %}
                 </ul>

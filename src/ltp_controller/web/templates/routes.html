@@ -42,14 +42,14 @@
                     {% endfor %}
                 {% endif %}
                 {% if not source_found %}
-                    {{ route.source_id[:8] }}...
+                    <span class="id-value">{{ route.source_id }}</span>
                 {% endif %}
             </td>
             <td class="sink-name" data-sink-id="{{ route.sink_id }}">
                 {% for sink in sinks if sink.id == route.sink_id %}
                     {{ sink.name }}
                 {% else %}
-                    {{ route.sink_id[:8] }}...
+                    <span class="id-value">{{ route.sink_id }}</span>
                 {% endfor %}
             </td>
             <td id="dims-{{ route.id }}">

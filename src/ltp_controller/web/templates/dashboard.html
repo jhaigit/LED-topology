@@ -88,14 +88,14 @@
                     {% for source in sources if source.id == route.source_id %}
                         {{ source.name }}
                     {% else %}
-                        {{ route.source_id[:8] }}...
+                        <span class="id-value">{{ route.source_id }}</span>
                     {% endfor %}
                 </td>
                 <td>
                     {% for sink in sinks if sink.id == route.sink_id %}
                         {{ sink.name }}
                     {% else %}
-                        {{ route.sink_id[:8] }}...
+                        <span class="id-value">{{ route.sink_id }}</span>
                     {% endfor %}
                 </td>
                 <td>

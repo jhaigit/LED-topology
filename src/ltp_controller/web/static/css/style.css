@@ -257,6 +257,12 @@ h2 {
     font-family: monospace;
 }
 
+.id-value {
+    font-family: monospace;
+    font-size: 0.75em;
+    word-break: break-all;
+}
+
 .device-controls {
     margin-bottom: 1rem;
 }
