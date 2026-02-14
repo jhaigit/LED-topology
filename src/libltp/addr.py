@@ -58,13 +58,17 @@ def format_address_port(host: str, port: int) -> str:
 
 
 def _can_bind_dual_stack() -> bool:
-    """Test whether binding to :: with IPV6_V6ONLY=False actually works."""
+    """Test whether :: sockets accept IPv4 by default.
+
+    asyncio.start_server and create_datagram_endpoint do NOT set
+    IPV6_V6ONLY, so we must check the kernel default (net.ipv6.bindv6only).
+    If it's 1, :: sockets only accept IPv6 and IPv4 connections are refused.
+    """
     try:
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-        sock.bind(("::", 0))
+        v6only = sock.getsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY)
         sock.close()
-        return True
+        return v6only == 0
     except (OSError, AttributeError):
         return False
 
