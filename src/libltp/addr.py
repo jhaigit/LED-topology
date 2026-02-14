@@ -57,14 +57,30 @@ def format_address_port(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
+def _can_bind_dual_stack() -> bool:
+    """Test whether binding to :: with IPV6_V6ONLY=False actually works."""
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        sock.bind(("::", 0))
+        sock.close()
+        return True
+    except (OSError, AttributeError):
+        return False
+
+
+# Cache the result at import time so we don't probe on every call
+_DUAL_STACK_AVAILABLE: bool = sys.platform == "linux" and _can_bind_dual_stack()
+
+
 def dual_stack_bind_address() -> str:
     """Return the appropriate wildcard bind address for dual-stack.
 
-    On Linux, "::" with IPV6_V6ONLY=False (the default) accepts both IPv4
-    and IPv6. On macOS and others where IPV6_V6ONLY defaults to True,
-    fall back to "0.0.0.0" for IPv4-only.
+    Returns "::" on Linux when IPv6 dual-stack is confirmed to work
+    (IPv6 enabled and IPV6_V6ONLY can be set to 0). Falls back to
+    "0.0.0.0" otherwise.
     """
-    if sys.platform == "linux":
+    if _DUAL_STACK_AVAILABLE:
         return "::"
     return "0.0.0.0"
 
