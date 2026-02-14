@@ -7,7 +7,14 @@ from typing import Any, Awaitable, Callable, Union
 
 import numpy as np
 
-from libltp.addr import address_family, dual_stack_bind_address, format_address_port, normalize_ipv6
+from libltp.addr import (
+    address_family,
+    create_dual_stack_tcp_socket,
+    create_dual_stack_udp_socket,
+    dual_stack_bind_address,
+    format_address_port,
+    normalize_ipv6,
+)
 from libltp.protocol import DataPacket, Message, ProtocolError
 from libltp.types import ColorFormat, Encoding, ErrorCode, MAX_PACKET_SIZE
 
@@ -188,9 +195,8 @@ class ControlServer:
 
     async def start(self) -> None:
         """Start the server."""
-        self._server = await asyncio.start_server(
-            self._handle_client, self.host, self.port
-        )
+        sock = create_dual_stack_tcp_socket(self.host, self.port)
+        self._server = await asyncio.start_server(self._handle_client, sock=sock)
         logger.info(f"Control server listening on {format_address_port(self.host, self.actual_port)}")
 
     async def stop(self) -> None:
@@ -385,11 +391,9 @@ class DataReceiver:
                 except Exception as e:
                     logger.error(f"Error processing packet from {format_address_port(addr[0], addr[1])}: {e}")
 
-        family = address_family(self.host)
+        sock = create_dual_stack_udp_socket(self.host, self.port)
         self._transport, self._protocol = await loop.create_datagram_endpoint(
-            DataReceiverProtocol,
-            local_addr=(self.host, self.port),
-            family=family,
+            DataReceiverProtocol, sock=sock,
         )
         logger.info(f"Data receiver listening on {format_address_port(self.host, self.actual_port)}")
 

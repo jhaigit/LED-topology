@@ -56,15 +56,47 @@ def format_address_port(host: str, port: int) -> str:
     return f"{host}:{port}"
 
 
-def dual_stack_bind_address() -> str:
-    """Return the wildcard bind address for servers.
+# Cache at import time — True if the platform supports IPv6 dual-stack
+DUAL_STACK = socket.has_dualstack_ipv6()
 
-    Returns "0.0.0.0" (IPv4). CPython's asyncio.start_server explicitly
-    sets IPV6_V6ONLY=1 on IPv6 sockets, so binding to "::" only accepts
-    IPv6 connections — IPv4 clients get ECONNREFUSED. Until we pre-create
-    sockets with IPV6_V6ONLY=0, IPv4 is the safe default.
+
+def dual_stack_bind_address() -> str:
+    """Return "::" when dual-stack is available, "0.0.0.0" otherwise."""
+    return "::" if DUAL_STACK else "0.0.0.0"
+
+
+def create_dual_stack_tcp_socket(host: str, port: int) -> socket.socket:
+    """Create a TCP server socket, dual-stack if host is "::".
+
+    Pre-configures IPV6_V6ONLY=0 to work around asyncio forcing it to 1.
+    Returns a bound, listening, non-blocking socket ready for
+    asyncio.start_server(sock=...).
     """
-    return "0.0.0.0"
+    family = address_family(host)
+    sock = socket.socket(family, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if family == socket.AF_INET6:
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    sock.bind((host, port))
+    sock.listen()
+    sock.setblocking(False)
+    return sock
+
+
+def create_dual_stack_udp_socket(host: str, port: int) -> socket.socket:
+    """Create a UDP socket, dual-stack if host is "::".
+
+    Pre-configures IPV6_V6ONLY=0 to guarantee dual-stack regardless of
+    net.ipv6.bindv6only sysctl. Returns a bound, non-blocking socket
+    ready for create_datagram_endpoint(sock=...).
+    """
+    family = address_family(host)
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    if family == socket.AF_INET6:
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    sock.bind((host, port))
+    sock.setblocking(False)
+    return sock
 
 
 def get_local_ip(remote_host: str) -> str:

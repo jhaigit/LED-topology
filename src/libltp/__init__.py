@@ -6,6 +6,8 @@ sinks, and controllers.
 
 from libltp.addr import (
     address_family,
+    create_dual_stack_tcp_socket,
+    create_dual_stack_udp_socket,
     dual_stack_bind_address,
     format_address_port,
     get_local_ip,
@@ -118,6 +120,8 @@ __version__ = "0.1.0"
 __all__ = [
     # Address utilities
     "address_family",
+    "create_dual_stack_tcp_socket",
+    "create_dual_stack_udp_socket",
     "dual_stack_bind_address",
     "format_address_port",
     "get_local_ip",
