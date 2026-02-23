@@ -347,6 +347,46 @@ def create_app(
 
         return jsonify(result)
 
+    @app.route("/api/sinks/<sink_id>/paint/image", methods=["POST"])
+    def api_sink_paint_image(sink_id: str) -> Any:
+        """Paint an uploaded image on a sink.
+
+        Accepts multipart form data with:
+        - file: Image file (png, jpg, jpeg, bmp, webp, gif)
+        - fit: Fit mode - "contain" (default), "cover", "stretch"
+        """
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not initialized"}), 503
+
+        if "file" not in request.files:
+            return jsonify({"error": "No file uploaded"}), 400
+
+        file = request.files["file"]
+        if not file.filename:
+            return jsonify({"error": "No file selected"}), 400
+
+        # Validate extension
+        allowed_ext = {"png", "jpg", "jpeg", "bmp", "webp", "gif"}
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if ext not in allowed_ext:
+            return jsonify({"error": f"Unsupported format: .{ext}"}), 400
+
+        # Read file data (limit 10MB)
+        image_data = file.read()
+        if len(image_data) > 10 * 1024 * 1024:
+            return jsonify({"error": "File too large (max 10MB)"}), 400
+
+        options = {
+            "fit": request.form.get("fit", "contain"),
+        }
+
+        result = run_async(sink_controller.paint_image(sink_id, image_data, options))
+
+        if result.get("status") == "error":
+            return jsonify(result), 400
+
+        return jsonify(result)
+
     @app.route("/api/sinks/<sink_id>/paint/buffer")
     def api_sink_paint_buffer(sink_id: str) -> Any:
         """Get the current paint buffer for a sink as JSON.

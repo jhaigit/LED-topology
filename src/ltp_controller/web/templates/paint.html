@@ -24,6 +24,7 @@
                 <option value="line">Line</option>
                 <option value="fill">Fill All</option>
                 <option value="text">Text</option>
+                <option value="image">Image</option>
             </select>
         </div>
         <div class="tool-group" id="textToolGroup" style="display: none;">
@@ -38,6 +39,15 @@
             <input type="number" id="ttfSize" value="16" min="6" max="64" step="1"
                    style="width: 60px; display: none;" title="TTF Font Size (pixels)">
             <button class="btn btn-sm btn-primary" onclick="paintText()">Paint Text</button>
+        </div>
+        <div class="tool-group" id="imageToolGroup" style="display: none;">
+            <input type="file" id="imageFile" accept="image/*">
+            <select id="imageFit">
+                <option value="contain">Contain</option>
+                <option value="cover">Cover</option>
+                <option value="stretch">Stretch</option>
+            </select>
+            <button class="btn btn-sm btn-primary" onclick="paintImage()">Upload</button>
         </div>
         <div class="tool-group">
             <button class="btn btn-sm" onclick="clearCanvas()">Clear</button>
@@ -401,6 +411,7 @@ async function sendToSink() {
 function onToolChange() {
     const tool = document.getElementById('paintTool').value;
     document.getElementById('textToolGroup').style.display = tool === 'text' ? 'flex' : 'none';
+    document.getElementById('imageToolGroup').style.display = tool === 'image' ? 'flex' : 'none';
 }
 
 function populateFontDropdown(fonts, defaultFont, filter = '') {
@@ -545,6 +556,40 @@ async function paintText() {
     } catch (err) {
         console.error('Failed to paint text:', err);
         showToast('Failed to paint text', 'error');
+    }
+}
+
+async function paintImage() {
+    const fileInput = document.getElementById('imageFile');
+    if (!fileInput.files || !fileInput.files[0]) {
+        showToast('Please select an image file', 'warning');
+        return;
+    }
+
+    const fit = document.getElementById('imageFit').value;
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+    formData.append('fit', fit);
+
+    try {
+        document.getElementById('lastAction').textContent = 'Uploading image...';
+        const response = await fetch(`/api/sinks/${sinkId}/paint/image`, {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            document.getElementById('lastAction').textContent =
+                `Image: ${data.original_size[0]}x${data.original_size[1]} -> ${data.dimensions[0]}x${data.dimensions[1]} (${data.fit})`;
+            await refreshFromSink();
+        } else {
+            showToast('Error uploading image: ' + (data.error || data.message || 'Unknown error'), 'error');
+            document.getElementById('lastAction').textContent = 'Image upload failed';
+        }
+    } catch (err) {
+        console.error('Failed to upload image:', err);
+        showToast('Failed to upload image', 'error');
+        document.getElementById('lastAction').textContent = 'Image upload failed';
     }
 }
 

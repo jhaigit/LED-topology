@@ -1,11 +1,18 @@
 """Direct sink control for fills and painting without routes."""
 
 import asyncio
+import io
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+
+try:
+    from PIL import Image as PILImage
+    HAS_PIL_IMAGE = True
+except ImportError:
+    HAS_PIL_IMAGE = False
 
 from libltp import (
     DataSender,
@@ -620,6 +627,112 @@ class SinkController:
 
         except Exception as e:
             logger.error(f"Error painting text: {e}")
+            return {"status": "error", "message": str(e)}
+
+    async def paint_image(
+        self, sink_id: str, image_data: bytes, options: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Paint an image on a sink.
+
+        Resizes the image to fit the sink dimensions using the specified fit mode.
+
+        Args:
+            sink_id: Sink device ID
+            image_data: Raw image file bytes (PNG, JPEG, etc.)
+            options: Dict with optional fields:
+                - fit: "contain" (default), "cover", or "stretch"
+                - clear: If true, clear display before rendering (default true)
+
+        Returns:
+            Status dict with success/error info
+        """
+        if not HAS_PIL_IMAGE:
+            return {"status": "error", "message": "PIL/Pillow is not installed"}
+
+        sink = self.controller.get_sink(sink_id)
+        if not sink:
+            return {"status": "error", "message": "Sink not found"}
+
+        if not sink.online:
+            return {"status": "error", "message": "Sink is offline"}
+
+        try:
+            img = PILImage.open(io.BytesIO(image_data))
+        except Exception as e:
+            return {"status": "error", "message": f"Cannot open image: {e}"}
+
+        original_size = img.size  # (w, h)
+
+        # Convert RGBA/palette to RGB, compositing onto black
+        if img.mode == "RGBA":
+            background = PILImage.new("RGB", img.size, (0, 0, 0))
+            background.paste(img, mask=img.split()[3])
+            img = background
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+
+        fit = options.get("fit", "contain")
+
+        try:
+            async with self._lock:
+                stream = await self._get_or_create_stream(sink)
+                pixel_count = stream.pixel_count
+                dimensions = self._get_dimensions(sink)
+
+                if len(dimensions) >= 2:
+                    w, h = dimensions[0], dimensions[1]
+                else:
+                    w = dimensions[0]
+                    h = 1
+
+                if fit == "stretch":
+                    img = img.resize((w, h), PILImage.LANCZOS)
+                elif fit == "cover":
+                    # Scale to fill, then center-crop
+                    scale = max(w / img.width, h / img.height)
+                    new_w = int(img.width * scale)
+                    new_h = int(img.height * scale)
+                    img = img.resize((new_w, new_h), PILImage.LANCZOS)
+                    left = (new_w - w) // 2
+                    top = (new_h - h) // 2
+                    img = img.crop((left, top, left + w, top + h))
+                else:
+                    # contain: scale to fit, center with black padding
+                    scale = min(w / img.width, h / img.height)
+                    new_w = max(1, int(img.width * scale))
+                    new_h = max(1, int(img.height * scale))
+                    img = img.resize((new_w, new_h), PILImage.LANCZOS)
+                    result = PILImage.new("RGB", (w, h), (0, 0, 0))
+                    paste_x = (w - new_w) // 2
+                    paste_y = (h - new_h) // 2
+                    result.paste(img, (paste_x, paste_y))
+                    img = result
+
+                # Convert to numpy and store in paint buffer
+                pixels = np.array(img, dtype=np.uint8).reshape(-1, 3)
+
+                # Ensure pixel count matches (crop or pad if needed)
+                if len(pixels) > pixel_count:
+                    pixels = pixels[:pixel_count]
+                elif len(pixels) < pixel_count:
+                    pad = np.zeros((pixel_count - len(pixels), 3), dtype=np.uint8)
+                    pixels = np.concatenate([pixels, pad])
+
+                self._paint_buffers[sink_id] = pixels.copy()
+
+                # Send frame
+                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+
+                logger.info(f"Painted image on sink {sink.name} ({original_size[0]}x{original_size[1]} -> {w}x{h}, fit={fit})")
+                return {
+                    "status": "ok",
+                    "original_size": list(original_size),
+                    "dimensions": [w, h],
+                    "fit": fit,
+                }
+
+        except Exception as e:
+            logger.error(f"Error painting image: {e}")
             return {"status": "error", "message": str(e)}
 
     async def get_paint_info(self, sink_id: str) -> dict[str, Any]:
