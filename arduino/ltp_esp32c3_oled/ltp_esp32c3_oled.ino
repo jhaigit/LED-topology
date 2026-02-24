@@ -285,6 +285,8 @@ void UsbTerminal::cmdInfo() {
     } else {
         dualOut.println("Current Time: not synced");
     }
+    dualOut.println("--- Stream ---");
+    dualOut.printf("Stream active: %s\r\n", protocol.isStreamActive() ? "YES" : "NO");
     dualOut.println("--- Stats ---");
     dualOut.printf("UDP Packets: %lu received, %lu dropped\r\n",
                   udpReceiver.getPacketsReceived(), udpReceiver.getPacketsDropped());

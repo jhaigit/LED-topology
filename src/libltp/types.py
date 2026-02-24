@@ -390,6 +390,8 @@ SERVICE_TYPE_CONTROLLER = "_ltp-controller._tcp.local."
 PROTOCOL_VERSION = "0.1"
 PACKET_MAGIC = 0x4C54
 # Max UDP packet size - 8KB works on most local networks
-# For larger displays, frame chunking should be implemented
 MAX_PACKET_SIZE = 8192
+# Max pixels per UDP chunk - keeps each packet under typical MTU (~1500)
+# 480 pixels * 3 bytes/pixel = 1440 + 12 header = 1452 bytes
+MAX_CHUNK_PIXELS = 480
 DEFAULT_REFRESH_HZ = 30

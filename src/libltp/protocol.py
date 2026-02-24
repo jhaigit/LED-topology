@@ -270,11 +270,13 @@ class DataPacket:
         pixel_data: np.ndarray,
         encoding: Encoding = Encoding.RAW,
         flags: int = 0,
+        chunk_index: int = 0,
     ):
         self.sequence = sequence
         self.color_format = color_format
         self.encoding = encoding
         self.flags = flags
+        self.chunk_index = chunk_index
         self.pixel_data = pixel_data
 
     @property
@@ -285,14 +287,21 @@ class DataPacket:
         return self.pixel_data.shape[0]
 
     def to_bytes(self) -> bytes:
-        """Serialize packet to bytes."""
+        """Serialize packet to bytes.
+
+        The reserved byte in the packet header carries the chunk_index
+        (0 for single-packet frames or the first chunk, 1+ for subsequent
+        chunks).  This lets DataSender split large frames into MTU-safe
+        chunks while remaining backward-compatible — existing receivers
+        that ignore the reserved byte still work for single-packet frames.
+        """
         # Packet header
         ver_flags = (0 << 4) | (self.flags & 0x0F)
         header = struct.pack(
             self.HEADER_FORMAT,
             PACKET_MAGIC,
             ver_flags,
-            0,  # reserved
+            self.chunk_index & 0xFF,
             self.sequence & 0xFFFFFFFF,
         )
 

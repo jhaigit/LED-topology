@@ -16,7 +16,7 @@ from libltp.addr import (
     normalize_ipv6,
 )
 from libltp.protocol import DataPacket, Message, ProtocolError
-from libltp.types import ColorFormat, Encoding, ErrorCode, MAX_PACKET_SIZE
+from libltp.types import ColorFormat, Encoding, ErrorCode, MAX_CHUNK_PIXELS, MAX_PACKET_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -336,24 +336,46 @@ class DataSender:
         color_format: ColorFormat = ColorFormat.RGB,
         encoding: Encoding = Encoding.RAW,
     ) -> None:
-        """Send pixel data."""
+        """Send pixel data, chunking large frames to avoid IP fragmentation.
+
+        Frames with more than MAX_CHUNK_PIXELS pixels are split into
+        multiple UDP packets.  Each chunk carries a chunk_index in the
+        packet header's reserved byte (0 for the first chunk, 1, 2, …).
+        The receiver multiplies chunk_index * MAX_CHUNK_PIXELS to get the
+        pixel offset for placement.
+        """
         if not self._transport:
             raise RuntimeError("Sender not started")
 
         self._sequence = (self._sequence + 1) & 0xFFFFFFFF
 
-        packet = DataPacket(
-            sequence=self._sequence,
-            color_format=color_format,
-            pixel_data=pixels,
-            encoding=encoding,
-        )
+        pixel_count = pixels.shape[0] if pixels.ndim > 1 else len(pixels) // color_format.bytes_per_pixel
 
-        data = packet.to_bytes()
-        if len(data) > MAX_PACKET_SIZE:
-            logger.warning(f"Packet size {len(data)} exceeds max {MAX_PACKET_SIZE}")
-
-        self._transport.sendto(data)
+        if pixel_count <= MAX_CHUNK_PIXELS:
+            # Single packet — fast path
+            packet = DataPacket(
+                sequence=self._sequence,
+                color_format=color_format,
+                pixel_data=pixels,
+                encoding=encoding,
+                chunk_index=0,
+            )
+            self._transport.sendto(packet.to_bytes())
+        else:
+            # Chunk into multiple MTU-safe packets
+            chunk_idx = 0
+            for offset in range(0, pixel_count, MAX_CHUNK_PIXELS):
+                end = min(offset + MAX_CHUNK_PIXELS, pixel_count)
+                chunk = pixels[offset:end]
+                packet = DataPacket(
+                    sequence=self._sequence,
+                    color_format=color_format,
+                    pixel_data=chunk,
+                    encoding=encoding,
+                    chunk_index=chunk_idx,
+                )
+                self._transport.sendto(packet.to_bytes())
+                chunk_idx += 1
 
 
 class DataReceiver:

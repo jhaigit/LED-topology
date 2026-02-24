@@ -9,7 +9,7 @@
 #   make upload PORT=/dev/ttyUSB0
 
 # Configuration - modify for your setup
-BOARD ?= esp32:esp32:esp32c3
+BOARD ?= esp32:esp32:esp32c3:CDCOnBoot=cdc
 PORT ?= /dev/ttyUSB0
 BAUD ?= 115200
 

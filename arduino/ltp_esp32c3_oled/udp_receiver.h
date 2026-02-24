@@ -2,11 +2,16 @@
  * ESP32-C3 OLED Sink - UDP Data Receiver
  *
  * Receives binary pixel data packets over UDP.
+ * Supports chunked frames: large frames are split into multiple
+ * MTU-safe packets by the sender.  The reserved byte in the packet
+ * header carries the chunk_index (0, 1, 2, ...).  Each chunk contains
+ * up to MAX_CHUNK_PIXELS pixels starting at chunk_index * MAX_CHUNK_PIXELS.
+ *
  * Packet format (from libltp/protocol.py DataPacket):
  *   Header (8 bytes):
  *     - magic: 2 bytes (0x4C54 = "LT")
  *     - ver_flags: 1 byte (version << 4 | flags)
- *     - reserved: 1 byte
+ *     - chunk_index: 1 byte (pixel offset = chunk_index * MAX_CHUNK_PIXELS)
  *     - sequence: 4 bytes (big-endian)
  *   Frame header (4 bytes):
  *     - color_format: 1 byte (0x01 = RGB)
@@ -27,7 +32,9 @@
 #define PACKET_MAGIC        0x4C54
 #define PACKET_HEADER_SIZE  8
 #define FRAME_HEADER_SIZE   4
-#define MAX_UDP_PACKET      1500
+
+// Must match MAX_CHUNK_PIXELS in Python libltp/types.py
+#define MAX_CHUNK_PIXELS    480
 
 // Color format values
 #define COLOR_FMT_RGB       0x01
@@ -45,12 +52,11 @@ public:
         , lastSequence(0)
         , packetsReceived(0)
         , packetsDropped(0)
+        , totalPixelsThisFrame(0)
     {}
 
     bool begin(uint16_t listenPort = 0) {
-        // Port 0 means let the system assign
         if (listenPort == 0) {
-            // Try a specific port first
             listenPort = 5001;
         }
 
@@ -76,81 +82,29 @@ public:
     uint16_t getPort() const { return port; }
     bool isRunning() const { return running; }
 
-    // Process incoming packets, copy pixels to buffer
-    // Returns number of pixels received, or 0 if no packet
+    // Process incoming packets, read pixels into caller's buffer.
+    // Handles chunked frames: each chunk is placed at
+    // chunk_index * MAX_CHUNK_PIXELS * 3 in the buffer.
+    // Returns total pixels received across all chunks for this frame
+    // when a new sequence starts, or 0 if frame is still accumulating.
+    // For single-packet frames (chunk_index=0), returns immediately.
     uint16_t receive(uint8_t* pixelBuffer, uint16_t maxPixels) {
         if (!running) return 0;
 
-        int packetSize = udp.parsePacket();
-        if (packetSize == 0) return 0;
+        uint16_t result = 0;
 
-        // Read packet into buffer
-        uint8_t packet[MAX_UDP_PACKET];
-        int len = udp.read(packet, min(packetSize, (int)MAX_UDP_PACKET));
+        // Drain all available packets (chunks arrive in quick succession)
+        while (true) {
+            int packetSize = udp.parsePacket();
+            if (packetSize == 0) break;
 
-        if (len < PACKET_HEADER_SIZE + FRAME_HEADER_SIZE) {
-            dualOut.println("UDP: Packet too small");
-            return 0;
+            uint16_t got = receiveOne(pixelBuffer, maxPixels);
+            if (got > 0) {
+                result = got;
+            }
         }
 
-        // Parse packet header (big-endian)
-        uint16_t magic = (packet[0] << 8) | packet[1];
-        if (magic != PACKET_MAGIC) {
-            dualOut.printf("UDP: Invalid magic 0x%04X\r\n", magic);
-            return 0;
-        }
-
-        uint8_t verFlags = packet[2];
-        // uint8_t reserved = packet[3];
-        uint32_t sequence = ((uint32_t)packet[4] << 24) |
-                           ((uint32_t)packet[5] << 16) |
-                           ((uint32_t)packet[6] << 8) |
-                           packet[7];
-
-        // Check for dropped packets
-        if (lastSequence > 0 && sequence > lastSequence + 1) {
-            packetsDropped += sequence - lastSequence - 1;
-        } else if (lastSequence > 0 && sequence <= lastSequence) {
-            // Sequence went backward — new stream, reset stats
-            packetsDropped = 0;
-            packetsReceived = 0;
-        }
-        lastSequence = sequence;
-
-        // Parse frame header
-        uint8_t colorFormat = packet[PACKET_HEADER_SIZE];
-        uint8_t encoding = packet[PACKET_HEADER_SIZE + 1];
-        uint16_t pixelCount = (packet[PACKET_HEADER_SIZE + 2] << 8) |
-                              packet[PACKET_HEADER_SIZE + 3];
-
-        // Only support RGB raw for now
-        if (colorFormat != COLOR_FMT_RGB) {
-            dualOut.printf("UDP: Unsupported color format %d\r\n", colorFormat);
-            return 0;
-        }
-
-        if (encoding != ENCODING_RAW) {
-            dualOut.printf("UDP: Unsupported encoding %d\r\n", encoding);
-            return 0;
-        }
-
-        // Calculate expected data size
-        uint8_t bytesPerPixel = 3;  // RGB
-        uint16_t expectedDataSize = pixelCount * bytesPerPixel;
-        uint16_t dataOffset = PACKET_HEADER_SIZE + FRAME_HEADER_SIZE;
-
-        if (len < dataOffset + expectedDataSize) {
-            dualOut.printf("UDP: Insufficient data: got %d, need %d\r\n",
-                          len - dataOffset, expectedDataSize);
-            return 0;
-        }
-
-        // Copy pixel data to buffer
-        uint16_t pixelsToCopy = min(pixelCount, maxPixels);
-        memcpy(pixelBuffer, packet + dataOffset, pixelsToCopy * bytesPerPixel);
-
-        packetsReceived++;
-        return pixelsToCopy;
+        return result;
     }
 
     // Statistics
@@ -171,6 +125,109 @@ private:
     uint32_t lastSequence;
     uint32_t packetsReceived;
     uint32_t packetsDropped;
+    uint16_t totalPixelsThisFrame;
+
+    // Drain any remaining bytes from current UDP packet
+    void flushPacket() {
+        while (udp.available()) udp.read();
+    }
+
+    // Process a single UDP packet (one chunk).
+    // Returns total pixels in frame when frame is complete, 0 otherwise.
+    uint16_t receiveOne(uint8_t* pixelBuffer, uint16_t maxPixels) {
+        // Read header (12 bytes: 8 packet + 4 frame)
+        uint8_t header[PACKET_HEADER_SIZE + FRAME_HEADER_SIZE];
+        int headerLen = udp.read(header, sizeof(header));
+
+        if (headerLen < (int)sizeof(header)) {
+            flushPacket();
+            return 0;
+        }
+
+        // Parse packet header (big-endian)
+        uint16_t magic = (header[0] << 8) | header[1];
+        if (magic != PACKET_MAGIC) {
+            flushPacket();
+            return 0;
+        }
+
+        uint8_t chunkIndex = header[3];
+        uint32_t sequence = ((uint32_t)header[4] << 24) |
+                           ((uint32_t)header[5] << 16) |
+                           ((uint32_t)header[6] << 8) |
+                           header[7];
+
+        // Track sequence for drop detection
+        if (lastSequence > 0 && sequence > lastSequence + 1) {
+            packetsDropped += sequence - lastSequence - 1;
+        } else if (lastSequence > 0 && sequence < lastSequence) {
+            // Sequence went backward — new stream, reset stats
+            packetsDropped = 0;
+            packetsReceived = 0;
+        }
+
+        // New sequence = new frame, reset accumulator
+        if (sequence != lastSequence) {
+            totalPixelsThisFrame = 0;
+        }
+        lastSequence = sequence;
+
+        // Parse frame header
+        uint8_t colorFormat = header[PACKET_HEADER_SIZE];
+        uint8_t encoding = header[PACKET_HEADER_SIZE + 1];
+        uint16_t pixelCount = (header[PACKET_HEADER_SIZE + 2] << 8) |
+                              header[PACKET_HEADER_SIZE + 3];
+
+        if (colorFormat != COLOR_FMT_RGB || encoding != ENCODING_RAW) {
+            flushPacket();
+            return 0;
+        }
+
+        // Calculate pixel offset from chunk index
+        uint16_t pixelOffset = (uint16_t)chunkIndex * MAX_CHUNK_PIXELS;
+        uint16_t pixelsToRead = pixelCount;
+
+        // Clamp to buffer bounds
+        if (pixelOffset >= maxPixels) {
+            flushPacket();
+            return 0;
+        }
+        if (pixelOffset + pixelsToRead > maxPixels) {
+            pixelsToRead = maxPixels - pixelOffset;
+        }
+
+        // Read pixel data directly into caller's buffer at the right offset
+        uint16_t bytesToRead = pixelsToRead * 3;
+        uint16_t bufferOffset = pixelOffset * 3;
+        int bytesRead = udp.read(pixelBuffer + bufferOffset, bytesToRead);
+
+        flushPacket();
+
+        if (bytesRead < (int)bytesToRead) {
+            return 0;
+        }
+
+        totalPixelsThisFrame += pixelsToRead;
+        packetsReceived++;
+
+        // For single-packet frames (chunk_index=0 and all pixels fit),
+        // return immediately.  For chunked frames, return total when we
+        // have enough pixels to fill the display.
+        if (chunkIndex == 0 && pixelCount >= maxPixels) {
+            return pixelsToRead;
+        }
+
+        // Return total accumulated pixels if we think the frame is complete
+        // (we've received enough to fill the display, or this is the last
+        // chunk — detectable because pixelCount < MAX_CHUNK_PIXELS)
+        if (totalPixelsThisFrame >= maxPixels || pixelCount < MAX_CHUNK_PIXELS) {
+            uint16_t total = totalPixelsThisFrame;
+            totalPixelsThisFrame = 0;
+            return total;
+        }
+
+        return 0;
+    }
 };
 
 #endif // UDP_RECEIVER_H
