@@ -115,8 +115,8 @@ class SinkController:
                 if self._pool and not self._pool.is_connected(sink_id):
                     raise ConnectionError("Pool connection closed")
                 # Check if host changed (e.g., DHCP renewal)
-                if stream.sender._host != sink.host:
-                    logger.info(f"Host changed for {sink_id}: {stream.sender._host} -> {sink.host}, recreating stream")
+                if stream.sender.host != sink.host:
+                    logger.info(f"Host changed for {sink_id}: {stream.sender.host} -> {sink.host}, recreating stream")
                     raise ConnectionError("Host changed")
                 # Check if pixel count changed (device might have reconnected with different config)
                 current_pixel_count = self._get_pixel_count(sink)
