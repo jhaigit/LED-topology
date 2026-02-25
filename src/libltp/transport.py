@@ -343,11 +343,23 @@ class DataSender:
         packet header's reserved byte (0 for the first chunk, 1, 2, …).
         The receiver multiplies chunk_index * MAX_CHUNK_PIXELS to get the
         pixel offset for placement.
+
+        If color_format is GRAYSCALE and pixels are RGB (N, 3), converts
+        to grayscale using ITU-R BT.601 luma coefficients.
         """
         if not self._transport:
             raise RuntimeError("Sender not started")
 
         self._sequence = (self._sequence + 1) & 0xFFFFFFFF
+
+        # Convert RGB to grayscale if needed
+        if color_format == ColorFormat.GRAYSCALE and pixels.ndim == 2 and pixels.shape[1] == 3:
+            luma = (
+                pixels[:, 0].astype(np.uint16) * 77
+                + pixels[:, 1].astype(np.uint16) * 150
+                + pixels[:, 2].astype(np.uint16) * 29
+            ) >> 8
+            pixels = luma.astype(np.uint8)
 
         pixel_count = pixels.shape[0] if pixels.ndim > 1 else len(pixels) // color_format.bytes_per_pixel
 

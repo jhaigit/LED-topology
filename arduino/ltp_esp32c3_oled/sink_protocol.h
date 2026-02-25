@@ -48,6 +48,7 @@ public:
         , oled(nullptr)
         , udpPort(0)
         , streamActive(false)
+        , activeColorFormat(COLOR_FMT_RGB)
         , lastSeq(0)
         , onLocalModeChange(nullptr)
         , onCycleTimeChange(nullptr)
@@ -121,9 +122,13 @@ public:
     // Check if stream is active
     bool isStreamActive() const { return streamActive; }
 
+    // Get the negotiated color format for the active stream
+    uint8_t getActiveColorFormat() const { return activeColorFormat; }
+
     // Stop stream (called when client disconnects)
     void stopStream() {
         streamActive = false;
+        activeColorFormat = COLOR_FMT_RGB;
         streamId[0] = '\0';
     }
 
@@ -132,6 +137,7 @@ private:
     OledDriver* oled;
     uint16_t udpPort;
     bool streamActive;
+    uint8_t activeColorFormat;
     char streamId[32];
     int lastSeq;
     LocalModeCallback onLocalModeChange;
@@ -175,7 +181,9 @@ private:
 
         JsonArray colorFormats = device["color_formats"].to<JsonArray>();
         colorFormats.add("rgb");
+        colorFormats.add("grayscale");
 
+        device["preferred_format"] = "grayscale";
         device["max_refresh_hz"] = 15;
         device["protocol_version"] = "0.1";
 
@@ -251,6 +259,16 @@ private:
         if (seq > 0) resp["seq"] = seq;
         resp["status"] = "ok";
         resp["udp_port"] = udpPort;
+
+        // Extract negotiated color format from stream_setup request
+        const char* colorStr = doc["format"]["color"];
+        if (colorStr && strcmp(colorStr, "grayscale") == 0) {
+            activeColorFormat = COLOR_FMT_GRAYSCALE;
+            dualOut.println("Stream format: grayscale");
+        } else {
+            activeColorFormat = COLOR_FMT_RGB;
+            dualOut.println("Stream format: rgb");
+        }
 
         // Generate stream ID
         snprintf(streamId, sizeof(streamId), "stream-%04x", (unsigned int)(millis() & 0xFFFF));

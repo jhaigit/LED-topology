@@ -68,6 +68,28 @@ public:
         display.sendBuffer();
     }
 
+    // Convert grayscale pixel buffer to monochrome and render to OLED
+    // grayBuffer: array of single bytes (1 byte per pixel, 0-255 luminance)
+    // count: number of pixels
+    void drawGrayscalePixels(const uint8_t* grayBuffer, uint16_t count) {
+        display.clearBuffer();
+
+        uint16_t maxPixels = (count < OLED_TOTAL_PIXELS) ? count : OLED_TOTAL_PIXELS;
+        for (uint16_t i = 0; i < maxPixels; i++) {
+            uint8_t x = i % OLED_WIDTH;
+            uint8_t y = i / OLED_WIDTH;
+
+            if (grayBuffer[i] >= 128) {
+                display.setDrawColor(1);
+            } else {
+                display.setDrawColor(0);
+            }
+            display.drawPixel(x, y);
+        }
+
+        display.sendBuffer();
+    }
+
     // Text drawing helpers for local modes
     void setFont(const uint8_t* font) {
         display.setFont(font);

@@ -14,11 +14,12 @@
  *     - chunk_index: 1 byte (pixel offset = chunk_index * MAX_CHUNK_PIXELS)
  *     - sequence: 4 bytes (big-endian)
  *   Frame header (4 bytes):
- *     - color_format: 1 byte (0x01 = RGB)
+ *     - color_format: 1 byte (0x01 = RGB, 0x04 = GRAYSCALE)
  *     - encoding: 1 byte (0x00 = RAW)
  *     - pixel_count: 2 bytes (big-endian)
  *   Pixel data:
- *     - RGB bytes (3 * pixel_count)
+ *     - RGB: 3 * pixel_count bytes
+ *     - GRAYSCALE: 1 * pixel_count bytes
  */
 
 #ifndef UDP_RECEIVER_H
@@ -39,6 +40,7 @@
 // Color format values
 #define COLOR_FMT_RGB       0x01
 #define COLOR_FMT_RGBW      0x02
+// COLOR_FMT_GRAYSCALE (0x04) defined in config.h
 
 // Encoding values
 #define ENCODING_RAW        0x00
@@ -53,6 +55,7 @@ public:
         , packetsReceived(0)
         , packetsDropped(0)
         , totalPixelsThisFrame(0)
+        , lastColorFormat(COLOR_FMT_RGB)
     {}
 
     bool begin(uint16_t listenPort = 0) {
@@ -107,6 +110,9 @@ public:
         return result;
     }
 
+    // Get the color format from the last received frame
+    uint8_t getLastColorFormat() const { return lastColorFormat; }
+
     // Statistics
     uint32_t getPacketsReceived() const { return packetsReceived; }
     uint32_t getPacketsDropped() const { return packetsDropped; }
@@ -126,6 +132,7 @@ private:
     uint32_t packetsReceived;
     uint32_t packetsDropped;
     uint16_t totalPixelsThisFrame;
+    uint8_t lastColorFormat;
 
     // Drain any remaining bytes from current UDP packet
     void flushPacket() {
@@ -178,10 +185,23 @@ private:
         uint16_t pixelCount = (header[PACKET_HEADER_SIZE + 2] << 8) |
                               header[PACKET_HEADER_SIZE + 3];
 
-        if (colorFormat != COLOR_FMT_RGB || encoding != ENCODING_RAW) {
+        // Determine bytes per pixel based on color format
+        uint8_t bytesPerPixel;
+        if (colorFormat == COLOR_FMT_RGB) {
+            bytesPerPixel = 3;
+        } else if (colorFormat == COLOR_FMT_GRAYSCALE) {
+            bytesPerPixel = 1;
+        } else {
             flushPacket();
             return 0;
         }
+
+        if (encoding != ENCODING_RAW) {
+            flushPacket();
+            return 0;
+        }
+
+        lastColorFormat = colorFormat;
 
         // Calculate pixel offset from chunk index
         uint16_t pixelOffset = (uint16_t)chunkIndex * MAX_CHUNK_PIXELS;
@@ -197,8 +217,8 @@ private:
         }
 
         // Read pixel data directly into caller's buffer at the right offset
-        uint16_t bytesToRead = pixelsToRead * 3;
-        uint16_t bufferOffset = pixelOffset * 3;
+        uint16_t bytesToRead = pixelsToRead * bytesPerPixel;
+        uint16_t bufferOffset = pixelOffset * bytesPerPixel;
         int bytesRead = udp.read(pixelBuffer + bufferOffset, bytesToRead);
 
         flushPacket();

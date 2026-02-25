@@ -55,6 +55,7 @@ class SinkStream:
     stream_id: str
     udp_port: int
     pixel_count: int
+    color_format: ColorFormat = ColorFormat.RGB
 
 
 class SinkController:
@@ -132,7 +133,10 @@ class SinkController:
         if not self._pool:
             raise ValueError("No connection pool available")
 
-        setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
+        # Negotiate color format based on sink capabilities
+        color_format = self._get_preferred_format(sink)
+
+        setup_req = stream_setup(0, color_format, Encoding.RAW)
         setup_resp = await self._pool.request(sink_id, setup_req)
 
         if not setup_resp or setup_resp.data.get("status") != "ok":
@@ -159,11 +163,13 @@ class SinkController:
             stream_id=stream_id,
             udp_port=udp_port,
             pixel_count=pixel_count,
+            color_format=color_format,
         )
         self._streams[sink_id] = stream
 
         dim_str = "x".join(str(d) for d in dimensions)
-        logger.info(f"Created stream to sink {sink.name} ({dim_str}, {pixel_count} pixels)")
+        fmt_str = color_format.name.lower()
+        logger.info(f"Created stream to sink {sink.name} ({dim_str}, {pixel_count} pixels, color: {fmt_str})")
         return stream
 
     async def _cleanup_stream(self, sink_id: str) -> None:
@@ -186,6 +192,29 @@ class SinkController:
             pass
 
         logger.info(f"Cleaned up stream to sink {sink_id}")
+
+    def _get_preferred_format(self, sink: DeviceState) -> ColorFormat:
+        """Determine the preferred color format for a sink.
+
+        Checks the sink's capabilities for preferred_format and color_formats.
+        Returns GRAYSCALE if the sink prefers it, otherwise RGB.
+        """
+        caps = sink.capabilities
+        if not caps:
+            return ColorFormat.RGB
+
+        # Check explicit preferred_format first
+        preferred = caps.get("preferred_format")
+        if preferred == "grayscale":
+            return ColorFormat.GRAYSCALE
+
+        # Check if grayscale is in supported formats
+        color_formats = caps.get("color_formats", [])
+        if "grayscale" in color_formats and "rgb" in color_formats:
+            # Sink supports both but didn't explicitly prefer — stick with RGB
+            return ColorFormat.RGB
+
+        return ColorFormat.RGB
 
     def _get_pixel_count(self, sink: DeviceState) -> int:
         """Get pixel count from sink device."""
@@ -250,7 +279,7 @@ class SinkController:
                 )
 
                 # Send frame
-                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                stream.sender.send(pixels, stream.color_format, Encoding.RAW)
                 logger.debug(f"Sent {len(pixels)} pixels to {sink.name} UDP:{stream.udp_port}")
 
             logger.info(f"Filled sink {sink.name} with color {color}")
@@ -308,7 +337,7 @@ class SinkController:
                     )
 
                 # Send frame
-                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                stream.sender.send(pixels, stream.color_format, Encoding.RAW)
 
             logger.info(f"Filled sink {sink.name} with gradient ({len(colors)} colors)")
             return {"status": "ok", "pixels": stream.pixel_count}
@@ -361,7 +390,7 @@ class SinkController:
                         pixels[start:end] = color
 
                 # Send frame
-                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                stream.sender.send(pixels, stream.color_format, Encoding.RAW)
 
             logger.info(f"Filled sink {sink.name} with {len(sections)} sections")
             return {"status": "ok", "pixels": stream.pixel_count, "sections": len(sections)}
@@ -478,7 +507,7 @@ class SinkController:
                     return {"status": "error", "message": "Unknown paint mode"}
 
                 # Send the frame
-                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                stream.sender.send(pixels, stream.color_format, Encoding.RAW)
                 logger.debug(f"Paint: sent {pixel_count} pixels to {sink.name} UDP:{stream.udp_port}")
 
                 return {"status": "ok", "pixels_set": pixel_count}
@@ -615,7 +644,7 @@ class SinkController:
                     pixels = buffer
 
                 # Send frame
-                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                stream.sender.send(pixels, stream.color_format, Encoding.RAW)
 
                 logger.info(f"Painted text '{text[:20]}...' on sink {sink.name}")
                 return {
@@ -721,7 +750,7 @@ class SinkController:
                 self._paint_buffers[sink_id] = pixels.copy()
 
                 # Send frame
-                stream.sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                stream.sender.send(pixels, stream.color_format, Encoding.RAW)
 
                 logger.info(f"Painted image on sink {sink.name} ({original_size[0]}x{original_size[1]} -> {w}x{h}, fit={fit})")
                 return {

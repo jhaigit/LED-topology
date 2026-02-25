@@ -106,6 +106,9 @@ class Route:
     _last_frame_time: datetime | None = field(default=None, repr=False)
     _last_frame: list | None = field(default=None, repr=False)
 
+    # Format negotiation
+    _sink_color_format: ColorFormat = field(default=ColorFormat.RGB, repr=False)
+
     # Dimension tracking and warnings
     _source_dims: list[int] | None = field(default=None, repr=False)
     _sink_dims: list[int] | None = field(default=None, repr=False)
@@ -401,7 +404,8 @@ class RoutingEngine:
 
         # Set up stream to sink via pool
         sink_dims = self._get_dimensions(sink)
-        setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
+        route._sink_color_format = self._get_preferred_format(sink)
+        setup_req = stream_setup(0, route._sink_color_format, Encoding.RAW)
 
         if self._pool:
             setup_resp = await self._pool.request(sink.id, setup_req)
@@ -523,7 +527,10 @@ class RoutingEngine:
         logger.info(f"Starting direct route: {route.name}")
 
         # Set up stream to sink via pool
-        setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
+        # Note: direct routes send source data straight to sink, so format
+        # negotiation is limited — source may not convert. Use RGB for safety.
+        route._sink_color_format = ColorFormat.RGB
+        setup_req = stream_setup(0, route._sink_color_format, Encoding.RAW)
 
         if self._pool:
             setup_resp = await self._pool.request(sink.id, setup_req)
@@ -617,8 +624,11 @@ class RoutingEngine:
         sink_dims = self._get_dimensions(sink)
         num_pixels = np.prod(sink_dims)
 
+        # Negotiate color format
+        route._sink_color_format = self._get_preferred_format(sink)
+
         # Set up stream to sink via pool
-        setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
+        setup_req = stream_setup(0, route._sink_color_format, Encoding.RAW)
 
         if self._pool:
             setup_resp = await self._pool.request(sink.id, setup_req)
@@ -702,9 +712,9 @@ class RoutingEngine:
                 # Store for preview
                 route._last_frame = pixels.tolist()
 
-                # Send to sink
+                # Send to sink using negotiated format
                 if route._sender:
-                    route._sender.send(pixels, ColorFormat.RGB, Encoding.RAW)
+                    route._sender.send(pixels, route._sink_color_format, Encoding.RAW)
                     route._frames_routed += 1
                     route._last_frame_time = datetime.now()
 
@@ -755,9 +765,9 @@ class RoutingEngine:
             # Store for preview (convert to list for JSON serialization)
             route._last_frame = pixels.tolist()
 
-            # Send to sink
+            # Send to sink using negotiated format
             if route._sender:
-                route._sender.send(pixels, packet.color_format, packet.encoding)
+                route._sender.send(pixels, route._sink_color_format, packet.encoding)
                 route._frames_routed += 1
                 route._last_frame_time = datetime.now()
 
@@ -814,6 +824,18 @@ class RoutingEngine:
     def _get_local_ip(self, remote_host: str) -> str:
         """Get local IP address that can reach the remote host."""
         return _get_local_ip_util(remote_host)
+
+    def _get_preferred_format(self, sink: DeviceState) -> ColorFormat:
+        """Determine the preferred color format for a sink."""
+        caps = sink.capabilities
+        if not caps:
+            return ColorFormat.RGB
+
+        preferred = caps.get("preferred_format")
+        if preferred == "grayscale":
+            return ColorFormat.GRAYSCALE
+
+        return ColorFormat.RGB
 
     def _get_dimensions(self, device: DeviceState) -> list[int]:
         """Get pixel dimensions from device."""

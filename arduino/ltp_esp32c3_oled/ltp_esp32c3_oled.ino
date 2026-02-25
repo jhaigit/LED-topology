@@ -574,14 +574,19 @@ void loop() {
             localModes.stop();
             resetActivityTimer();
 
-            // Convert RGB to monochrome and display
-            oled.drawPixels(pixelBuffer, pixelsReceived);
+            // Dispatch based on color format
+            uint8_t fmt = udpReceiver.getLastColorFormat();
+            if (fmt == COLOR_FMT_GRAYSCALE) {
+                oled.drawGrayscalePixels(pixelBuffer, pixelsReceived);
+            } else {
+                oled.drawPixels(pixelBuffer, pixelsReceived);
+            }
 
             // Debug: print stats every 100 packets
             static uint32_t debugCounter = 0;
             if (++debugCounter % 100 == 1) {
-                dualOut.printf("UDP: %d px, first=[%d,%d,%d]\r\n",
-                    pixelsReceived, pixelBuffer[0], pixelBuffer[1], pixelBuffer[2]);
+                dualOut.printf("UDP: %d px, fmt=%s\r\n",
+                    pixelsReceived, fmt == COLOR_FMT_GRAYSCALE ? "gray" : "rgb");
             }
         }
     }
