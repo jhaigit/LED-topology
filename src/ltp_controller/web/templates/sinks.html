@@ -31,8 +31,9 @@
             {% else %}
             <span class="geometry-value">{{ sink.device.properties.pixels or '?' }} pixels</span>
             {% endif %}
-            {% if sink.device.properties.color %}
-            <span class="geometry-color">{{ sink.device.properties.color|upper }}</span>
+            {% set color_fmt = sink.capabilities.preferred_format if sink.capabilities and sink.capabilities.preferred_format else sink.device.properties.color %}
+            {% if color_fmt %}
+            <span class="geometry-color">{{ color_fmt|upper }}</span>
             {% endif %}
         </div>
 
