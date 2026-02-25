@@ -182,8 +182,9 @@ private:
         JsonArray colorFormats = device["color_formats"].to<JsonArray>();
         colorFormats.add("rgb");
         colorFormats.add("grayscale");
+        colorFormats.add("mono_packed");
 
-        device["preferred_format"] = "grayscale";
+        device["preferred_format"] = "mono_packed";
         device["max_refresh_hz"] = 15;
         device["protocol_version"] = "0.1";
 
@@ -262,7 +263,10 @@ private:
 
         // Extract negotiated color format from stream_setup request
         const char* colorStr = doc["format"]["color"];
-        if (colorStr && strcmp(colorStr, "grayscale") == 0) {
+        if (colorStr && strcmp(colorStr, "mono_packed") == 0) {
+            activeColorFormat = COLOR_FMT_MONO_PACKED;
+            dualOut.println("Stream format: mono_packed");
+        } else if (colorStr && strcmp(colorStr, "grayscale") == 0) {
             activeColorFormat = COLOR_FMT_GRAYSCALE;
             dualOut.println("Stream format: grayscale");
         } else {

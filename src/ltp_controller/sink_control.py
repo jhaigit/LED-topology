@@ -205,6 +205,8 @@ class SinkController:
 
         # Check explicit preferred_format first
         preferred = caps.get("preferred_format")
+        if preferred == "mono_packed":
+            return ColorFormat.MONO_PACKED
         if preferred == "grayscale":
             return ColorFormat.GRAYSCALE
 

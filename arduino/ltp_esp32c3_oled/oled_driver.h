@@ -90,6 +90,29 @@ public:
         display.sendBuffer();
     }
 
+    // Render pre-packed monochrome pixels (1 bit per pixel, MSB-first)
+    // packedBuffer: ceil(count / 8) bytes, each bit is one pixel
+    // count: number of pixels
+    void drawMonoPackedPixels(const uint8_t* packedBuffer, uint16_t count) {
+        display.clearBuffer();
+
+        uint16_t maxPixels = (count < OLED_TOTAL_PIXELS) ? count : OLED_TOTAL_PIXELS;
+        for (uint16_t i = 0; i < maxPixels; i++) {
+            uint8_t x = i % OLED_WIDTH;
+            uint8_t y = i / OLED_WIDTH;
+
+            // MSB-first: bit 7 of byte 0 = pixel 0
+            uint8_t byteIdx = i >> 3;
+            uint8_t bitIdx = 7 - (i & 7);
+            bool on = (packedBuffer[byteIdx] >> bitIdx) & 1;
+
+            display.setDrawColor(on ? 1 : 0);
+            display.drawPixel(x, y);
+        }
+
+        display.sendBuffer();
+    }
+
     // Text drawing helpers for local modes
     void setFont(const uint8_t* font) {
         display.setFont(font);

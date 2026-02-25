@@ -14,12 +14,13 @@
  *     - chunk_index: 1 byte (pixel offset = chunk_index * MAX_CHUNK_PIXELS)
  *     - sequence: 4 bytes (big-endian)
  *   Frame header (4 bytes):
- *     - color_format: 1 byte (0x01 = RGB, 0x04 = GRAYSCALE)
+ *     - color_format: 1 byte (0x01 = RGB, 0x04 = GRAYSCALE, 0x05 = MONO_PACKED)
  *     - encoding: 1 byte (0x00 = RAW)
  *     - pixel_count: 2 bytes (big-endian)
  *   Pixel data:
  *     - RGB: 3 * pixel_count bytes
  *     - GRAYSCALE: 1 * pixel_count bytes
+ *     - MONO_PACKED: ceil(pixel_count / 8) bytes (1 bit per pixel, MSB-first)
  */
 
 #ifndef UDP_RECEIVER_H
@@ -185,12 +186,15 @@ private:
         uint16_t pixelCount = (header[PACKET_HEADER_SIZE + 2] << 8) |
                               header[PACKET_HEADER_SIZE + 3];
 
-        // Determine bytes per pixel based on color format
+        // Determine data size based on color format
+        bool isMonoPacked = (colorFormat == COLOR_FMT_MONO_PACKED);
         uint8_t bytesPerPixel;
         if (colorFormat == COLOR_FMT_RGB) {
             bytesPerPixel = 3;
         } else if (colorFormat == COLOR_FMT_GRAYSCALE) {
             bytesPerPixel = 1;
+        } else if (isMonoPacked) {
+            bytesPerPixel = 0;  // Sub-byte format, handled specially below
         } else {
             flushPacket();
             return 0;
@@ -217,8 +221,16 @@ private:
         }
 
         // Read pixel data directly into caller's buffer at the right offset
-        uint16_t bytesToRead = pixelsToRead * bytesPerPixel;
-        uint16_t bufferOffset = pixelOffset * bytesPerPixel;
+        uint16_t bytesToRead;
+        uint16_t bufferOffset;
+        if (isMonoPacked) {
+            // MONO_PACKED: ceil(pixelsToRead / 8) bytes, always single chunk
+            bytesToRead = (pixelsToRead + 7) / 8;
+            bufferOffset = (pixelOffset + 7) / 8;  // Always 0 for OLED single-packet frames
+        } else {
+            bytesToRead = pixelsToRead * bytesPerPixel;
+            bufferOffset = pixelOffset * bytesPerPixel;
+        }
         int bytesRead = udp.read(pixelBuffer + bufferOffset, bytesToRead);
 
         flushPacket();

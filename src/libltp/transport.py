@@ -344,13 +344,15 @@ class DataSender:
         The receiver multiplies chunk_index * MAX_CHUNK_PIXELS to get the
         pixel offset for placement.
 
-        If color_format is GRAYSCALE and pixels are RGB (N, 3), converts
-        to grayscale using ITU-R BT.601 luma coefficients.
+        Converts RGB input to grayscale or mono_packed as needed.
         """
         if not self._transport:
             raise RuntimeError("Sender not started")
 
         self._sequence = (self._sequence + 1) & 0xFFFFFFFF
+
+        # Compute pixel_count from input (always RGB at entry)
+        pixel_count = pixels.shape[0] if pixels.ndim > 1 else len(pixels) // 3
 
         # Convert RGB to grayscale if needed
         if color_format == ColorFormat.GRAYSCALE and pixels.ndim == 2 and pixels.shape[1] == 3:
@@ -360,10 +362,32 @@ class DataSender:
                 + pixels[:, 2].astype(np.uint16) * 29
             ) >> 8
             pixels = luma.astype(np.uint8)
+        # Convert RGB to mono packed if needed
+        elif color_format == ColorFormat.MONO_PACKED and pixels.ndim == 2 and pixels.shape[1] == 3:
+            luma = (
+                pixels[:, 0].astype(np.uint16) * 77
+                + pixels[:, 1].astype(np.uint16) * 150
+                + pixels[:, 2].astype(np.uint16) * 29
+            ) >> 8
+            pixels = np.packbits((luma >= 128).astype(np.uint8), bitorder='big')
 
-        pixel_count = pixels.shape[0] if pixels.ndim > 1 else len(pixels) // color_format.bytes_per_pixel
-
-        if pixel_count <= MAX_CHUNK_PIXELS:
+        if color_format == ColorFormat.MONO_PACKED:
+            # MONO_PACKED data is tiny (e.g. 360 bytes for 2880 pixels).
+            # Chunking packed bit arrays by pixel offset is not supported;
+            # the entire frame always fits in one UDP packet.
+            assert len(pixels) <= MAX_PACKET_SIZE, (
+                f"MONO_PACKED frame too large: {len(pixels)} bytes"
+            )
+            packet = DataPacket(
+                sequence=self._sequence,
+                color_format=color_format,
+                pixel_data=pixels,
+                encoding=encoding,
+                chunk_index=0,
+                pixel_count_override=pixel_count,
+            )
+            self._transport.sendto(packet.to_bytes())
+        elif pixel_count <= MAX_CHUNK_PIXELS:
             # Single packet — fast path
             packet = DataPacket(
                 sequence=self._sequence,

@@ -271,6 +271,7 @@ class DataPacket:
         encoding: Encoding = Encoding.RAW,
         flags: int = 0,
         chunk_index: int = 0,
+        pixel_count_override: int | None = None,
     ):
         self.sequence = sequence
         self.color_format = color_format
@@ -278,10 +279,13 @@ class DataPacket:
         self.flags = flags
         self.chunk_index = chunk_index
         self.pixel_data = pixel_data
+        self._pixel_count_override = pixel_count_override
 
     @property
     def pixel_count(self) -> int:
         """Return the number of pixels in this packet."""
+        if self._pixel_count_override is not None:
+            return self._pixel_count_override
         if self.pixel_data.ndim == 1:
             return len(self.pixel_data) // self.color_format.bytes_per_pixel
         return self.pixel_data.shape[0]

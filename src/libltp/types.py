@@ -14,16 +14,38 @@ class ColorFormat(IntEnum):
     RGBW = 0x02
     HSV = 0x03
     GRAYSCALE = 0x04
+    MONO_PACKED = 0x05
 
     @property
     def bytes_per_pixel(self) -> int:
-        """Return the number of bytes per pixel for this format."""
+        """Return the number of bytes per pixel for this format.
+
+        For MONO_PACKED (sub-byte format), returns 1 as a safe fallback.
+        Use bits_per_pixel and packed_byte_count() for accurate MONO_PACKED sizing.
+        """
         return {
             ColorFormat.RGB: 3,
             ColorFormat.RGBW: 4,
             ColorFormat.HSV: 3,
             ColorFormat.GRAYSCALE: 1,
+            ColorFormat.MONO_PACKED: 1,
         }[self]
+
+    @property
+    def bits_per_pixel(self) -> int:
+        """Return the number of bits per pixel for this format."""
+        return {
+            ColorFormat.RGB: 24,
+            ColorFormat.RGBW: 32,
+            ColorFormat.HSV: 24,
+            ColorFormat.GRAYSCALE: 8,
+            ColorFormat.MONO_PACKED: 1,
+        }[self]
+
+    @staticmethod
+    def packed_byte_count(pixel_count: int) -> int:
+        """Return the number of bytes needed for MONO_PACKED pixel data."""
+        return (pixel_count + 7) // 8
 
 
 class ScalarFormat(IntEnum):

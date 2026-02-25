@@ -576,7 +576,9 @@ void loop() {
 
             // Dispatch based on color format
             uint8_t fmt = udpReceiver.getLastColorFormat();
-            if (fmt == COLOR_FMT_GRAYSCALE) {
+            if (fmt == COLOR_FMT_MONO_PACKED) {
+                oled.drawMonoPackedPixels(pixelBuffer, pixelsReceived);
+            } else if (fmt == COLOR_FMT_GRAYSCALE) {
                 oled.drawGrayscalePixels(pixelBuffer, pixelsReceived);
             } else {
                 oled.drawPixels(pixelBuffer, pixelsReceived);
@@ -585,8 +587,11 @@ void loop() {
             // Debug: print stats every 100 packets
             static uint32_t debugCounter = 0;
             if (++debugCounter % 100 == 1) {
+                const char* fmtStr = "rgb";
+                if (fmt == COLOR_FMT_MONO_PACKED) fmtStr = "mono";
+                else if (fmt == COLOR_FMT_GRAYSCALE) fmtStr = "gray";
                 dualOut.printf("UDP: %d px, fmt=%s\r\n",
-                    pixelsReceived, fmt == COLOR_FMT_GRAYSCALE ? "gray" : "rgb");
+                    pixelsReceived, fmtStr);
             }
         }
     }
