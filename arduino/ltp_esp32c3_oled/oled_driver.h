@@ -102,7 +102,7 @@ public:
             uint8_t y = i / OLED_WIDTH;
 
             // MSB-first: bit 7 of byte 0 = pixel 0
-            uint8_t byteIdx = i >> 3;
+            uint16_t byteIdx = i >> 3;
             uint8_t bitIdx = 7 - (i & 7);
             bool on = (packedBuffer[byteIdx] >> bitIdx) & 1;
 
