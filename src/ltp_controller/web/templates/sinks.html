@@ -33,7 +33,7 @@
             {% endif %}
             {% set color_fmt = sink.capabilities.preferred_format if sink.capabilities and sink.capabilities.preferred_format else sink.device.properties.color %}
             {% if color_fmt %}
-            <span class="geometry-color">{{ color_fmt|upper }}</span>
+            <span class="geometry-color">{{ color_fmt|upper|replace('MONO_PACKED', 'MONO') }}</span>
             {% endif %}
         </div>
 
