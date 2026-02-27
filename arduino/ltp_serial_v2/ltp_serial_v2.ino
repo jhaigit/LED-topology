@@ -70,8 +70,9 @@ LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 #define LOCAL_MODE_FIRE     3   // Fire effect
 #define LOCAL_MODE_SPARKLE  4   // Random sparkles
 #define LOCAL_MODE_CHASE    5   // Color chase
+#define LOCAL_MODE_MITOSIS  6   // Splitting/merging cells
 #define LOCAL_MODE_CYCLE    255 // Cycle through all modes
-#define LOCAL_MODE_COUNT    6   // Number of actual modes (excluding cycle)
+#define LOCAL_MODE_COUNT    7   // Number of actual modes (excluding cycle)
 
 // Device configuration (stored in EEPROM)
 struct Config {
@@ -308,6 +309,9 @@ void startLocalMode(uint8_t mode) {
         } else {
             currentDisplayMode = mode;
         }
+        if (currentDisplayMode == LOCAL_MODE_MITOSIS) {
+            initMitosis();
+        }
     }
 }
 
@@ -465,6 +469,178 @@ void updateChase() {
     leds.show();
 }
 
+// Mitosis (splitting/merging cells) animation
+#define MITOSIS_MAX_CELLS 6
+struct MitosisCell {
+    int16_t pos8;       // Position in 1/8th pixel units (fixed-point)
+    int8_t speed8;      // Speed in 1/8th pixel units per update
+    uint8_t hue;
+    int8_t hueSpeed;
+    bool active;
+};
+static MitosisCell mitosisCells[MITOSIS_MAX_CELLS];
+static uint8_t mitosisCellCount;
+static uint32_t mitosisNextSplitTime;
+static bool mitosisSplitting;  // true = splitting phase, false = merging phase
+
+void initMitosis() {
+    for (uint8_t i = 0; i < MITOSIS_MAX_CELLS; i++) {
+        mitosisCells[i].active = false;
+    }
+    mitosisCells[0].active = true;
+    mitosisCells[0].pos8 = 0;
+    mitosisCells[0].speed8 = 6 + random(5);  // 0.75-1.25 pixels/update
+    mitosisCells[0].hue = random(256);
+    mitosisCells[0].hueSpeed = 1 + random(3);
+    mitosisCellCount = 1;
+    mitosisNextSplitTime = millis() + 2000 + random(3000);
+    mitosisSplitting = true;
+}
+
+void splitMitosisCell() {
+    // Find a random active cell to split
+    uint8_t activeIdx[MITOSIS_MAX_CELLS];
+    uint8_t activeCount = 0;
+    for (uint8_t i = 0; i < MITOSIS_MAX_CELLS; i++) {
+        if (mitosisCells[i].active) activeIdx[activeCount++] = i;
+    }
+    if (activeCount == 0) return;
+
+    uint8_t parentIdx = activeIdx[random(activeCount)];
+
+    // Find an inactive slot
+    int8_t childIdx = -1;
+    for (uint8_t i = 0; i < MITOSIS_MAX_CELLS; i++) {
+        if (!mitosisCells[i].active) { childIdx = i; break; }
+    }
+    if (childIdx < 0) return;
+
+    MitosisCell& parent = mitosisCells[parentIdx];
+    MitosisCell& child = mitosisCells[childIdx];
+
+    child.active = true;
+    child.pos8 = parent.pos8;
+
+    // Opposite directions, varied speeds
+    int8_t baseSpeed = 4 + random(5);  // 0.5-1.0 pixels/update
+    if (random(2)) {
+        parent.speed8 = baseSpeed;
+        child.speed8 = -baseSpeed - (int8_t)random(3);
+    } else {
+        parent.speed8 = -baseSpeed;
+        child.speed8 = baseSpeed + (int8_t)random(3);
+    }
+
+    child.hue = parent.hue + 30 + random(60);
+    child.hueSpeed = 1 + random(3);
+    parent.hueSpeed = 1 + random(3);
+    mitosisCellCount++;
+}
+
+void checkMitosisMerge(uint8_t chance) {
+    const int16_t threshold8 = 6 * 8;  // 6 pixels in fixed-point
+
+    for (uint8_t i = 0; i < MITOSIS_MAX_CELLS; i++) {
+        if (!mitosisCells[i].active) continue;
+        for (uint8_t j = i + 1; j < MITOSIS_MAX_CELLS; j++) {
+            if (!mitosisCells[j].active) continue;
+
+            int16_t dist = mitosisCells[i].pos8 - mitosisCells[j].pos8;
+            if (dist < 0) dist = -dist;
+
+            if (dist < threshold8 && (uint8_t)random(100) < chance) {
+                // Merge j into i
+                mitosisCells[i].speed8 = (mitosisCells[i].speed8 + mitosisCells[j].speed8) / 2;
+                if (mitosisCells[i].speed8 == 0) {
+                    mitosisCells[i].speed8 = random(2) ? 4 : -4;
+                }
+                mitosisCells[i].hue = ((uint16_t)mitosisCells[i].hue + mitosisCells[j].hue) / 2;
+                mitosisCells[j].active = false;
+                mitosisCellCount--;
+                return;  // One merge per update
+            }
+        }
+    }
+}
+
+void updateMitosis() {
+    const uint8_t eyeSize = 5;
+    const uint8_t fadeAmount = 40;
+    const int16_t maxPos8 = (int16_t)(NUM_PIXELS - 1) * 8;
+
+    // Fade all pixels
+    for (uint16_t i = 0; i < NUM_PIXELS; i++) {
+        uint8_t r, g, b;
+        leds.getPixel(i, r, g, b);
+        r = r > fadeAmount ? r - fadeAmount : 0;
+        g = g > fadeAmount ? g - fadeAmount : 0;
+        b = b > fadeAmount ? b - fadeAmount : 0;
+        leds.setPixel(i, r, g, b);
+    }
+
+    // Update and draw each active cell
+    for (uint8_t c = 0; c < MITOSIS_MAX_CELLS; c++) {
+        if (!mitosisCells[c].active) continue;
+
+        // Update position
+        mitosisCells[c].pos8 += mitosisCells[c].speed8;
+
+        // Bounce off ends
+        if (mitosisCells[c].pos8 < 0) {
+            mitosisCells[c].pos8 = -mitosisCells[c].pos8;
+            mitosisCells[c].speed8 = -mitosisCells[c].speed8;
+        } else if (mitosisCells[c].pos8 > maxPos8) {
+            mitosisCells[c].pos8 = 2 * maxPos8 - mitosisCells[c].pos8;
+            mitosisCells[c].speed8 = -mitosisCells[c].speed8;
+        }
+
+        // Update hue
+        mitosisCells[c].hue += mitosisCells[c].hueSpeed;
+
+        // Draw the cell (cylon-like eye)
+        int16_t centerPx = mitosisCells[c].pos8 / 8;
+        for (int8_t i = -(eyeSize / 2); i <= eyeSize / 2; i++) {
+            int16_t pos = centerPx + i;
+            if (pos >= 0 && pos < NUM_PIXELS) {
+                uint8_t brightness = 255 - (uint8_t)(abs(i) * 45);
+                uint8_t r, g, b;
+                hsvToRgb(mitosisCells[c].hue, 255, brightness, r, g, b);
+                // Blend: average with existing pixel for overlap glow
+                uint8_t er, eg, eb;
+                leds.getPixel(pos, er, eg, eb);
+                r = ((uint16_t)r + er) / 2;
+                g = ((uint16_t)g + eg) / 2;
+                b = ((uint16_t)b + eb) / 2;
+                leds.setPixel(pos, r, g, b);
+            }
+        }
+    }
+
+    // Splitting phase
+    uint32_t now = millis();
+    if (mitosisSplitting && mitosisCellCount < MITOSIS_MAX_CELLS) {
+        if (now >= mitosisNextSplitTime) {
+            splitMitosisCell();
+            uint32_t baseDelay = 2000 + (uint32_t)mitosisCellCount * 500;
+            mitosisNextSplitTime = now + baseDelay + random(3000);
+            if (mitosisCellCount >= MITOSIS_MAX_CELLS) {
+                mitosisSplitting = false;
+            }
+        }
+    }
+
+    // Merging phase
+    if (!mitosisSplitting && mitosisCellCount > 1) {
+        checkMitosisMerge(60);
+        if (mitosisCellCount <= 1) {
+            mitosisSplitting = true;
+            mitosisNextSplitTime = now + 2000 + random(2000);
+        }
+    }
+
+    leds.show();
+}
+
 // Update local mode animation (called from loop)
 void updateLocalMode() {
     if (!localModeActive) return;
@@ -479,6 +655,7 @@ void updateLocalMode() {
         case LOCAL_MODE_FIRE:    interval = 30; break;
         case LOCAL_MODE_SPARKLE: interval = 30; break;
         case LOCAL_MODE_CHASE:   interval = 40; break;
+        case LOCAL_MODE_MITOSIS: interval = 25; break;
         default: interval = 50; break;
     }
 
@@ -505,6 +682,7 @@ void updateLocalMode() {
         case LOCAL_MODE_FIRE:    updateFire(); break;
         case LOCAL_MODE_SPARKLE: updateSparkle(); break;
         case LOCAL_MODE_CHASE:   updateChase(); break;
+        case LOCAL_MODE_MITOSIS: updateMitosis(); break;
         default: break;
     }
 }
