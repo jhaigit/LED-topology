@@ -474,6 +474,8 @@ class ServiceBrowser:
         self._browsers: list[AsyncServiceBrowser] = []
         self._devices: dict[str, DiscoveredDevice] = {}
         self._lock = asyncio.Lock()
+        self._pending_removals: dict[str, asyncio.Task] = {}
+        self._removal_grace_period = 30.0  # seconds before acting on removal
 
     @property
     def devices(self) -> dict[str, DiscoveredDevice]:
@@ -517,12 +519,15 @@ class ServiceBrowser:
         """Handle service state change asynchronously."""
         try:
             async with self._lock:
-                if state_change == ServiceStateChange.Added:
+                if state_change in (ServiceStateChange.Added, ServiceStateChange.Updated):
+                    # Cancel any pending removal for this service
+                    pending = self._pending_removals.pop(name, None)
+                    if pending and not pending.done():
+                        pending.cancel()
+                        logger.debug(f"Cancelled pending removal for {name} (service reappeared)")
                     await self._add_service(zeroconf, service_type, name)
                 elif state_change == ServiceStateChange.Removed:
-                    self._remove_service(name)
-                elif state_change == ServiceStateChange.Updated:
-                    await self._add_service(zeroconf, service_type, name)
+                    self._schedule_removal(name)
         except Exception as e:
             logger.error(f"Error handling service change for {name}: {e}", exc_info=True)
 
@@ -628,13 +633,41 @@ class ServiceBrowser:
         if self.callback:
             self.callback(device, True)
 
-    def _remove_service(self, name: str) -> None:
-        """Remove a discovered service."""
-        device = self._devices.pop(name, None)
-        if device:
-            logger.info(f"Service removed: {device.display_name}")
-            if self.callback:
-                self.callback(device, False)
+    def _schedule_removal(self, name: str) -> None:
+        """Schedule a delayed service removal with grace period.
+
+        If the service reappears before the grace period expires, the
+        removal is cancelled. This prevents route teardown on transient
+        mDNS blips.
+        """
+        if name in self._pending_removals:
+            return  # already scheduled
+        if name not in self._devices:
+            return  # nothing to remove
+
+        device = self._devices[name]
+        logger.info(
+            f"Service disappeared: {device.display_name} "
+            f"(grace period {self._removal_grace_period}s)"
+        )
+        self._pending_removals[name] = asyncio.create_task(
+            self._delayed_removal(name)
+        )
+
+    async def _delayed_removal(self, name: str) -> None:
+        """Wait for the grace period, then remove the service."""
+        try:
+            await asyncio.sleep(self._removal_grace_period)
+        except asyncio.CancelledError:
+            return  # service reappeared, removal cancelled
+
+        async with self._lock:
+            self._pending_removals.pop(name, None)
+            device = self._devices.pop(name, None)
+            if device:
+                logger.info(f"Service removed (after grace period): {device.display_name}")
+                if self.callback:
+                    self.callback(device, False)
 
     async def start(self) -> None:
         """Start browsing for services."""
@@ -654,6 +687,11 @@ class ServiceBrowser:
 
     async def stop(self) -> None:
         """Stop browsing for services."""
+        # Cancel any pending removals
+        for task in self._pending_removals.values():
+            task.cancel()
+        self._pending_removals.clear()
+
         for browser in self._browsers:
             await browser.async_cancel()
         self._browsers.clear()

@@ -1,6 +1,8 @@
 """Thermal camera source - AMG8833 Pattern and Source setup."""
 
 import logging
+import threading
+import time
 from typing import Any
 
 import numpy as np
@@ -13,14 +15,13 @@ from ltp_thermal_source.palettes import PALETTES, apply_palette
 logger = logging.getLogger(__name__)
 
 
-class ThermalParams:
-    """Stored as plain attributes on the pattern (not using PatternParams to
-    avoid pulling pydantic into the sensor read path)."""
-
-
 @PatternRegistry.register
 class ThermalPattern(Pattern):
-    """Pattern that reads an AMG8833 thermal sensor and renders a heatmap."""
+    """Pattern that reads an AMG8833 thermal sensor and renders a heatmap.
+
+    Sensor reads run in a background thread to avoid blocking the asyncio
+    event loop (which would starve zeroconf keepalives).
+    """
 
     name = "thermal"
     description = "AMG8833 infrared thermal camera"
@@ -29,8 +30,7 @@ class ThermalPattern(Pattern):
         super().__init__(params)
         p = params or {}
 
-        # Sensor
-        self._sensor: AMG8833 | None = None
+        # Sensor config
         self._bus = p.get("bus", 1)
         self._address = p.get("address", 0x69)
 
@@ -47,37 +47,61 @@ class ThermalPattern(Pattern):
         self._tracked_max: float = -40.0
         self._decay = 0.995  # per-frame decay toward new extremes
 
-        # Cached pixel data for when sensor read fails
-        self._last_temps: list[float] | None = None
+        # Background reader thread
+        self._lock = threading.Lock()
+        self._cached_temps: list[float] | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._reader_stop = threading.Event()
+        self._read_interval = p.get("read_interval", 0.1)  # 10 Hz default
+        self._start_reader()
 
-    def _ensure_sensor(self) -> bool:
-        """Open sensor if not already open. Returns True if sensor is ready."""
-        if self._sensor is not None:
-            return True
-        try:
-            self._sensor = AMG8833(bus=self._bus, address=self._address)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to open AMG8833: {e}")
-            return False
+    def _start_reader(self) -> None:
+        """Start the background sensor reader thread."""
+        self._reader_stop.clear()
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, daemon=True, name="amg8833-reader"
+        )
+        self._reader_thread.start()
+
+    def _reader_loop(self) -> None:
+        """Background thread: read sensor periodically, cache result."""
+        sensor: AMG8833 | None = None
+
+        while not self._reader_stop.is_set():
+            # Open sensor if needed
+            if sensor is None:
+                try:
+                    sensor = AMG8833(bus=self._bus, address=self._address)
+                except Exception as e:
+                    logger.error(f"Failed to open AMG8833: {e}")
+                    self._reader_stop.wait(2.0)
+                    continue
+
+            # Read
+            try:
+                temps = sensor.read_pixels()
+                with self._lock:
+                    self._cached_temps = temps
+            except Exception as e:
+                logger.warning(f"Sensor read failed: {e}")
+                # AMG8833 driver handles bus reopen internally;
+                # just wait for backoff to expire on next iteration
+
+            self._reader_stop.wait(self._read_interval)
+
+        # Cleanup
+        if sensor is not None:
+            sensor.close()
 
     def render(self, buffer: np.ndarray) -> None:
-        """Read thermal sensor and write heatmap to buffer.
+        """Render cached thermal data to buffer (non-blocking).
 
         Buffer is expected to be shape (8, 8, 3) for 2D or (64, 3) for 1D.
         """
-        # Read sensor
-        temps = None
-        if self._ensure_sensor():
-            try:
-                temps = self._sensor.read_pixels()
-                self._last_temps = temps
-            except Exception as e:
-                logger.warning(f"Sensor read failed: {e}")
-                temps = self._last_temps
+        with self._lock:
+            temps = self._cached_temps
 
         if temps is None:
-            # No data yet - fill black
             buffer[:] = 0
             return
 
@@ -177,10 +201,11 @@ class ThermalPattern(Pattern):
         self._tracked_max = -40.0
 
     def close(self) -> None:
-        """Close the sensor."""
-        if self._sensor:
-            self._sensor.close()
-            self._sensor = None
+        """Stop the reader thread and clean up."""
+        self._reader_stop.set()
+        if self._reader_thread is not None:
+            self._reader_thread.join(timeout=3.0)
+            self._reader_thread = None
 
 
 def create_thermal_source(
