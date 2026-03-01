@@ -263,8 +263,7 @@ class Source:
         # Update pattern parameters
         if self._pattern:
             for key, value in applied.items():
-                if hasattr(self._pattern.params, key):
-                    self._pattern.set_param(key, value)
+                self._pattern.set_param(key, value)
 
         status = "ok" if not errors else "partial"
         return control_set_response(message.seq, status, applied, errors or None)

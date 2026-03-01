@@ -56,14 +56,41 @@
         {% if source.controls %}
         <div class="device-controls">
             <h4>Controls</h4>
-            <ul class="control-list">
+            <div class="control-list">
                 {% for control in source.controls %}
-                <li>
-                    <span class="control-name">{{ control.name }}</span>
-                    <span class="control-value">{{ source.control_values.get(control.id, control.get('value', '-')) }}</span>
-                </li>
+                <div class="control-row" data-source-id="{{ source.id }}" data-control-id="{{ control.id }}">
+                    <label class="control-name" {% if control.description %}title="{{ control.description }}"{% endif %}>{{ control.name }}</label>
+                    {% set current_value = source.control_values.get(control.id, control.get('value', '')) %}
+                    {% if control.type == 'action' %}
+                    <button class="btn btn-sm btn-action" onclick="triggerSourceAction('{{ source.id }}', '{{ control.id }}', '{{ control.name }}')">
+                        {{ control.name|capitalize }}
+                    </button>
+                    {% elif control.type == 'boolean' %}
+                    <input type="checkbox" class="control-input"
+                           {% if current_value %}checked{% endif %}
+                           onchange="setSourceControl('{{ source.id }}', '{{ control.id }}', this.checked)">
+                    {% elif control.type == 'number' %}
+                    {% set is_integer = control.step is defined and control.step >= 1 %}
+                    <input type="number" class="control-input"
+                           value="{{ current_value|int if is_integer else current_value }}"
+                           {% if control.min is defined and control.min is not none %}min="{{ control.min|int if is_integer else control.min }}"{% endif %}
+                           {% if control.max is defined and control.max is not none %}max="{{ control.max|int if is_integer else control.max }}"{% endif %}
+                           {% if control.step is defined %}step="{{ control.step|int if is_integer else control.step }}"{% endif %}
+                           onchange="setSourceControl('{{ source.id }}', '{{ control.id }}', {{ 'parseInt(this.value)' if is_integer else 'parseFloat(this.value)' }})">
+                    {% elif control.type == 'enum' %}
+                    <select class="control-input" onchange="setSourceControl('{{ source.id }}', '{{ control.id }}', this.value)">
+                        {% for option in control.options %}
+                        <option value="{{ option.value }}" {% if current_value == option.value %}selected{% endif %}>
+                            {{ option.label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                    {% else %}
+                    <span class="control-value">{{ current_value }}</span>
+                    {% endif %}
+                </div>
                 {% endfor %}
-            </ul>
+            </div>
         </div>
         {% endif %}
 
@@ -91,6 +118,57 @@ function refreshDevice(type, id) {
                 location.reload();
             }
         });
+}
+
+function setSourceControl(sourceId, controlId, value) {
+    const values = {};
+    values[controlId] = value;
+
+    fetch(`/api/sources/${sourceId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status !== 'ok') {
+            showToast('Error setting control: ' + JSON.stringify(data.results || data.error), 'error');
+        }
+    })
+    .catch(err => {
+        showToast('Error: ' + err.message, 'error');
+    });
+}
+
+function triggerSourceAction(sourceId, controlId, actionName) {
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    const values = {};
+    values[controlId] = 1;
+
+    fetch(`/api/sources/${sourceId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.textContent = data.status === 'ok' ? 'Done!' : 'Error';
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }, 1000);
+    })
+    .catch(err => {
+        btn.textContent = 'Error';
+        setTimeout(() => {
+            btn.textContent = originalText;
+            btn.disabled = false;
+        }, 2000);
+    });
 }
 
 function refreshDiscovery() {
@@ -164,6 +242,62 @@ function purgeOffline() {
     font-family: monospace;
     font-size: 0.85rem;
     cursor: help;
+}
+.control-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.control-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+}
+.control-name {
+    font-size: 0.9rem;
+    color: var(--text-muted, #9ca3af);
+}
+.control-name[title] {
+    cursor: help;
+    border-bottom: 1px dotted var(--text-muted, #9ca3af);
+}
+.control-input {
+    padding: 4px 8px;
+    border: 1px solid var(--border-color, #333);
+    border-radius: 4px;
+    background: var(--secondary-bg, #374151);
+    color: var(--text-color, #fff);
+    font-size: 0.9rem;
+}
+.control-input[type="number"] {
+    width: 100px;
+    text-align: right;
+}
+.control-input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+select.control-input {
+    min-width: 100px;
+}
+.btn-action {
+    background: var(--secondary-bg, #374151);
+    border: 1px solid var(--border-color, #4b5563);
+    color: var(--text-color, #fff);
+    padding: 4px 12px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.btn-action:hover:not(:disabled) {
+    background: var(--primary, #2563eb);
+    border-color: var(--primary, #2563eb);
+}
+.btn-action:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 </style>
 {% endblock %}
