@@ -57,6 +57,9 @@ media = [
 media-lite = [
     "Pillow>=10.0.0",
 ]
+thermal = [
+    "smbus2>=0.4.0",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -66,7 +69,7 @@ dev = [
     "mypy>=1.0.0",
 ]
 all = [
-    "ltp[gui,controller,serial,media,dev]",
+    "ltp[gui,controller,serial,media,thermal,dev]",
 ]
 
 [project.scripts]
@@ -78,6 +81,7 @@ ltp-media-source = "ltp_media_source.__main__:main"
 ltp-media-source-group = "ltp_media_source.cli_group:main"
 ltp-multi-channel-source = "ltp_media_source.cli_multi_channel:main"
 ltp-controller = "ltp_controller.__main__:main"
+ltp-thermal-source = "ltp_thermal_source.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/jhaigit/LED-topology"
