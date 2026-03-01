@@ -737,12 +737,19 @@ def create_app(
         if not route:
             return jsonify({"error": "Route not found"}), 404
 
+        # Determine dimensions from source (fall back to pixel count)
+        dims = route._source_dims
+        is_2d = dims is not None and len(dims) >= 2
+
         # Get the last frame data if available
         if route._last_frame is None:
-            # Return empty preview
+            if is_2d:
+                return _generate_led_svg_2d([], dims[0], dims[1])
             return _generate_led_svg([], 60)
 
         pixels = route._last_frame
+        if is_2d:
+            return _generate_led_svg_2d(pixels, dims[0], dims[1])
         return _generate_led_svg(pixels, len(pixels))
 
     def _generate_led_svg(pixels: list, count: int) -> Any:
