@@ -1,7 +1,7 @@
 """AMG8833 Grid-EYE infrared thermal sensor driver."""
 
 import logging
-import struct
+import time
 
 from smbus2 import SMBus
 
@@ -21,6 +21,8 @@ class AMG8833:
 
     Communicates via I2C/SMBus. The sensor provides 64 temperature readings
     in an 8x8 grid, plus an on-chip thermistor for ambient temperature.
+
+    Automatically reopens the I2C bus after errors with exponential backoff.
     """
 
     def __init__(self, bus: int = 1, address: int = 0x69):
@@ -31,17 +33,74 @@ class AMG8833:
             address: I2C address (default: 0x69, AD_SELECT high)
         """
         self._address = address
-        self._bus = SMBus(bus)
-        logger.info(f"AMG8833 opened on bus {bus}, address 0x{address:02X}")
+        self._bus_num = bus
+        self._bus: SMBus | None = None
+        self._consecutive_errors = 0
+        self._reopen_after: float = 0.0  # monotonic time to wait until
+        self._open_bus()
+
+    def _open_bus(self) -> None:
+        """Open (or reopen) the I2C bus."""
+        if self._bus is not None:
+            try:
+                self._bus.close()
+            except Exception:
+                pass
+        self._bus = SMBus(self._bus_num)
+        logger.info(f"AMG8833 opened on bus {self._bus_num}, address 0x{self._address:02X}")
+
+    def _handle_error(self) -> None:
+        """Handle a bus error: close bus, set backoff delay before reopen."""
+        self._consecutive_errors += 1
+        # Exponential backoff: 0.25s, 0.5s, 1s, 2s (capped)
+        delay = min(2.0, 0.25 * (2 ** (self._consecutive_errors - 1)))
+        self._reopen_after = time.monotonic() + delay
+        logger.warning(f"I2C error, will reopen bus after {delay:.2f}s backoff")
+        try:
+            self._bus.close()
+        except Exception:
+            pass
+        self._bus = None
+
+    def _ensure_bus(self) -> bool:
+        """Ensure the bus is open. Returns False if still in backoff."""
+        if self._bus is not None:
+            return True
+        if time.monotonic() < self._reopen_after:
+            return False
+        try:
+            self._open_bus()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reopen I2C bus: {e}")
+            self._reopen_after = time.monotonic() + 2.0
+            return False
 
     def read_pixels(self) -> list[float]:
         """Read all 64 pixel temperatures.
 
         Returns:
-            List of 64 temperature values in °C, row-major order (top-left to bottom-right).
+            List of 64 temperature values in °C, row-major order.
+
+        Raises:
+            OSError: If the bus is unavailable or the read fails.
         """
-        # Read 128 bytes (64 pixels x 2 bytes each)
-        raw = self._bus.read_i2c_block_data(self._address, _REG_PIXELS, 128)
+        if not self._ensure_bus():
+            raise OSError("I2C bus unavailable (backoff)")
+
+        try:
+            # SMBus limits reads to 32 bytes per transaction.
+            # Read 128 bytes in 4 chunks of 32 bytes each.
+            raw = []
+            for offset in range(0, 128, 32):
+                raw.extend(
+                    self._bus.read_i2c_block_data(self._address, _REG_PIXELS + offset, 32)
+                )
+        except OSError:
+            self._handle_error()
+            raise
+
+        self._consecutive_errors = 0
 
         temps = []
         for i in range(64):
@@ -60,8 +119,20 @@ class AMG8833:
 
         Returns:
             Ambient temperature in °C.
+
+        Raises:
+            OSError: If the bus is unavailable or the read fails.
         """
-        raw = self._bus.read_i2c_block_data(self._address, _REG_THERMISTOR, 2)
+        if not self._ensure_bus():
+            raise OSError("I2C bus unavailable (backoff)")
+
+        try:
+            raw = self._bus.read_i2c_block_data(self._address, _REG_THERMISTOR, 2)
+        except OSError:
+            self._handle_error()
+            raise
+
+        self._consecutive_errors = 0
         raw_val = ((raw[1] & 0x0F) << 8) | raw[0]
         if raw[1] & 0x08:  # sign bit
             raw_val -= 4096
@@ -69,5 +140,7 @@ class AMG8833:
 
     def close(self) -> None:
         """Close the I2C bus."""
-        self._bus.close()
+        if self._bus is not None:
+            self._bus.close()
+            self._bus = None
         logger.info("AMG8833 closed")
