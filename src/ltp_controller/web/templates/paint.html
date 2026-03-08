@@ -20,11 +20,12 @@
         <div class="tool-group">
             <label>Tool:</label>
             <select id="paintTool" onchange="onToolChange()">
-                <option value="pixel">Single Pixel</option>
-                <option value="line">Line</option>
-                <option value="fill">Fill All</option>
-                <option value="text">Text</option>
-                <option value="image">Image</option>
+                <option value="pixel">Single Pixel (B)</option>
+                <option value="line">Line (L)</option>
+                <option value="fill">Fill All (F)</option>
+                <option value="eyedropper">Eyedropper (E)</option>
+                <option value="text">Text (T)</option>
+                <option value="image">Image (I)</option>
             </select>
         </div>
         <div class="tool-group" id="textToolGroup" style="display: none;">
@@ -48,6 +49,15 @@
                 <option value="stretch">Stretch</option>
             </select>
             <button class="btn btn-sm btn-primary" onclick="paintImage()">Upload</button>
+        </div>
+        <div class="tool-group">
+            <button class="btn btn-sm" onclick="undo()" title="Undo (Ctrl+Z)">Undo</button>
+            <button class="btn btn-sm" onclick="redo()" title="Redo (Ctrl+Y)">Redo</button>
+        </div>
+        <div class="tool-group">
+            <button class="btn btn-sm" onclick="zoomOut()" title="Zoom Out">-</button>
+            <span id="zoomLevel">100%</span>
+            <button class="btn btn-sm" onclick="zoomIn()" title="Zoom In">+</button>
         </div>
         <div class="tool-group">
             <button class="btn btn-sm" onclick="clearCanvas()">Clear</button>
@@ -131,7 +141,8 @@
     border-radius: 8px;
     padding: 1rem;
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
+    max-height: 70vh;
 }
 
 #paintCanvas {
@@ -191,12 +202,91 @@ const sinkId = '{{ sink.id }}';
 let width = 60;
 let height = 1;
 let pixelSize = 10;
+let basePixelSize = 10;
+let zoomFactor = 1.0;
 let pixels = [];
 let canvas, ctx;
 let isDrawing = false;
 let lastX = -1, lastY = -1;
 let availableFonts = [];
 let hasTTF = false;
+
+// Undo/redo stacks
+const undoStack = [];
+const redoStack = [];
+const MAX_UNDO = 50;
+
+function saveUndoState() {
+    undoStack.push(pixels.map(p => [...p]));
+    if (undoStack.length > MAX_UNDO) undoStack.shift();
+    redoStack.length = 0;
+}
+
+function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(pixels.map(p => [...p]));
+    pixels = undoStack.pop();
+    drawCanvas();
+    sendToSink();
+    document.getElementById('lastAction').textContent = 'Undo';
+}
+
+function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(pixels.map(p => [...p]));
+    pixels = redoStack.pop();
+    drawCanvas();
+    sendToSink();
+    document.getElementById('lastAction').textContent = 'Redo';
+}
+
+// Zoom
+function updateZoom() {
+    pixelSize = Math.max(2, Math.round(basePixelSize * zoomFactor));
+    canvas.width = width * pixelSize;
+    canvas.height = height * pixelSize;
+    drawCanvas();
+    document.getElementById('zoomLevel').textContent = Math.round(zoomFactor * 100) + '%';
+}
+
+function zoomIn() {
+    if (zoomFactor < 4.0) {
+        zoomFactor = Math.min(4.0, zoomFactor * 1.25);
+        updateZoom();
+    }
+}
+
+function zoomOut() {
+    if (zoomFactor > 0.25) {
+        zoomFactor = Math.max(0.25, zoomFactor / 1.25);
+        updateZoom();
+    }
+}
+
+function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(c => c.toString(16).padStart(2, '0')).join('');
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // Skip if user is typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+        else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo(); }
+        else if (e.key === '=') { e.preventDefault(); zoomIn(); }
+        else if (e.key === '-') { e.preventDefault(); zoomOut(); }
+        return;
+    }
+
+    const toolMap = { b: 'pixel', l: 'line', f: 'fill', e: 'eyedropper', t: 'text', i: 'image' };
+    const tool = toolMap[e.key.toLowerCase()];
+    if (tool) {
+        document.getElementById('paintTool').value = tool;
+        onToolChange();
+    }
+});
 
 // Initialize
 async function init() {
@@ -242,11 +332,20 @@ async function init() {
     canvas.height = height * pixelSize;
     ctx = canvas.getContext('2d');
 
+    basePixelSize = pixelSize;
+
     // Event listeners
     canvas.addEventListener('mousedown', onMouseDown);
     canvas.addEventListener('mousemove', onMouseMove);
     canvas.addEventListener('mouseup', onMouseUp);
     canvas.addEventListener('mouseleave', onMouseUp);
+
+    // Mouse wheel zoom
+    canvas.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        if (e.deltaY < 0) zoomIn();
+        else zoomOut();
+    }, { passive: false });
 
     // Load current state from device
     await fetchBuffer();
@@ -294,15 +393,29 @@ function drawLine(x0, y0, x1, y1, color) {
 }
 
 function onMouseDown(e) {
-    isDrawing = true;
     const { x, y } = getPixelCoords(e);
-    const color = hexToRgb(document.getElementById('paintColor').value);
     const tool = document.getElementById('paintTool').value;
+
+    // Eyedropper: pick color and return
+    if (tool === 'eyedropper') {
+        const idx = y * width + x;
+        if (idx >= 0 && idx < pixels.length) {
+            const [r, g, b] = pixels[idx];
+            document.getElementById('paintColor').value = rgbToHex(r, g, b);
+            document.getElementById('lastAction').textContent = `Picked ${rgbToHex(r, g, b)} from (${x}, ${y})`;
+        }
+        return;
+    }
+
+    saveUndoState();
+    isDrawing = true;
+    const color = hexToRgb(document.getElementById('paintColor').value);
 
     if (tool === 'fill') {
         pixels = pixels.map(() => [...color]);
         drawCanvas();
         sendToSink();
+        isDrawing = false;
         return;
     }
 
@@ -376,6 +489,7 @@ function drawCanvas() {
 }
 
 function clearCanvas() {
+    saveUndoState();
     pixels = pixels.map(() => [0, 0, 0]);
     drawCanvas();
     sendToSink();
@@ -412,6 +526,10 @@ function onToolChange() {
     const tool = document.getElementById('paintTool').value;
     document.getElementById('textToolGroup').style.display = tool === 'text' ? 'flex' : 'none';
     document.getElementById('imageToolGroup').style.display = tool === 'image' ? 'flex' : 'none';
+    // Update cursor for eyedropper
+    if (canvas) {
+        canvas.style.cursor = tool === 'eyedropper' ? 'cell' : 'crosshair';
+    }
 }
 
 function populateFontDropdown(fonts, defaultFont, filter = '') {

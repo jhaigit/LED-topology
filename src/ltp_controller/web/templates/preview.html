@@ -2,6 +2,10 @@
 
 {% block title %}LED Preview - LTP Controller{% endblock %}
 
+{% block head %}
+<script src="{{ url_for('static', filename='js/led-canvas.js') }}"></script>
+{% endblock %}
+
 {% block content %}
 <h1>LED Preview</h1>
 
@@ -13,7 +17,11 @@
     <div class="preview-card">
         <div class="preview-header">
             <h3>{{ route.name }}</h3>
-            <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
+            <div class="preview-header-right">
+                <span class="fps-counter" id="fps-{{ route.id }}">-- fps</span>
+                <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
+                <button class="btn btn-sm" onclick="toggleFullscreen('preview-{{ route.id }}')" title="Fullscreen">&#x26F6;</button>
+            </div>
         </div>
         <div class="preview-info">
             <span>
@@ -31,8 +39,10 @@
             </span>
             <span class="frame-count">Frames: <span id="frames-{{ route.id }}">{% if route.mode.value == 'direct' %}<em class="na-text">N/A</em>{% else %}{{ route._frames_routed }}{% endif %}</span></span>
         </div>
-        <div class="led-preview" id="preview-{{ route.id }}">
-            <img src="/api/routes/{{ route.id }}/preview" alt="LED Preview" class="led-strip">
+        <div class="led-preview" id="preview-{{ route.id }}" data-route-id="{{ route.id }}"
+             data-width="{{ route._source_dims[0] if route._source_dims else 60 }}"
+             data-height="{{ route._source_dims[1] if route._source_dims and route._source_dims|length > 1 else 1 }}">
+            <canvas class="led-canvas"></canvas>
         </div>
     </div>
     {% endfor %}
@@ -69,11 +79,24 @@
     margin: 0;
 }
 
+.preview-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.fps-counter {
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
 .preview-info {
     display: flex;
     justify-content: space-between;
     color: var(--text-secondary);
     font-size: 0.9rem;
+    margin-bottom: 0.75rem;
 }
 
 .na-text {
@@ -84,30 +107,61 @@
 .led-preview {
     background: #111;
     border-radius: 4px;
-    padding: 1rem;
+    padding: 0.5rem;
     overflow-x: auto;
+    display: flex;
+    justify-content: center;
 }
 
-.led-strip {
+.led-preview:fullscreen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    padding: 2rem;
+}
+
+.led-canvas {
     display: block;
-    max-width: 100%;
-    height: auto;
+    image-rendering: pixelated;
 }
 </style>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Refresh previews every 100ms for smooth animation
-setInterval(() => {
-    document.querySelectorAll('.led-strip').forEach(img => {
-        const src = img.src.split('?')[0];
-        img.src = src + '?t=' + Date.now();
-    });
-}, 100);
+const canvasInstances = {};
 
-// Update frame counts every second (skip direct routes)
-setInterval(() => {
+// Initialize all preview canvases
+document.querySelectorAll('.led-preview[data-route-id]').forEach(container => {
+    const routeId = container.getAttribute('data-route-id');
+    const w = parseInt(container.getAttribute('data-width')) || 60;
+    const h = parseInt(container.getAttribute('data-height')) || 1;
+    const canvasEl = container.querySelector('canvas');
+
+    const lc = new LtpLedCanvas.LedCanvas(canvasEl, w, h);
+    canvasInstances[routeId] = lc;
+});
+
+// Poll for frame data
+function updatePreviews() {
+    for (const [routeId, lc] of Object.entries(canvasInstances)) {
+        fetch(`/api/routes/${routeId}/frame`)
+            .then(r => r.json())
+            .then(data => {
+                if (data.pixels && data.pixels.length > 0) {
+                    lc.render(data.pixels);
+                    // Update FPS display
+                    const fpsEl = document.getElementById('fps-' + routeId);
+                    if (fpsEl) fpsEl.textContent = lc.fps + ' fps';
+                }
+            })
+            .catch(() => {});
+    }
+}
+
+// Update frame counts
+function updateFrameCounts() {
     fetch('/api/routes')
         .then(r => r.json())
         .then(routes => {
@@ -118,6 +172,32 @@ setInterval(() => {
                 }
             });
         });
-}, 1000);
+}
+
+// Preview refresh at 5 fps (200ms) - good balance without WebSocket
+setInterval(updatePreviews, 200);
+setInterval(updateFrameCounts, 2000);
+
+// Initial load
+updatePreviews();
+
+function toggleFullscreen(containerId) {
+    const el = document.getElementById(containerId);
+    if (el) {
+        LtpLedCanvas.enterFullscreen(el);
+        // Resize canvas after entering fullscreen
+        const routeId = el.getAttribute('data-route-id');
+        if (canvasInstances[routeId]) {
+            setTimeout(() => canvasInstances[routeId].resize(), 100);
+        }
+    }
+}
+
+// Handle fullscreen change to resize canvas
+document.addEventListener('fullscreenchange', () => {
+    for (const [routeId, lc] of Object.entries(canvasInstances)) {
+        lc.resize();
+    }
+});
 </script>
 {% endblock %}

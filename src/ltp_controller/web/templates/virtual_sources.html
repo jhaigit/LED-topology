@@ -12,7 +12,7 @@
 </div>
 
 {% if virtual_sources %}
-<div class="device-grid">
+<div class="device-grid" id="vs-grid">
     {% for vs in virtual_sources %}
     <div class="device-card {% if vs.is_running %}online{% else %}offline{% endif %}">
         <div class="device-header">
@@ -205,6 +205,11 @@
 
 {% block scripts %}
 <script>
+// Initialize search
+if (document.getElementById('vs-grid')) {
+    LtpListTools.initSearch('vs-grid', { type: 'cards', placeholder: 'Search virtual sources...' });
+}
+
 const matrixPatterns = ['grid', 'corners', 'sweep', 'checkerboard', 'pixel_index', 'coordinates', 'test_card', 'text', 'counter', 'clock'];
 
 function showCreateModal() {

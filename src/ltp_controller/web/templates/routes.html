@@ -7,12 +7,26 @@
 
 <p class="subtitle">Configure data flow between sources and sinks</p>
 
-<div class="actions-bar">
+<div class="actions-bar" style="display: flex; justify-content: space-between; align-items: center;">
     <button class="btn btn-primary" onclick="showCreateModal()">Create Route</button>
+    <div class="btn-group">
+        <button class="btn btn-sm" id="view-list-btn" onclick="showView('list')" style="opacity:0.5;">List View</button>
+        <button class="btn btn-sm" id="view-graph-btn" onclick="showView('graph')">Graph View</button>
+    </div>
+</div>
+
+<!-- Graph View (hidden by default) -->
+<div id="graph-view" style="display: none; margin-bottom: 1.5rem;">
+    <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem;">
+        <div style="display: flex; justify-content: flex-end; margin-bottom: 0.25rem;">
+            <button class="btn btn-sm btn-secondary" onclick="LtpRouteGraph.resetLayout()">Reset Layout</button>
+        </div>
+        <canvas id="routeGraphCanvas" style="width: 100%; border-radius: 4px;"></canvas>
+    </div>
 </div>
 
 {% if routes %}
-<table class="table">
+<table class="table" id="routes-table">
     <thead>
         <tr>
             <th>Name</th>
@@ -210,6 +224,47 @@
 
 {% block scripts %}
 <script>
+// Initialize search and bulk select
+if (document.getElementById('routes-table')) {
+    LtpListTools.initSearch('routes-table', { type: 'table', placeholder: 'Search routes...' });
+    LtpListTools.initBulkSelect('routes-table', {
+        'Enable': async function(ids) {
+            const resp = await fetch('/api/routes/bulk-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'enable', ids: ids })
+            });
+            if ((await resp.json()).status === 'ok') {
+                showToast(`Enabled ${ids.length} routes`, 'success');
+                setTimeout(() => location.reload(), 500);
+            }
+        },
+        'Disable': async function(ids) {
+            const resp = await fetch('/api/routes/bulk-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'disable', ids: ids })
+            });
+            if ((await resp.json()).status === 'ok') {
+                showToast(`Disabled ${ids.length} routes`, 'success');
+                setTimeout(() => location.reload(), 500);
+            }
+        },
+        'Delete': async function(ids) {
+            if (!await confirmAction(`Delete ${ids.length} route(s)?`)) return;
+            const resp = await fetch('/api/routes/bulk-action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'delete', ids: ids })
+            });
+            if ((await resp.json()).status === 'ok') {
+                showToast(`Deleted ${ids.length} routes`, 'success');
+                setTimeout(() => location.reload(), 500);
+            }
+        }
+    });
+}
+
 function showCreateModal() {
     document.getElementById('createModal').style.display = 'flex';
 }
@@ -320,5 +375,96 @@ function updateRouteStatus() {
 
 // Update every second
 setInterval(updateRouteStatus, 1000);
+
+// View toggle (list vs graph)
+let currentView = 'list';
+
+function showView(view) {
+    currentView = view;
+    const listEl = document.getElementById('routes-table');
+    const graphEl = document.getElementById('graph-view');
+    const listBtn = document.getElementById('view-list-btn');
+    const graphBtn = document.getElementById('view-graph-btn');
+    // Also hide bulk bar and search toolbar
+    const bulkBar = document.querySelector('.bulk-actions-bar');
+
+    if (view === 'graph') {
+        if (listEl) listEl.style.display = 'none';
+        if (graphEl) graphEl.style.display = 'block';
+        if (listBtn) listBtn.style.opacity = '1';
+        if (graphBtn) graphBtn.style.opacity = '0.5';
+        if (bulkBar) bulkBar.style.display = 'none';
+        // Also hide list toolbar
+        document.querySelectorAll('.list-toolbar').forEach(el => el.style.display = 'none');
+        initGraph();
+    } else {
+        if (listEl) listEl.style.display = '';
+        if (graphEl) graphEl.style.display = 'none';
+        if (listBtn) listBtn.style.opacity = '0.5';
+        if (graphBtn) graphBtn.style.opacity = '1';
+        document.querySelectorAll('.list-toolbar').forEach(el => el.style.display = '');
+    }
+}
+
+let graphInitialized = false;
+
+function initGraph() {
+    if (graphInitialized) {
+        LtpRouteGraph.resizeCanvas();
+        return;
+    }
+    graphInitialized = true;
+
+    const graphCanvas = document.getElementById('routeGraphCanvas');
+    if (!graphCanvas) return;
+
+    // Build source/sink data for graph
+    const graphSources = [];
+    const allSources = {{ sources | tojson | safe }};
+    const allVS = {{ virtual_sources | tojson | safe }};
+    const allSinks = {{ sinks | tojson | safe }};
+    const allRoutes = {{ routes | tojson | safe }};
+
+    allSources.forEach(s => {
+        graphSources.push({ id: s.id, name: s.name, online: s.online, type: 'physical' });
+    });
+    allVS.forEach(v => {
+        graphSources.push({ id: v.id, name: v.name, online: v.is_running, type: 'virtual' });
+    });
+
+    const graphSinks = allSinks.map(s => ({
+        id: s.id, name: s.name, online: s.online
+    }));
+
+    const graphRoutes = allRoutes.map(r => ({
+        id: r.id,
+        name: r.name,
+        source_id: r.source_id,
+        sink_id: r.sink_id,
+        enabled: r.enabled,
+        status: r.status ? (r.status.value || r.status) : 'disconnected'
+    }));
+
+    LtpRouteGraph.init(graphCanvas, graphSources, graphSinks, graphRoutes);
+
+    // Handle create-route event from graph
+    graphCanvas.addEventListener('create-route', function(e) {
+        const { sourceId, sinkId } = e.detail;
+        document.getElementById('source_id').value = sourceId;
+        document.getElementById('sink_id').value = sinkId;
+        showCreateModal();
+    });
+
+    // Handle cable context menu
+    graphCanvas.addEventListener('cable-context', function(e) {
+        const { route, x, y } = e.detail;
+        if (confirm(`${route.enabled ? 'Disable' : 'Enable'} route "${route.name}"?`)) {
+            const action = route.enabled ? 'disable' : 'enable';
+            fetch(`/api/routes/${route.id}/${action}`, { method: 'POST' })
+                .then(() => location.reload());
+        }
+    });
+}
 </script>
+<script src="{{ url_for('static', filename='js/route-graph.js') }}"></script>
 {% endblock %}

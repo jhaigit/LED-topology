@@ -15,7 +15,7 @@
 </div>
 
 {% if sinks %}
-<div class="device-grid">
+<div class="device-grid" id="sinks-grid">
     {% for sink in sinks %}
     <div class="device-card {% if sink.online %}online{% else %}offline{% endif %}" data-sink-id="{{ sink.id }}">
         <div class="device-header">
@@ -280,6 +280,11 @@ select.control-input {
 
 {% block scripts %}
 <script>
+// Initialize search
+if (document.getElementById('sinks-grid')) {
+    LtpListTools.initSearch('sinks-grid', { type: 'cards', placeholder: 'Search sinks...' });
+}
+
 function refreshDevice(type, id) {
     fetch(`/api/${type}s/${id}/refresh`, { method: 'POST' })
         .then(response => response.json())

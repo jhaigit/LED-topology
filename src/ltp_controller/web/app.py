@@ -50,6 +50,7 @@ def create_app(
     app.config["rule_engine"] = rule_engine
     app.config["event_loop"] = event_loop
     app.config["config_path"] = config_path
+    app.config["scenes"] = {}  # Scene storage: {id: scene_dict}
 
     # Helper to run async code from sync Flask handlers
     def run_async(coro: Any) -> Any:
@@ -73,6 +74,7 @@ def create_app(
             sources=controller.sources,
             sinks=controller.sinks,
             routes=router.routes,
+            virtual_sources=virtual_source_manager.sources if virtual_source_manager else [],
         )
 
     @app.route("/sources")
@@ -604,6 +606,35 @@ def create_app(
             return jsonify({"error": "Route not found"}), 404
         return jsonify({"status": "ok"})
 
+    @app.route("/api/routes/bulk-action", methods=["POST"])
+    def api_routes_bulk_action() -> Any:
+        """Bulk enable/disable/delete routes."""
+        data = request.json
+        action = data.get("action")
+        ids = data.get("ids", [])
+
+        if action not in ("enable", "disable", "delete"):
+            return jsonify({"error": "Invalid action"}), 400
+
+        results = {}
+        for route_id in ids:
+            try:
+                route = router.get_route(route_id)
+                if not route:
+                    results[route_id] = "not found"
+                    continue
+                if action == "enable":
+                    run_async(router.enable_route(route_id))
+                elif action == "disable":
+                    run_async(router.disable_route(route_id))
+                elif action == "delete":
+                    run_async(router.delete_route(route_id))
+                results[route_id] = "ok"
+            except Exception as e:
+                results[route_id] = str(e)
+
+        return jsonify({"status": "ok", "results": results})
+
     # ==================== API: System ====================
 
     @app.route("/api/status")
@@ -674,6 +705,152 @@ def create_app(
         if not rule_engine:
             return jsonify({"error": "Rule engine not available"}), 503
         return jsonify(rule_engine.to_config())
+
+    # ==================== Scenes API ====================
+
+    @app.route("/api/scenes", methods=["GET"])
+    def api_scenes_list():
+        """List all saved scenes."""
+        scenes = app.config["scenes"]
+        return jsonify([
+            {"id": s_id, "name": s["name"], "description": s.get("description", "")}
+            for s_id, s in scenes.items()
+        ])
+
+    @app.route("/api/scenes", methods=["POST"])
+    def api_scenes_create():
+        """Create a new scene from current state."""
+        import uuid
+        import time
+        data = request.json or {}
+        name = data.get("name", "Untitled Scene")
+        description = data.get("description", "")
+
+        # Snapshot current state
+        route_states = []
+        for route in router.routes:
+            route_state = {
+                "route_id": route.id,
+                "enabled": route.enabled,
+            }
+            if route.transform:
+                route_state["transform"] = {
+                    "brightness": route.transform.brightness,
+                    "gamma": route.transform.gamma,
+                    "scale_mode": route.transform.scale_mode.value if hasattr(route.transform.scale_mode, 'value') else str(route.transform.scale_mode),
+                    "mirror": route.transform.mirror,
+                }
+            route_states.append(route_state)
+
+        vs_states = []
+        if virtual_source_manager:
+            for vs in virtual_source_manager.sources:
+                vs_state = {
+                    "id": vs.id,
+                    "is_running": vs.is_running,
+                }
+                if hasattr(vs, 'controls') and vs.controls:
+                    vs_state["control_values"] = {
+                        ctrl.id: vs.controls.get_value(ctrl.id)
+                        for ctrl in vs.controls.to_list()
+                    }
+                vs_states.append(vs_state)
+
+        rule_states = []
+        if rule_engine:
+            for rule in rule_engine.rules:
+                rule_states.append({
+                    "id": rule.id,
+                    "enabled": rule.enabled,
+                })
+
+        scene_id = str(uuid.uuid4())[:8]
+        scene = {
+            "name": name,
+            "description": description,
+            "created_at": time.time(),
+            "routes": route_states,
+            "virtual_sources": vs_states,
+            "rules": rule_states,
+        }
+        app.config["scenes"][scene_id] = scene
+        return jsonify({"status": "ok", "id": scene_id, "name": name})
+
+    @app.route("/api/scenes/<scene_id>", methods=["DELETE"])
+    def api_scenes_delete(scene_id: str):
+        """Delete a scene."""
+        if scene_id not in app.config["scenes"]:
+            return jsonify({"error": "Scene not found"}), 404
+        del app.config["scenes"][scene_id]
+        return jsonify({"status": "ok"})
+
+    @app.route("/api/scenes/<scene_id>/activate", methods=["POST"])
+    def api_scenes_activate(scene_id: str):
+        """Activate a scene: apply its saved state."""
+        scene = app.config["scenes"].get(scene_id)
+        if not scene:
+            return jsonify({"error": "Scene not found"}), 404
+
+        applied = {"routes": 0, "virtual_sources": 0, "rules": 0}
+
+        # Apply route states
+        for rs in scene.get("routes", []):
+            route = None
+            for r in router.routes:
+                if r.id == rs["route_id"]:
+                    route = r
+                    break
+            if not route:
+                continue
+            try:
+                if rs["enabled"] and not route.enabled:
+                    run_async(router.enable_route(route.id))
+                elif not rs["enabled"] and route.enabled:
+                    run_async(router.disable_route(route.id))
+                # Apply transform if present
+                if "transform" in rs and route.transform:
+                    route.transform.brightness = rs["transform"].get("brightness", route.transform.brightness)
+                    route.transform.gamma = rs["transform"].get("gamma", route.transform.gamma)
+                    route.transform.mirror = rs["transform"].get("mirror", route.transform.mirror)
+                applied["routes"] += 1
+            except Exception as e:
+                logger.warning("Failed to apply route state for %s: %s", rs["route_id"], e)
+
+        # Apply virtual source states
+        if virtual_source_manager:
+            for vs_state in scene.get("virtual_sources", []):
+                vs = None
+                for v in virtual_source_manager.sources:
+                    if v.id == vs_state["id"]:
+                        vs = v
+                        break
+                if not vs:
+                    continue
+                try:
+                    if vs_state.get("is_running") and not vs.is_running:
+                        run_async(virtual_source_manager.start_source(vs.id))
+                    elif not vs_state.get("is_running") and vs.is_running:
+                        run_async(virtual_source_manager.stop_source(vs.id))
+                    if "control_values" in vs_state and hasattr(vs, 'controls'):
+                        for ctrl_id, value in vs_state["control_values"].items():
+                            vs.controls.set_value(ctrl_id, value)
+                    applied["virtual_sources"] += 1
+                except Exception as e:
+                    logger.warning("Failed to apply VS state for %s: %s", vs_state["id"], e)
+
+        # Apply rule states
+        if rule_engine:
+            for rule_state in scene.get("rules", []):
+                try:
+                    if rule_state["enabled"]:
+                        rule_engine.enable_rule(rule_state["id"])
+                    else:
+                        rule_engine.disable_rule(rule_state["id"])
+                    applied["rules"] += 1
+                except Exception as e:
+                    logger.warning("Failed to apply rule state for %s: %s", rule_state["id"], e)
+
+        return jsonify({"status": "ok", "applied": applied})
 
     @app.route("/api/config/save", methods=["POST"])
     def api_config_save() -> Any:
@@ -783,6 +960,21 @@ def create_app(
         svg_content = "".join(svg_parts)
 
         return Response(svg_content, mimetype="image/svg+xml")
+
+    @app.route("/api/routes/<route_id>/frame")
+    def api_route_frame(route_id: str) -> Any:
+        """Get last frame data as JSON (for canvas rendering)."""
+        route = router.get_route(route_id)
+        if not route:
+            return jsonify({"error": "Route not found"}), 404
+
+        dims = route._source_dims or [0]
+        pixels = route._last_frame or []
+
+        return jsonify({
+            "pixels": [[int(c) for c in p] for p in pixels] if pixels else [],
+            "dimensions": list(dims),
+        })
 
     @app.route("/api/sinks/<sink_id>/preview")
     def api_sink_preview(sink_id: str) -> Any:
@@ -1478,6 +1670,36 @@ def create_app(
         if rule_engine.disable_rule(rule_id):
             return jsonify({"status": "ok"})
         return jsonify({"error": "Rule not found"}), 404
+
+    @app.route("/api/rules/bulk-action", methods=["POST"])
+    def api_rules_bulk_action() -> Any:
+        """Bulk enable/disable/delete rules."""
+        if not rule_engine:
+            return jsonify({"error": "Rule engine not available"}), 503
+
+        data = request.json
+        action = data.get("action")
+        ids = data.get("ids", [])
+
+        if action not in ("enable", "disable", "delete"):
+            return jsonify({"error": "Invalid action"}), 400
+
+        results = {}
+        for rule_id in ids:
+            try:
+                if action == "enable":
+                    rule_engine.enable_rule(rule_id)
+                    results[rule_id] = "ok"
+                elif action == "disable":
+                    rule_engine.disable_rule(rule_id)
+                    results[rule_id] = "ok"
+                elif action == "delete":
+                    rule_engine.delete_rule(rule_id)
+                    results[rule_id] = "ok"
+            except Exception as e:
+                results[rule_id] = str(e)
+
+        return jsonify({"status": "ok", "results": results})
 
     @app.route("/api/rules/action-types")
     def api_rule_action_types() -> Any:

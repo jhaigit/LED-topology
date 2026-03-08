@@ -23,6 +23,14 @@
             <li><a href="/preview" class="{% if request.path == '/preview' %}active{% endif %}">Preview</a></li>
         </ul>
         <div class="navbar-actions">
+            <div class="scenes-wrapper">
+                <button class="btn btn-sm" onclick="LtpScenes.toggleDropdown()">Scenes</button>
+                <button class="btn btn-sm btn-primary" onclick="LtpScenes.save()" title="Save current state as scene">+ Save Scene</button>
+                <div id="scenes-dropdown" class="scenes-dropdown" style="display: none;">
+                    <div class="scenes-list"></div>
+                </div>
+            </div>
+            <button id="theme-toggle-btn" class="btn btn-sm" onclick="toggleTheme()" title="Toggle light/dark theme">Light/Dark</button>
             <button id="save-config-btn" class="btn btn-save" title="Save routes and rules to config file">Save Config</button>
         </div>
     </nav>
@@ -36,11 +44,11 @@
     </footer>
 
     <!-- Confirm dialog (shared across all pages) -->
-    <div id="confirmModal" class="modal" style="display: none;">
+    <div id="confirmModal" class="modal" style="display: none;" role="dialog" aria-modal="true">
         <div class="modal-content" style="max-width: 400px;">
             <div class="modal-header">
                 <h2 id="confirmTitle">Confirm</h2>
-                <button class="close-btn" onclick="ltpConfirmClose(false)">&times;</button>
+                <button class="close-btn" onclick="ltpConfirmClose(false)" aria-label="Close">&times;</button>
             </div>
             <div class="confirm-body">
                 <p id="confirmMessage"></p>
@@ -53,6 +61,8 @@
     </div>
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/list-tools.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/scenes.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

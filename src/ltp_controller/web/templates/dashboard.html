@@ -18,9 +18,61 @@
         <div class="stat-label">Sinks Online</div>
     </div>
     <div class="stat-card">
-        <div class="stat-value">{{ routes|selectattr('enabled')|list|length }} / {{ routes|length }}</div>
+        <div class="stat-value" id="routes-stat">{{ routes|selectattr('enabled')|list|length }} / {{ routes|length }}</div>
         <div class="stat-label">Routes Active</div>
     </div>
+    <div class="stat-card">
+        <div class="stat-value" id="vs-stat">{{ virtual_sources|selectattr('is_running')|list|length }} / {{ virtual_sources|length }}</div>
+        <div class="stat-label">Virtual Sources</div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<section class="panel quick-actions-panel">
+    <h2>Quick Actions</h2>
+    <div class="quick-actions">
+        <button class="btn btn-success btn-sm" onclick="bulkRoutes('enable')">Enable All Routes</button>
+        <button class="btn btn-warning btn-sm" onclick="bulkRoutes('disable')">Disable All Routes</button>
+        <button class="btn btn-success btn-sm" onclick="bulkVS('start')">Start All VS</button>
+        <button class="btn btn-warning btn-sm" onclick="bulkVS('stop')">Stop All VS</button>
+    </div>
+</section>
+
+<div class="dashboard-grid">
+    <!-- System Diagram -->
+    <section class="panel">
+        <h2>System Diagram</h2>
+        <div id="system-diagram" class="system-diagram">
+            <svg id="diagram-svg" width="100%" height="200"></svg>
+        </div>
+    </section>
+
+    <!-- Route Performance -->
+    <section class="panel">
+        <h2>Route Performance</h2>
+        {% if routes %}
+        <table class="table table-compact">
+            <thead>
+                <tr>
+                    <th>Route</th>
+                    <th>Status</th>
+                    <th>Frames</th>
+                </tr>
+            </thead>
+            <tbody id="route-perf-body">
+                {% for route in routes %}
+                <tr data-route-id="{{ route.id }}">
+                    <td>{{ route.name }}</td>
+                    <td><span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span></td>
+                    <td class="frames-col">{% if route.mode.value == 'direct' %}<em>N/A</em>{% else %}{{ route._frames_routed }}{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty-state">No routes configured</p>
+        {% endif %}
+    </section>
 </div>
 
 <div class="dashboard-grid">
@@ -67,52 +119,13 @@
     </section>
 </div>
 
-<section class="panel">
-    <h2>Active Routes</h2>
-    {% if routes %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Source</th>
-                <th>Sink</th>
-                <th>Status</th>
-                <th>Mode</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for route in routes %}
-            <tr>
-                <td>{{ route.name }}</td>
-                <td>
-                    {% for source in sources if source.id == route.source_id %}
-                        {{ source.name }}
-                    {% else %}
-                        <span class="id-value">{{ route.source_id }}</span>
-                    {% endfor %}
-                </td>
-                <td>
-                    {% for sink in sinks if sink.id == route.sink_id %}
-                        {{ sink.name }}
-                    {% else %}
-                        <span class="id-value">{{ route.sink_id }}</span>
-                    {% endfor %}
-                </td>
-                <td>
-                    <span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span>
-                </td>
-                <td>{{ route.mode.value }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <p class="empty-state">No routes configured</p>
-    {% endif %}
-    <a href="/routes" class="btn">Manage Routes</a>
-</section>
-
 <script>
+// Route and source data for diagram
+const diagramRoutes = {{ routes | tojson | safe }};
+const diagramSources = {{ sources | tojson | safe }};
+const diagramSinks = {{ sinks | tojson | safe }};
+const diagramVS = {{ virtual_sources | tojson | safe }};
+
 function refreshDiscovery() {
     const btn = document.getElementById('refresh-btn');
     const originalText = btn.textContent;
@@ -126,7 +139,6 @@ function refreshDiscovery() {
             setTimeout(() => {
                 btn.textContent = originalText;
                 btn.disabled = false;
-                // Reload page to show new devices
                 window.location.reload();
             }, 1000);
         })
@@ -142,7 +154,6 @@ function refreshDiscovery() {
 
 // Auto-refresh device status every 5 seconds
 function updateStatus() {
-    // Fetch sources
     fetch('/api/sources')
         .then(r => r.json())
         .then(sources => {
@@ -153,13 +164,11 @@ function updateStatus() {
                     el.classList.toggle('offline', !source.online);
                 }
             });
-            // Update sources count
             const onlineSources = sources.filter(s => s.online).length;
             const sourceStat = document.getElementById('sources-stat');
             if (sourceStat) sourceStat.textContent = `${onlineSources} / ${sources.length}`;
         });
 
-    // Fetch sinks
     fetch('/api/sinks')
         .then(r => r.json())
         .then(sinks => {
@@ -170,15 +179,181 @@ function updateStatus() {
                     el.classList.toggle('offline', !sink.online);
                 }
             });
-            // Update sinks count
             const onlineSinks = sinks.filter(s => s.online).length;
             const sinkStat = document.getElementById('sinks-stat');
             if (sinkStat) sinkStat.textContent = `${onlineSinks} / ${sinks.length}`;
         });
+
+    // Update route performance
+    fetch('/api/routes')
+        .then(r => r.json())
+        .then(routes => {
+            routes.forEach(route => {
+                const row = document.querySelector(`#route-perf-body tr[data-route-id="${route.id}"]`);
+                if (row) {
+                    const statusEl = row.querySelector('.status-badge');
+                    if (statusEl) {
+                        statusEl.textContent = route.status;
+                        statusEl.className = 'status-badge ' + route.status;
+                    }
+                    const framesEl = row.querySelector('.frames-col');
+                    if (framesEl && route.mode !== 'direct') {
+                        framesEl.textContent = route.frames_routed;
+                    }
+                }
+            });
+            // Update routes stat
+            const activeRoutes = routes.filter(r => r.enabled).length;
+            const routesStat = document.getElementById('routes-stat');
+            if (routesStat) routesStat.textContent = `${activeRoutes} / ${routes.length}`;
+        });
 }
 
-// Start auto-refresh
 setInterval(updateStatus, 5000);
+
+// Quick actions
+async function bulkRoutes(action) {
+    const routeIds = diagramRoutes.map(r => r.id);
+    if (routeIds.length === 0) {
+        showToast('No routes to ' + action, 'warning');
+        return;
+    }
+    try {
+        const resp = await fetch('/api/routes/bulk-action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action, ids: routeIds })
+        });
+        const data = await resp.json();
+        if (data.status === 'ok') {
+            showToast(`All routes ${action}d`, 'success');
+            setTimeout(() => location.reload(), 500);
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown'), 'error');
+        }
+    } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+    }
+}
+
+async function bulkVS(action) {
+    const vsIds = diagramVS.map(v => v.id);
+    if (vsIds.length === 0) {
+        showToast('No virtual sources to ' + action, 'warning');
+        return;
+    }
+    let errors = 0;
+    for (const id of vsIds) {
+        try {
+            await fetch(`/api/virtual-sources/${id}/${action}`, { method: 'POST' });
+        } catch (e) {
+            errors++;
+        }
+    }
+    if (errors === 0) {
+        showToast(`All virtual sources ${action}ed`, 'success');
+    } else {
+        showToast(`${errors} error(s) during ${action}`, 'warning');
+    }
+    setTimeout(() => location.reload(), 500);
+}
+
+// System diagram
+function renderDiagram() {
+    const svg = document.getElementById('diagram-svg');
+    if (!svg) return;
+
+    // Collect unique sources and sinks from routes
+    const routeSourceIds = new Set(diagramRoutes.map(r => r.source_id));
+    const routeSinkIds = new Set(diagramRoutes.map(r => r.sink_id));
+
+    // Build source entries (physical + virtual that are in routes)
+    const sourceEntries = [];
+    diagramSources.forEach(s => {
+        if (routeSourceIds.has(s.id)) {
+            sourceEntries.push({ id: s.id, name: s.name, online: s.online, type: 'physical' });
+        }
+    });
+    diagramVS.forEach(v => {
+        if (routeSourceIds.has(v.id)) {
+            sourceEntries.push({ id: v.id, name: v.name, online: v.is_running, type: 'virtual' });
+        }
+    });
+
+    // Build sink entries
+    const sinkEntries = [];
+    diagramSinks.forEach(s => {
+        if (routeSinkIds.has(s.id)) {
+            sinkEntries.push({ id: s.id, name: s.name, online: s.online });
+        }
+    });
+
+    if (sourceEntries.length === 0 && sinkEntries.length === 0) {
+        svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#a0a0a0" font-size="14">No active routes to display</text>';
+        return;
+    }
+
+    const maxItems = Math.max(sourceEntries.length, sinkEntries.length, 1);
+    const rowH = 40;
+    const svgH = maxItems * rowH + 40;
+    svg.setAttribute('height', svgH);
+
+    const svgW = svg.getBoundingClientRect().width || 600;
+    const srcX = 10;
+    const srcW = 140;
+    const sinkX = svgW - 150;
+    const sinkW = 140;
+
+    let html = '';
+
+    // Draw source boxes
+    sourceEntries.forEach((s, i) => {
+        const y = 20 + i * rowH;
+        const color = s.online ? 'var(--success)' : 'var(--text-secondary)';
+        const badge = s.type === 'virtual' ? ' (VS)' : '';
+        html += `<rect x="${srcX}" y="${y}" width="${srcW}" height="28" rx="4" fill="var(--bg-card)" stroke="${color}" stroke-width="1.5"/>`;
+        html += `<circle cx="${srcX + 10}" cy="${y + 14}" r="4" fill="${color}"/>`;
+        html += `<text x="${srcX + 20}" y="${y + 18}" fill="var(--text-primary)" font-size="11" class="diagram-label">${truncate(s.name, 14)}${badge}</text>`;
+    });
+
+    // Draw sink boxes
+    sinkEntries.forEach((s, i) => {
+        const y = 20 + i * rowH;
+        const color = s.online ? 'var(--success)' : 'var(--text-secondary)';
+        html += `<rect x="${sinkX}" y="${y}" width="${sinkW}" height="28" rx="4" fill="var(--bg-card)" stroke="${color}" stroke-width="1.5"/>`;
+        html += `<circle cx="${sinkX + sinkW - 10}" cy="${y + 14}" r="4" fill="${color}"/>`;
+        html += `<text x="${sinkX + 10}" y="${y + 18}" fill="var(--text-primary)" font-size="11" class="diagram-label">${truncate(s.name, 14)}</text>`;
+    });
+
+    // Draw route cables
+    diagramRoutes.forEach(route => {
+        const srcIdx = sourceEntries.findIndex(s => s.id === route.source_id);
+        const sinkIdx = sinkEntries.findIndex(s => s.id === route.sink_id);
+        if (srcIdx < 0 || sinkIdx < 0) return;
+
+        const srcY = 20 + srcIdx * rowH + 14;
+        const sinkY = 20 + sinkIdx * rowH + 14;
+        const x1 = srcX + srcW;
+        const x2 = sinkX;
+        const cp = (x2 - x1) * 0.4;
+
+        const color = !route.enabled ? '#666' :
+                      route.status === 'connected' ? 'var(--success)' :
+                      route.status === 'error' ? 'var(--error)' : 'var(--warning)';
+
+        html += `<path d="M${x1},${srcY} C${x1 + cp},${srcY} ${x2 - cp},${sinkY} ${x2},${sinkY}" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="${route.enabled ? '' : '5,5'}"/>`;
+    });
+
+    svg.innerHTML = html;
+}
+
+function truncate(str, maxLen) {
+    return str.length > maxLen ? str.substring(0, maxLen - 1) + '…' : str;
+}
+
+// Render diagram on load and resize
+renderDiagram();
+window.addEventListener('resize', renderDiagram);
 </script>
 
 <style>
@@ -190,6 +365,36 @@ setInterval(updateStatus, 5000);
 }
 .page-header h1 {
     margin: 0;
+}
+.quick-actions-panel {
+    margin-bottom: 1.5rem;
+}
+.quick-actions-panel h2 {
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+}
+.quick-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.system-diagram {
+    min-height: 100px;
+    overflow-x: auto;
+}
+.system-diagram svg {
+    min-width: 400px;
+}
+.diagram-label {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+.table-compact th,
+.table-compact td {
+    padding: 0.5rem 0.75rem;
+}
+.frames-col {
+    font-family: monospace;
+    font-size: 0.9rem;
 }
 </style>
 {% endblock %}

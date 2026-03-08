@@ -1,5 +1,22 @@
 // LTP Controller Web Interface JavaScript
 
+// Theme management
+(function() {
+    const saved = localStorage.getItem('ltp-theme');
+    if (saved) {
+        document.documentElement.setAttribute('data-theme', saved);
+    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+})();
+
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    const next = current === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('ltp-theme', next);
+}
+
 // Auto-refresh status every 5 seconds
 (function() {
     const statusElements = document.querySelectorAll('[data-auto-refresh]');
@@ -37,6 +54,8 @@ async function apiCall(method, endpoint, data = null) {
 function showToast(message, type = 'info') {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
     toast.textContent = message;
     document.body.appendChild(toast);
 

@@ -15,7 +15,7 @@
 </div>
 
 {% if sources %}
-<div class="device-grid">
+<div class="device-grid" id="sources-grid">
     {% for source in sources %}
     <div class="device-card {% if source.online %}online{% else %}offline{% endif %}">
         <div class="device-header">
@@ -195,6 +195,11 @@ function refreshDiscovery() {
                 btn.disabled = false;
             }, 2000);
         });
+}
+
+// Initialize search
+if (document.getElementById('sources-grid')) {
+    LtpListTools.initSearch('sources-grid', { type: 'cards', placeholder: 'Search sources...' });
 }
 
 function purgeOffline() {

@@ -12,7 +12,7 @@
 </div>
 
 {% if rules %}
-<div class="rules-list">
+<div class="rules-list" id="rules-list">
     {% for rule in rules %}
     <div class="rule-card {% if rule.enabled %}enabled{% else %}disabled{% endif %}" data-rule-id="{{ rule.id }}">
         <div class="rule-header">
@@ -375,6 +375,11 @@
 
 {% block scripts %}
 <script>
+// Initialize search
+if (document.getElementById('rules-list')) {
+    LtpListTools.initSearch('rules-list', { type: 'cards', placeholder: 'Search rules...' });
+}
+
 // Data from server
 const sinks = {{ sinks | tojson | safe }};
 const routes = {{ routes | tojson | safe }};

@@ -12,7 +12,7 @@
 </div>
 
 {% if scalar_sources %}
-<div class="device-grid">
+<div class="device-grid" id="ss-grid">
     {% for ss in scalar_sources %}
     <div class="device-card {% if ss.is_running %}online{% else %}offline{% endif %}">
         <div class="device-header">
@@ -168,6 +168,11 @@
 
 {% block scripts %}
 <script>
+// Initialize search
+if (document.getElementById('ss-grid')) {
+    LtpListTools.initSearch('ss-grid', { type: 'cards', placeholder: 'Search sensors...' });
+}
+
 // Store source IDs for live updates
 const sourceIds = [{% for ss in scalar_sources %}'{{ ss.id }}'{% if not loop.last %}, {% endif %}{% endfor %}];
 
