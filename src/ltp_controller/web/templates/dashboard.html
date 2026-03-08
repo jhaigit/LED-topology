@@ -210,14 +210,7 @@ function renderSourceDetail(s) {
     }
     html += `</div>`;
     if (s.controls && s.controls.length > 0) {
-        html += `<h4>Controls <button class="btn btn-sm btn-secondary" onclick="toggleFullControls('source', '${s.id}')">Edit Controls</button></h4>`;
-        html += `<div class="detail-controls" id="controls-summary-${s.id}">`;
-        s.controls.forEach(ctrl => {
-            const val = s.control_values && s.control_values[ctrl.id] !== undefined ? s.control_values[ctrl.id] : ctrl.default;
-            html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
-        });
-        html += `</div>`;
-        html += `<div class="detail-controls-full" id="controls-full-${s.id}" style="display:none;">`;
+        html += `<h4>Controls</h4><div class="detail-controls-full">`;
         html += renderInteractiveControls(s.controls, s.control_values || {}, 'source', s.id);
         html += `</div>`;
     }
@@ -251,14 +244,7 @@ function renderSinkDetail(s) {
     }
     html += `</div>`;
     if (s.controls && s.controls.length > 0) {
-        html += `<h4>Controls <button class="btn btn-sm btn-secondary" onclick="toggleFullControls('sink', '${s.id}')">Edit Controls</button></h4>`;
-        html += `<div class="detail-controls" id="controls-summary-${s.id}">`;
-        s.controls.forEach(ctrl => {
-            const val = s.control_values && s.control_values[ctrl.id] !== undefined ? s.control_values[ctrl.id] : ctrl.default;
-            html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
-        });
-        html += `</div>`;
-        html += `<div class="detail-controls-full" id="controls-full-${s.id}" style="display:none;">`;
+        html += `<h4>Controls</h4><div class="detail-controls-full">`;
         html += renderInteractiveControls(s.controls, s.control_values || {}, 'sink', s.id);
         html += `</div>`;
     }
@@ -335,14 +321,7 @@ function renderVSDetail(v) {
                 vsCtrlValues[ctrl.id] = ctrl.value !== undefined ? ctrl.value : ctrl.default;
             }
         });
-        html += `<h4>Controls <button class="btn btn-sm btn-secondary" onclick="toggleFullControls('virtual-source', '${v.id}')">Edit Controls</button></h4>`;
-        html += `<div class="detail-controls" id="controls-summary-${v.id}">`;
-        vsControls.forEach(ctrl => {
-            const val = vsCtrlValues[ctrl.id];
-            html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
-        });
-        html += `</div>`;
-        html += `<div class="detail-controls-full" id="controls-full-${v.id}" style="display:none;">`;
+        html += `<h4>Controls</h4><div class="detail-controls-full">`;
         html += renderInteractiveControls(vsControls, vsCtrlValues, 'virtual-source', v.id);
         html += `</div>`;
     }
@@ -433,19 +412,6 @@ function renderInteractiveControls(controls, values, deviceType, deviceId) {
         html += `</div>`;
     });
     return html;
-}
-
-function toggleFullControls(deviceType, deviceId) {
-    const summary = document.getElementById('controls-summary-' + deviceId);
-    const full = document.getElementById('controls-full-' + deviceId);
-    if (!summary || !full) return;
-    if (full.style.display === 'none') {
-        summary.style.display = 'none';
-        full.style.display = '';
-    } else {
-        summary.style.display = '';
-        full.style.display = 'none';
-    }
 }
 
 function setDeviceControl(deviceType, deviceId, controlId, value) {
@@ -1115,11 +1081,6 @@ function esc(str) {
 }
 .control-row .btn-action {
     flex-shrink: 0;
-}
-h4 .btn {
-    margin-left: 0.5rem;
-    vertical-align: middle;
-    font-size: 0.75rem;
 }
 </style>
 {% endblock %}
