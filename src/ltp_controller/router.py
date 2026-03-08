@@ -252,6 +252,7 @@ class RoutingEngine:
         name: str | None = None,
         enabled: bool | None = None,
         transform: RouteTransform | None = None,
+        mode: RouteMode | None = None,
     ) -> Route | None:
         """Update a route's configuration."""
         route = self._routes.get(route_id)
@@ -262,6 +263,8 @@ class RoutingEngine:
             route.name = name
         if transform is not None:
             route.transform = transform
+        if mode is not None:
+            route.mode = mode
 
         if enabled is not None and enabled != route.enabled:
             route.enabled = enabled

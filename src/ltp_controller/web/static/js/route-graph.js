@@ -5,26 +5,31 @@ window.LtpRouteGraph = (function() {
     let nodePositions = {};  // Stored positions keyed by device id
     let selectedCable = null;
     let hoveredCable = null;
+    let selectedNode = null;
     let dragTarget = null;
     let dragOffset = { x: 0, y: 0 };
+    let dragMoved = false;
     let pendingCable = null;  // For drag-to-connect
+    let storageKey = 'ltp-route-graph-positions';
 
     const NODE_W = 160;
     const NODE_H = 36;
     const PORT_R = 6;
 
-    function init(canvasEl, srcData, sinkData, routeData) {
+    // opts.storageKey: localStorage key for positions (default: 'ltp-route-graph-positions')
+    function init(canvasEl, srcData, sinkData, routeData, opts) {
         canvas = canvasEl;
         ctx = canvas.getContext('2d');
         sources = srcData;
         sinks = sinkData;
         routes = routeData;
+        if (opts && opts.storageKey) storageKey = opts.storageKey;
 
         // Size the canvas first so autoLayout has correct dimensions
         resizeCanvas();
 
         // Load saved positions or auto-layout
-        const saved = localStorage.getItem('ltp-route-graph-positions');
+        const saved = localStorage.getItem(storageKey);
         if (saved) {
             try { nodePositions = JSON.parse(saved); } catch (e) { nodePositions = {}; }
         }
@@ -68,7 +73,7 @@ window.LtpRouteGraph = (function() {
     }
 
     function savePositions() {
-        localStorage.setItem('ltp-route-graph-positions', JSON.stringify(nodePositions));
+        localStorage.setItem(storageKey, JSON.stringify(nodePositions));
     }
 
     function draw() {
@@ -102,7 +107,7 @@ window.LtpRouteGraph = (function() {
         sources.forEach(s => {
             const pos = nodePositions[s.id];
             if (!pos) return;
-            drawNode(pos.x, pos.y, s.name, s.online, 'source', s.type === 'virtual');
+            drawNode(pos.x, pos.y, s.name, s.online, 'source', s.type === 'virtual', selectedNode === s.id);
             // Output port (right side)
             drawPort(pos.x + NODE_W, pos.y + NODE_H / 2, s.online);
         });
@@ -111,14 +116,16 @@ window.LtpRouteGraph = (function() {
         sinks.forEach(s => {
             const pos = nodePositions[s.id];
             if (!pos) return;
-            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false);
+            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false, selectedNode === s.id);
             // Input port (left side)
             drawPort(pos.x, pos.y + NODE_H / 2, s.online);
         });
     }
 
-    function drawNode(x, y, name, online, type, isVirtual) {
-        const borderColor = online ?
+    function drawNode(x, y, name, online, type, isVirtual, isSelected) {
+        const borderColor = isSelected ?
+            (getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e94560') :
+            online ?
             (getComputedStyle(document.documentElement).getPropertyValue('--success').trim() || '#4caf50') :
             (getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#a0a0a0');
         const cardColor = getComputedStyle(document.documentElement).getPropertyValue('--bg-card').trim() || '#0f3460';
@@ -126,7 +133,7 @@ window.LtpRouteGraph = (function() {
 
         ctx.fillStyle = cardColor;
         ctx.strokeStyle = borderColor;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
 
         // Rounded rect
         const r = 4;
@@ -318,6 +325,7 @@ window.LtpRouteGraph = (function() {
         const cable = getCableAt(x, y);
         if (cable) {
             selectedCable = cable.id;
+            selectedNode = null;
             draw();
             // Dispatch event for side panel
             canvas.dispatchEvent(new CustomEvent('cable-selected', { detail: cable }));
@@ -328,6 +336,7 @@ window.LtpRouteGraph = (function() {
         const node = getNodeAt(x, y);
         if (node) {
             dragTarget = node;
+            dragMoved = false;
             const pos = nodePositions[node.id];
             dragOffset = { x: x - pos.x, y: y - pos.y };
             selectedCable = null;
@@ -337,8 +346,10 @@ window.LtpRouteGraph = (function() {
 
         // Click on empty space - deselect
         selectedCable = null;
+        selectedNode = null;
         draw();
         canvas.dispatchEvent(new CustomEvent('cable-selected', { detail: null }));
+        canvas.dispatchEvent(new CustomEvent('node-clicked', { detail: null }));
     }
 
     function onMouseMove(e) {
@@ -352,6 +363,7 @@ window.LtpRouteGraph = (function() {
         }
 
         if (dragTarget) {
+            dragMoved = true;
             nodePositions[dragTarget.id] = {
                 x: x - dragOffset.x,
                 y: y - dragOffset.y
@@ -379,8 +391,17 @@ window.LtpRouteGraph = (function() {
 
     function onMouseUp(e) {
         if (dragTarget) {
+            const clicked = dragTarget;
             dragTarget = null;
-            savePositions();
+            if (dragMoved) {
+                savePositions();
+            } else {
+                // Click without drag - select the node
+                selectedNode = clicked.id;
+                selectedCable = null;
+                draw();
+                canvas.dispatchEvent(new CustomEvent('node-clicked', { detail: clicked }));
+            }
             return;
         }
 
@@ -427,16 +448,40 @@ window.LtpRouteGraph = (function() {
 
     function resetLayout() {
         nodePositions = {};
-        localStorage.removeItem('ltp-route-graph-positions');
+        localStorage.removeItem(storageKey);
         autoLayout();
         draw();
+    }
+
+    function updateSourceData(newSources) {
+        sources = newSources;
+        autoLayout();
+        draw();
+    }
+
+    function updateSinkData(newSinks) {
+        sinks = newSinks;
+        autoLayout();
+        draw();
+    }
+
+    function getSelectedCable() {
+        return selectedCable;
+    }
+
+    function getSelectedNode() {
+        return selectedNode;
     }
 
     return {
         init,
         draw,
         updateRouteData,
+        updateSourceData,
+        updateSinkData,
         resetLayout,
-        resizeCanvas
+        resizeCanvas,
+        getSelectedCable,
+        getSelectedNode
     };
 })();

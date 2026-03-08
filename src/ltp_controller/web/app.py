@@ -589,11 +589,14 @@ def create_app(
         if "transform" in data:
             transform = RouteTransform.from_dict(data["transform"])
 
+        mode = RouteMode(data["mode"]) if "mode" in data else None
+
         route = router.update_route(
             route_id,
             name=data.get("name"),
             enabled=data.get("enabled"),
             transform=transform,
+            mode=mode,
         )
 
         return jsonify(route.to_dict())

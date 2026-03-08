@@ -2,10 +2,17 @@
 
 {% block title %}Dashboard - LTP Controller{% endblock %}
 
+{% block head %}
+<script src="{{ url_for('static', filename='js/route-graph.js') }}"></script>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <h1>Dashboard</h1>
-    <button class="btn" onclick="refreshDiscovery()" id="refresh-btn">Refresh Discovery</button>
+    <div class="btn-group">
+        <button class="btn btn-sm" onclick="refreshDiscovery()" id="refresh-btn">Refresh Discovery</button>
+        <button class="btn btn-sm btn-secondary" onclick="LtpRouteGraph.resetLayout()">Reset Layout</button>
+    </div>
 </div>
 
 <div class="stats-grid">
@@ -38,93 +45,453 @@
     </div>
 </section>
 
-<div class="dashboard-grid">
-    <!-- System Diagram -->
-    <section class="panel">
-        <h2>System Diagram</h2>
-        <div id="system-diagram" class="system-diagram">
-            <svg id="diagram-svg" width="100%" height="200"></svg>
-        </div>
-    </section>
+<!-- System Graph -->
+<section class="panel">
+    <h2>System Graph</h2>
+    <p class="graph-hint">Drag ports to connect. Click nodes for details. Click cables to edit routes.</p>
+    <div id="graph-container" style="background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px;">
+        <canvas id="dashboardGraph"></canvas>
+    </div>
+</section>
 
-    <!-- Route Performance -->
-    <section class="panel">
-        <h2>Route Performance</h2>
-        {% if routes %}
-        <table class="table table-compact">
-            <thead>
-                <tr>
-                    <th>Route</th>
-                    <th>Status</th>
-                    <th>Frames</th>
-                </tr>
-            </thead>
-            <tbody id="route-perf-body">
-                {% for route in routes %}
-                <tr data-route-id="{{ route.id }}">
-                    <td>{{ route.name }}</td>
-                    <td><span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span></td>
-                    <td class="frames-col">{% if route.mode.value == 'direct' %}<em>N/A</em>{% else %}{{ route._frames_routed }}{% endif %}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% else %}
-        <p class="empty-state">No routes configured</p>
-        {% endif %}
-    </section>
-</div>
+<!-- Detail Panel (shown when node or cable is selected) -->
+<section class="panel" id="detail-panel" style="display: none;">
+    <div id="detail-content"></div>
+</section>
 
-<div class="dashboard-grid">
-    <section class="panel">
-        <h2>Sources</h2>
-        {% if sources %}
-        <ul class="device-list">
-            {% for source in sources %}
-            <li class="device-item {% if source.online %}online{% else %}offline{% endif %}" data-source-id="{{ source.id }}">
-                <span class="status-dot"></span>
-                <div class="device-info">
-                    <strong>{{ source.name }}</strong>
-                    <span class="device-meta">{{ source.description or 'No description' }}</span>
-                </div>
-                <span class="device-address">{{ source.host }}:{{ source.port }}</span>
-            </li>
+<!-- Route Performance -->
+<section class="panel">
+    <h2>Route Performance</h2>
+    {% if routes %}
+    <table class="table table-compact">
+        <thead>
+            <tr>
+                <th>Route</th>
+                <th>Status</th>
+                <th>Mode</th>
+                <th>Frames</th>
+            </tr>
+        </thead>
+        <tbody id="route-perf-body">
+            {% for route in routes %}
+            <tr data-route-id="{{ route.id }}">
+                <td>{{ route.name }}</td>
+                <td><span class="status-badge {{ route.status.value }}">{{ route.status.value }}</span></td>
+                <td class="mode-col">{{ route.mode.value }}</td>
+                <td class="frames-col">{% if route.mode.value == 'direct' %}<em>N/A</em>{% else %}{{ route._frames_routed }}{% endif %}</td>
+            </tr>
             {% endfor %}
-        </ul>
-        {% else %}
-        <p class="empty-state">No sources discovered</p>
-        {% endif %}
-        <a href="/sources" class="btn">View All Sources</a>
-    </section>
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No routes configured. Drag from a source port to a sink port in the graph above to create one.</p>
+    {% endif %}
+</section>
+{% endblock %}
 
-    <section class="panel">
-        <h2>Sinks</h2>
-        {% if sinks %}
-        <ul class="device-list">
-            {% for sink in sinks %}
-            <li class="device-item {% if sink.online %}online{% else %}offline{% endif %}" data-sink-id="{{ sink.id }}">
-                <span class="status-dot"></span>
-                <div class="device-info">
-                    <strong>{{ sink.name }}</strong>
-                    <span class="device-meta">{{ sink.description or 'No description' }}</span>
-                </div>
-                <span class="device-address">{{ sink.host }}:{{ sink.port }}</span>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="empty-state">No sinks discovered</p>
-        {% endif %}
-        <a href="/sinks" class="btn">View All Sinks</a>
-    </section>
-</div>
-
+{% block scripts %}
 <script>
-// Route and source data for diagram
-const diagramRoutes = {{ routes_json | tojson | safe }};
-const diagramSources = {{ sources_json | tojson | safe }};
-const diagramSinks = {{ sinks_json | tojson | safe }};
-const diagramVS = {{ vs_json | tojson | safe }};
+// Data from server (pre-serialized)
+const rawSources = {{ sources_json | tojson | safe }};
+const rawSinks = {{ sinks_json | tojson | safe }};
+const rawRoutes = {{ routes_json | tojson | safe }};
+const rawVS = {{ vs_json | tojson | safe }};
+
+// Build graph data - ALL sources and sinks, not just routed ones
+const graphSources = [];
+rawSources.forEach(s => {
+    graphSources.push({ id: s.id, name: s.name, online: s.online, type: 'physical', _raw: s });
+});
+rawVS.forEach(v => {
+    graphSources.push({ id: v.id, name: v.name, online: v.is_running, type: 'virtual', _raw: v });
+});
+
+const graphSinks = rawSinks.map(s => ({
+    id: s.id, name: s.name, online: s.online, _raw: s
+}));
+
+const graphRoutes = rawRoutes.map(r => ({
+    id: r.id,
+    name: r.name,
+    source_id: r.source_id,
+    sink_id: r.sink_id,
+    enabled: r.enabled,
+    status: r.status,
+    mode: r.mode,
+    _raw: r
+}));
+
+// Initialize graph
+const graphCanvas = document.getElementById('dashboardGraph');
+LtpRouteGraph.init(graphCanvas, graphSources, graphSinks, graphRoutes, {
+    storageKey: 'ltp-dashboard-graph-positions'
+});
+
+// --- Node click: show device details ---
+graphCanvas.addEventListener('node-clicked', function(e) {
+    const node = e.detail;
+    const panel = document.getElementById('detail-panel');
+    const content = document.getElementById('detail-content');
+
+    if (!node) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    const src = graphSources.find(s => s.id === node.id);
+    const snk = graphSinks.find(s => s.id === node.id);
+
+    if (src) {
+        // Fetch live details
+        const isVS = src.type === 'virtual';
+        const apiUrl = isVS ? `/api/virtual-sources` : `/api/sources`;
+        fetch(apiUrl)
+            .then(r => r.json())
+            .then(items => {
+                const item = Array.isArray(items) ? items.find(i => i.id === node.id) : null;
+                if (!item) {
+                    content.innerHTML = `<h3>${node.name}</h3><p class="empty-state">Device details not available</p>`;
+                    panel.style.display = '';
+                    return;
+                }
+                if (isVS) {
+                    renderVSDetail(item);
+                } else {
+                    renderSourceDetail(item);
+                }
+                panel.style.display = '';
+            })
+            .catch(() => {
+                content.innerHTML = `<h3>${node.name}</h3><p>Could not load details</p>`;
+                panel.style.display = '';
+            });
+    } else if (snk) {
+        fetch(`/api/sinks`)
+            .then(r => r.json())
+            .then(items => {
+                const item = items.find(i => i.id === node.id);
+                if (!item) {
+                    content.innerHTML = `<h3>${node.name}</h3><p class="empty-state">Device details not available</p>`;
+                    panel.style.display = '';
+                    return;
+                }
+                renderSinkDetail(item);
+                panel.style.display = '';
+            })
+            .catch(() => {
+                content.innerHTML = `<h3>${node.name}</h3><p>Could not load details</p>`;
+                panel.style.display = '';
+            });
+    }
+});
+
+function renderSourceDetail(s) {
+    const content = document.getElementById('detail-content');
+    const statusClass = s.online ? 'online' : 'offline';
+    const props = s.properties || {};
+    let html = `
+        <div class="detail-header">
+            <h3><span class="status-dot ${statusClass}"></span> ${esc(s.name)}</h3>
+            <a href="/sources" class="btn btn-sm">View All Sources</a>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${s.online ? 'connected' : 'disconnected'}">${s.online ? 'Online' : 'Offline'}</span></div>
+            <div class="detail-row"><span class="label">Address:</span> <span>${esc(s.host)}:${s.port}</span></div>
+            <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(s.id)}</span></div>`;
+    if (props.output) html += `<div class="detail-row"><span class="label">Output:</span> <span>${esc(props.output)}</span></div>`;
+    if (props.rate) html += `<div class="detail-row"><span class="label">Rate:</span> <span>${props.rate} Hz</span></div>`;
+    if (s.capabilities && s.capabilities.git_commit) {
+        html += `<div class="detail-row"><span class="label">Build:</span> <span>${esc(s.capabilities.git_commit.substring(0, 8))}`;
+        if (s.capabilities.build_date) html += ` (${esc(s.capabilities.build_date)})`;
+        html += `</span></div>`;
+    }
+    html += `</div>`;
+    if (s.controls && s.controls.length > 0) {
+        html += `<h4>Controls</h4><div class="detail-controls">`;
+        s.controls.forEach(ctrl => {
+            const val = s.control_values && s.control_values[ctrl.id] !== undefined ? s.control_values[ctrl.id] : ctrl.default;
+            html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
+        });
+        html += `</div>`;
+    }
+    content.innerHTML = html;
+}
+
+function renderSinkDetail(s) {
+    const content = document.getElementById('detail-content');
+    const statusClass = s.online ? 'online' : 'offline';
+    const props = s.properties || {};
+    let html = `
+        <div class="detail-header">
+            <h3><span class="status-dot ${statusClass}"></span> ${esc(s.name)}</h3>
+            <div class="btn-group">
+                <a href="/sinks" class="btn btn-sm">View All Sinks</a>
+                <a href="/paint/${encodeURIComponent(s.id)}" class="btn btn-sm btn-primary">Paint</a>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${s.online ? 'connected' : 'disconnected'}">${s.online ? 'Online' : 'Offline'}</span></div>
+            <div class="detail-row"><span class="label">Address:</span> <span>${esc(s.host)}:${s.port}</span></div>
+            <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(s.id)}</span></div>`;
+    if (props.dim) html += `<div class="detail-row"><span class="label">Dimensions:</span> <span>${esc(props.dim)} (${props.pixels || '?'} pixels)</span></div>`;
+    else if (props.pixels) html += `<div class="detail-row"><span class="label">Pixels:</span> <span>${props.pixels}</span></div>`;
+    if (props.type) html += `<div class="detail-row"><span class="label">Type:</span> <span>${esc(props.type)}</span></div>`;
+    if (props.rate) html += `<div class="detail-row"><span class="label">Max Rate:</span> <span>${props.rate} Hz</span></div>`;
+    if (s.capabilities && s.capabilities.git_commit) {
+        html += `<div class="detail-row"><span class="label">Build:</span> <span>${esc(s.capabilities.git_commit.substring(0, 8))}`;
+        if (s.capabilities.build_date) html += ` (${esc(s.capabilities.build_date)})`;
+        html += `</span></div>`;
+    }
+    html += `</div>`;
+    if (s.controls && s.controls.length > 0) {
+        html += `<h4>Controls</h4><div class="detail-controls">`;
+        s.controls.forEach(ctrl => {
+            const val = s.control_values && s.control_values[ctrl.id] !== undefined ? s.control_values[ctrl.id] : ctrl.default;
+            html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
+        });
+        html += `</div>`;
+    }
+    content.innerHTML = html;
+}
+
+function renderVSDetail(v) {
+    const content = document.getElementById('detail-content');
+    let html = `
+        <div class="detail-header">
+            <h3>VS: ${esc(v.name)}</h3>
+            <div class="btn-group">
+                <a href="/virtual-sources" class="btn btn-sm">View All VS</a>`;
+    if (v.is_running) {
+        html += `<button class="btn btn-sm btn-warning" onclick="vsAction('${v.id}', 'stop')">Stop</button>`;
+    } else {
+        html += `<button class="btn btn-sm btn-success" onclick="vsAction('${v.id}', 'start')">Start</button>`;
+    }
+    html += `</div></div>
+        <div class="detail-grid">
+            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${v.is_running ? 'connected' : 'disconnected'}">${v.is_running ? 'Running' : 'Stopped'}</span></div>
+            <div class="detail-row"><span class="label">Type:</span> <span>${esc(v.source_type)}</span></div>
+            <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(v.id)}</span></div>`;
+    if (v.dimensions) html += `<div class="detail-row"><span class="label">Dimensions:</span> <span>${v.dimensions.join('x')}</span></div>`;
+    html += `</div>`;
+    content.innerHTML = html;
+}
+
+// --- Cable click: show route editor ---
+graphCanvas.addEventListener('cable-selected', function(e) {
+    const cable = e.detail;
+    const panel = document.getElementById('detail-panel');
+    const content = document.getElementById('detail-content');
+
+    if (!cable) {
+        panel.style.display = 'none';
+        return;
+    }
+
+    // Fetch full route details
+    fetch(`/api/routes/${cable.id}`)
+        .then(r => r.json())
+        .then(route => {
+            renderRouteEditor(route);
+            panel.style.display = '';
+        })
+        .catch(() => {
+            content.innerHTML = `<h3>${esc(cable.name)}</h3><p>Could not load route details</p>`;
+            panel.style.display = '';
+        });
+});
+
+function renderRouteEditor(route) {
+    const content = document.getElementById('detail-content');
+    const t = route.transform || {};
+    const statusClass = route.status || 'disconnected';
+
+    let html = `
+        <div class="detail-header">
+            <h3>Route: ${esc(route.name)}</h3>
+            <div class="btn-group">`;
+    if (route.enabled) {
+        html += `<button class="btn btn-sm btn-warning" onclick="routeAction('${route.id}', 'disable')">Disable</button>`;
+    } else {
+        html += `<button class="btn btn-sm btn-success" onclick="routeAction('${route.id}', 'enable')">Enable</button>`;
+    }
+    html += `<button class="btn btn-sm btn-danger" onclick="routeDelete('${route.id}')">Delete</button>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${statusClass}">${statusClass}</span></div>
+            <div class="detail-row"><span class="label">Source:</span> <span>${esc(route.source_name || route.source_id)}</span></div>
+            <div class="detail-row"><span class="label">Sink:</span> <span>${esc(route.sink_name || route.sink_id)}</span></div>`;
+    if (route.source_dims && route.sink_dims) {
+        html += `<div class="detail-row"><span class="label">Dimensions:</span> <span>${route.source_dims.join('x')} &rarr; ${route.sink_dims.join('x')}</span></div>`;
+    }
+    if (route.frames_routed !== undefined && route.mode !== 'direct') {
+        html += `<div class="detail-row"><span class="label">Frames:</span> <span>${route.frames_routed}</span></div>`;
+    }
+    if (route.error_message) {
+        html += `<div class="detail-row"><span class="label">Error:</span> <span style="color:var(--error)">${esc(route.error_message)}</span></div>`;
+    }
+    html += `</div>
+
+        <h4>Settings</h4>
+        <form id="route-edit-form" class="route-edit-form" onsubmit="saveRouteEdit(event, '${route.id}')">
+            <div class="form-row">
+                <label for="re-name">Name</label>
+                <input type="text" id="re-name" value="${esc(route.name)}" required>
+            </div>
+            <div class="form-row">
+                <label for="re-mode">Mode</label>
+                <select id="re-mode">
+                    <option value="proxy" ${route.mode === 'proxy' ? 'selected' : ''}>Proxy</option>
+                    <option value="direct" ${route.mode === 'direct' ? 'selected' : ''}>Direct</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label for="re-scale">Scale</label>
+                <select id="re-scale">
+                    <option value="fit" ${t.scale_mode === 'fit' ? 'selected' : ''}>Fit</option>
+                    <option value="stretch" ${t.scale_mode === 'stretch' ? 'selected' : ''}>Stretch</option>
+                    <option value="pad_black" ${t.scale_mode === 'pad_black' ? 'selected' : ''}>Pad Black</option>
+                    <option value="pad_repeat" ${t.scale_mode === 'pad_repeat' ? 'selected' : ''}>Pad Repeat</option>
+                    <option value="truncate" ${t.scale_mode === 'truncate' ? 'selected' : ''}>Truncate</option>
+                    <option value="none" ${t.scale_mode === 'none' ? 'selected' : ''}>None</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label for="re-brightness">Brightness</label>
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                    <input type="range" id="re-brightness" min="0" max="1" step="0.05" value="${t.brightness !== undefined ? t.brightness : 1}" oninput="document.getElementById('re-bri-val').textContent=Math.round(this.value*100)+'%'">
+                    <span id="re-bri-val">${Math.round((t.brightness !== undefined ? t.brightness : 1) * 100)}%</span>
+                </div>
+            </div>
+            <div class="form-row">
+                <label for="re-gamma">Gamma</label>
+                <input type="number" id="re-gamma" min="0.1" max="5" step="0.1" value="${t.gamma !== undefined ? t.gamma : 1}" style="width:80px;">
+            </div>
+            <div class="form-row">
+                <label>Mirror</label>
+                <div style="display:flex;gap:1rem;">
+                    <label style="font-weight:normal;"><input type="checkbox" id="re-mirror-x" ${t.mirror_x ? 'checked' : ''}> X</label>
+                    <label style="font-weight:normal;"><input type="checkbox" id="re-mirror-y" ${t.mirror_y ? 'checked' : ''}> Y</label>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+            </div>
+        </form>`;
+
+    content.innerHTML = html;
+}
+
+async function saveRouteEdit(event, routeId) {
+    event.preventDefault();
+    const data = {
+        name: document.getElementById('re-name').value,
+        mode: document.getElementById('re-mode').value,
+        transform: {
+            scale_mode: document.getElementById('re-scale').value,
+            brightness: parseFloat(document.getElementById('re-brightness').value),
+            gamma: parseFloat(document.getElementById('re-gamma').value),
+            mirror_x: document.getElementById('re-mirror-x').checked,
+            mirror_y: document.getElementById('re-mirror-y').checked,
+        }
+    };
+    try {
+        const resp = await fetch(`/api/routes/${routeId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await resp.json();
+        if (result.id) {
+            showToast('Route updated', 'success');
+            // Refresh graph data
+            refreshGraphData();
+        } else {
+            showToast('Error: ' + (result.error || 'Unknown'), 'error');
+        }
+    } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+    }
+}
+
+async function routeAction(routeId, action) {
+    await fetch(`/api/routes/${routeId}/${action}`, { method: 'POST' });
+    showToast(`Route ${action}d`, 'success');
+    refreshGraphData();
+}
+
+async function routeDelete(routeId) {
+    if (!await confirmAction('Delete this route?')) return;
+    await fetch(`/api/routes/${routeId}`, { method: 'DELETE' });
+    showToast('Route deleted', 'success');
+    document.getElementById('detail-panel').style.display = 'none';
+    refreshGraphData();
+}
+
+async function vsAction(vsId, action) {
+    await fetch(`/api/virtual-sources/${vsId}/${action}`, { method: 'POST' });
+    showToast(`Virtual source ${action}ed`, 'success');
+    setTimeout(() => location.reload(), 500);
+}
+
+// --- Drag-to-create route ---
+graphCanvas.addEventListener('create-route', function(e) {
+    const { sourceId, sinkId } = e.detail;
+    const src = graphSources.find(s => s.id === sourceId);
+    const snk = graphSinks.find(s => s.id === sinkId);
+    const name = (src ? src.name : 'Source') + ' \u2192 ' + (snk ? snk.name : 'Sink');
+
+    fetch('/api/routes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, source_id: sourceId, sink_id: sinkId })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.id) {
+            showToast('Route created: ' + name, 'success');
+            refreshGraphData();
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown'), 'error');
+        }
+    })
+    .catch(() => showToast('Failed to create route', 'error'));
+});
+
+// --- Refresh graph data from API ---
+function refreshGraphData() {
+    fetch('/api/routes')
+        .then(r => r.json())
+        .then(routes => {
+            const updated = routes.map(r => ({
+                id: r.id, name: r.name, source_id: r.source_id,
+                sink_id: r.sink_id, enabled: r.enabled, status: r.status,
+                mode: r.mode, _raw: r
+            }));
+            LtpRouteGraph.updateRouteData(updated);
+
+            // Update perf table
+            const tbody = document.getElementById('route-perf-body');
+            if (tbody) {
+                routes.forEach(route => {
+                    const row = tbody.querySelector(`tr[data-route-id="${route.id}"]`);
+                    if (row) {
+                        const statusEl = row.querySelector('.status-badge');
+                        if (statusEl) { statusEl.textContent = route.status; statusEl.className = 'status-badge ' + route.status; }
+                        const framesEl = row.querySelector('.frames-col');
+                        if (framesEl && route.mode !== 'direct') framesEl.textContent = route.frames_routed;
+                        const modeEl = row.querySelector('.mode-col');
+                        if (modeEl) modeEl.textContent = route.mode;
+                    }
+                });
+            }
+
+            // Update stats
+            const active = routes.filter(r => r.enabled).length;
+            const routesStat = document.getElementById('routes-stat');
+            if (routesStat) routesStat.textContent = `${active} / ${routes.length}`;
+        });
+}
 
 function refreshDiscovery() {
     const btn = document.getElementById('refresh-btn');
@@ -133,227 +500,79 @@ function refreshDiscovery() {
     btn.disabled = true;
 
     fetch('/api/discovery/refresh', { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
+        .then(() => {
             btn.textContent = 'Refreshed!';
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.disabled = false;
-                window.location.reload();
-            }, 1000);
+            setTimeout(() => { btn.textContent = originalText; btn.disabled = false; location.reload(); }, 1000);
         })
-        .catch(err => {
-            console.error('Discovery refresh error:', err);
+        .catch(() => {
             btn.textContent = 'Error';
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.disabled = false;
-            }, 2000);
+            setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 2000);
         });
 }
 
-// Auto-refresh device status every 5 seconds
+// Auto-refresh status
 function updateStatus() {
-    fetch('/api/sources')
-        .then(r => r.json())
-        .then(sources => {
-            sources.forEach(source => {
-                const el = document.querySelector(`[data-source-id="${source.id}"]`);
-                if (el) {
-                    el.classList.toggle('online', source.online);
-                    el.classList.toggle('offline', !source.online);
-                }
-            });
-            const onlineSources = sources.filter(s => s.online).length;
-            const sourceStat = document.getElementById('sources-stat');
-            if (sourceStat) sourceStat.textContent = `${onlineSources} / ${sources.length}`;
-        });
+    // Update source/sink online state
+    fetch('/api/sources').then(r => r.json()).then(sources => {
+        const online = sources.filter(s => s.online).length;
+        const el = document.getElementById('sources-stat');
+        if (el) el.textContent = `${online} / ${sources.length}`;
+        // Update graph source online states
+        const updated = [];
+        sources.forEach(s => updated.push({ id: s.id, name: s.name, online: s.online, type: 'physical', _raw: s }));
+        rawVS.forEach(v => updated.push({ id: v.id, name: v.name, online: v.is_running, type: 'virtual', _raw: v }));
+        LtpRouteGraph.updateSourceData(updated);
+    }).catch(() => {});
 
-    fetch('/api/sinks')
-        .then(r => r.json())
-        .then(sinks => {
-            sinks.forEach(sink => {
-                const el = document.querySelector(`[data-sink-id="${sink.id}"]`);
-                if (el) {
-                    el.classList.toggle('online', sink.online);
-                    el.classList.toggle('offline', !sink.online);
-                }
-            });
-            const onlineSinks = sinks.filter(s => s.online).length;
-            const sinkStat = document.getElementById('sinks-stat');
-            if (sinkStat) sinkStat.textContent = `${onlineSinks} / ${sinks.length}`;
-        });
+    fetch('/api/sinks').then(r => r.json()).then(sinks => {
+        const online = sinks.filter(s => s.online).length;
+        const el = document.getElementById('sinks-stat');
+        if (el) el.textContent = `${online} / ${sinks.length}`;
+        LtpRouteGraph.updateSinkData(sinks.map(s => ({ id: s.id, name: s.name, online: s.online, _raw: s })));
+    }).catch(() => {});
 
-    // Update route performance
-    fetch('/api/routes')
-        .then(r => r.json())
-        .then(routes => {
-            routes.forEach(route => {
-                const row = document.querySelector(`#route-perf-body tr[data-route-id="${route.id}"]`);
-                if (row) {
-                    const statusEl = row.querySelector('.status-badge');
-                    if (statusEl) {
-                        statusEl.textContent = route.status;
-                        statusEl.className = 'status-badge ' + route.status;
-                    }
-                    const framesEl = row.querySelector('.frames-col');
-                    if (framesEl && route.mode !== 'direct') {
-                        framesEl.textContent = route.frames_routed;
-                    }
-                }
-            });
-            // Update routes stat
-            const activeRoutes = routes.filter(r => r.enabled).length;
-            const routesStat = document.getElementById('routes-stat');
-            if (routesStat) routesStat.textContent = `${activeRoutes} / ${routes.length}`;
-        });
+    refreshGraphData();
 }
 
 setInterval(updateStatus, 5000);
 
 // Quick actions
 async function bulkRoutes(action) {
-    const routeIds = diagramRoutes.map(r => r.id);
-    if (routeIds.length === 0) {
-        showToast('No routes to ' + action, 'warning');
-        return;
-    }
+    const ids = rawRoutes.map(r => r.id);
+    if (ids.length === 0) { showToast('No routes to ' + action, 'warning'); return; }
     try {
         const resp = await fetch('/api/routes/bulk-action', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: action, ids: routeIds })
+            body: JSON.stringify({ action: action, ids: ids })
         });
         const data = await resp.json();
         if (data.status === 'ok') {
             showToast(`All routes ${action}d`, 'success');
-            setTimeout(() => location.reload(), 500);
-        } else {
-            showToast('Error: ' + (data.error || 'Unknown'), 'error');
+            refreshGraphData();
         }
-    } catch (err) {
-        showToast('Error: ' + err.message, 'error');
-    }
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 async function bulkVS(action) {
-    const vsIds = diagramVS.map(v => v.id);
-    if (vsIds.length === 0) {
-        showToast('No virtual sources to ' + action, 'warning');
-        return;
-    }
+    const ids = rawVS.map(v => v.id);
+    if (ids.length === 0) { showToast('No virtual sources to ' + action, 'warning'); return; }
     let errors = 0;
-    for (const id of vsIds) {
-        try {
-            await fetch(`/api/virtual-sources/${id}/${action}`, { method: 'POST' });
-        } catch (e) {
-            errors++;
-        }
+    for (const id of ids) {
+        try { await fetch(`/api/virtual-sources/${id}/${action}`, { method: 'POST' }); }
+        catch (e) { errors++; }
     }
-    if (errors === 0) {
-        showToast(`All virtual sources ${action}ed`, 'success');
-    } else {
-        showToast(`${errors} error(s) during ${action}`, 'warning');
-    }
+    showToast(errors === 0 ? `All virtual sources ${action}ed` : `${errors} error(s)`, errors === 0 ? 'success' : 'warning');
     setTimeout(() => location.reload(), 500);
 }
 
-// System diagram
-function renderDiagram() {
-    const svg = document.getElementById('diagram-svg');
-    if (!svg) return;
-
-    // Collect unique sources and sinks from routes
-    const routeSourceIds = new Set(diagramRoutes.map(r => r.source_id));
-    const routeSinkIds = new Set(diagramRoutes.map(r => r.sink_id));
-
-    // Build source entries (physical + virtual that are in routes)
-    const sourceEntries = [];
-    diagramSources.forEach(s => {
-        if (routeSourceIds.has(s.id)) {
-            sourceEntries.push({ id: s.id, name: s.name, online: s.online, type: 'physical' });
-        }
-    });
-    diagramVS.forEach(v => {
-        if (routeSourceIds.has(v.id)) {
-            sourceEntries.push({ id: v.id, name: v.name, online: v.is_running, type: 'virtual' });
-        }
-    });
-
-    // Build sink entries
-    const sinkEntries = [];
-    diagramSinks.forEach(s => {
-        if (routeSinkIds.has(s.id)) {
-            sinkEntries.push({ id: s.id, name: s.name, online: s.online });
-        }
-    });
-
-    if (sourceEntries.length === 0 && sinkEntries.length === 0) {
-        svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#a0a0a0" font-size="14">No active routes to display</text>';
-        return;
-    }
-
-    const maxItems = Math.max(sourceEntries.length, sinkEntries.length, 1);
-    const rowH = 40;
-    const svgH = maxItems * rowH + 40;
-    svg.setAttribute('height', svgH);
-
-    const svgW = svg.getBoundingClientRect().width || 600;
-    const srcX = 10;
-    const srcW = 140;
-    const sinkX = svgW - 150;
-    const sinkW = 140;
-
-    let html = '';
-
-    // Draw source boxes
-    sourceEntries.forEach((s, i) => {
-        const y = 20 + i * rowH;
-        const color = s.online ? 'var(--success)' : 'var(--text-secondary)';
-        const badge = s.type === 'virtual' ? ' (VS)' : '';
-        html += `<rect x="${srcX}" y="${y}" width="${srcW}" height="28" rx="4" fill="var(--bg-card)" stroke="${color}" stroke-width="1.5"/>`;
-        html += `<circle cx="${srcX + 10}" cy="${y + 14}" r="4" fill="${color}"/>`;
-        html += `<text x="${srcX + 20}" y="${y + 18}" fill="var(--text-primary)" font-size="11" class="diagram-label">${truncate(s.name, 14)}${badge}</text>`;
-    });
-
-    // Draw sink boxes
-    sinkEntries.forEach((s, i) => {
-        const y = 20 + i * rowH;
-        const color = s.online ? 'var(--success)' : 'var(--text-secondary)';
-        html += `<rect x="${sinkX}" y="${y}" width="${sinkW}" height="28" rx="4" fill="var(--bg-card)" stroke="${color}" stroke-width="1.5"/>`;
-        html += `<circle cx="${sinkX + sinkW - 10}" cy="${y + 14}" r="4" fill="${color}"/>`;
-        html += `<text x="${sinkX + 10}" y="${y + 18}" fill="var(--text-primary)" font-size="11" class="diagram-label">${truncate(s.name, 14)}</text>`;
-    });
-
-    // Draw route cables
-    diagramRoutes.forEach(route => {
-        const srcIdx = sourceEntries.findIndex(s => s.id === route.source_id);
-        const sinkIdx = sinkEntries.findIndex(s => s.id === route.sink_id);
-        if (srcIdx < 0 || sinkIdx < 0) return;
-
-        const srcY = 20 + srcIdx * rowH + 14;
-        const sinkY = 20 + sinkIdx * rowH + 14;
-        const x1 = srcX + srcW;
-        const x2 = sinkX;
-        const cp = (x2 - x1) * 0.4;
-
-        const color = !route.enabled ? '#666' :
-                      route.status === 'connected' ? 'var(--success)' :
-                      route.status === 'error' ? 'var(--error)' : 'var(--warning)';
-
-        html += `<path d="M${x1},${srcY} C${x1 + cp},${srcY} ${x2 - cp},${sinkY} ${x2},${sinkY}" fill="none" stroke="${color}" stroke-width="2" stroke-dasharray="${route.enabled ? '' : '5,5'}"/>`;
-    });
-
-    svg.innerHTML = html;
+// HTML escaping
+function esc(str) {
+    if (!str) return '';
+    const d = document.createElement('div');
+    d.textContent = String(str);
+    return d.innerHTML;
 }
-
-function truncate(str, maxLen) {
-    return str.length > maxLen ? str.substring(0, maxLen - 1) + '…' : str;
-}
-
-// Render diagram on load and resize
-renderDiagram();
-window.addEventListener('resize', renderDiagram);
 </script>
 
 <style>
@@ -378,23 +597,91 @@ window.addEventListener('resize', renderDiagram);
     gap: 0.75rem;
     flex-wrap: wrap;
 }
-.system-diagram {
-    min-height: 100px;
-    overflow-x: auto;
-}
-.system-diagram svg {
-    min-width: 400px;
-}
-.diagram-label {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+.graph-hint {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin: 0 0 0.5rem 0;
 }
 .table-compact th,
 .table-compact td {
     padding: 0.5rem 0.75rem;
 }
-.frames-col {
+.frames-col, .mode-col {
     font-family: monospace;
     font-size: 0.9rem;
+}
+
+/* Detail panel */
+.detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+.detail-header h3 {
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 0.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+}
+.detail-grid .detail-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.2rem 0;
+}
+.detail-grid .label {
+    color: var(--text-secondary);
+    min-width: 90px;
+}
+.detail-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.25rem 1.5rem;
+    margin-bottom: 0.5rem;
+}
+.detail-controls .detail-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.15rem 0;
+    font-size: 0.9rem;
+}
+.detail-controls .label {
+    color: var(--text-secondary);
+}
+
+/* Route edit form */
+.route-edit-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 0.5rem 1.5rem;
+}
+.route-edit-form .form-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.route-edit-form .form-row label {
+    min-width: 80px;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+.route-edit-form .form-row input[type="text"],
+.route-edit-form .form-row input[type="number"],
+.route-edit-form .form-row select {
+    flex: 1;
+    min-width: 0;
+}
+.route-edit-form .form-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 0.25rem;
 }
 </style>
 {% endblock %}
