@@ -882,6 +882,13 @@ class RoutingEngine:
 
         await self._cleanup_route(route)
 
+    def _sink_has_other_active_routes(self, route: Route) -> bool:
+        """Check if another active route uses the same sink."""
+        for other in self._routes.values():
+            if other.id != route.id and other.sink_id == route.sink_id and other.status == RouteStatus.CONNECTED:
+                return True
+        return False
+
     async def _cleanup_route(self, route: Route) -> None:
         """Clean up route resources."""
         logger.info(f"Cleaning up route {route.name}: sink_client={route._sink_client is not None}, "
@@ -897,8 +904,12 @@ class RoutingEngine:
             await route._sender.stop()
             route._sender = None
 
-        # Stop stream on sink (via pool or direct client)
-        if route._sink_stream_id:
+        # Stop stream on sink — skip if another active route uses the same sink
+        skip_sink_stop = self._sink_has_other_active_routes(route)
+        if skip_sink_stop:
+            logger.info(f"Skipping sink STOP for route {route.name}: another route shares the sink")
+
+        if route._sink_stream_id and not skip_sink_stop:
             try:
                 logger.info(f"Sending STOP command for stream {route._sink_stream_id} to sink")
                 stop_req = stream_control(0, route._sink_stream_id, StreamAction.STOP)
