@@ -420,10 +420,10 @@ function initGraph() {
 
     // Build source/sink data for graph
     const graphSources = [];
-    const allSources = {{ sources | tojson | safe }};
-    const allVS = {{ virtual_sources | tojson | safe }};
-    const allSinks = {{ sinks | tojson | safe }};
-    const allRoutes = {{ routes | tojson | safe }};
+    const allSources = {{ sources_json | tojson | safe }};
+    const allVS = {{ vs_json | tojson | safe }};
+    const allSinks = {{ sinks_json | tojson | safe }};
+    const allRoutes = {{ routes_json | tojson | safe }};
 
     allSources.forEach(s => {
         graphSources.push({ id: s.id, name: s.name, online: s.online, type: 'physical' });

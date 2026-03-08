@@ -121,10 +121,10 @@
 
 <script>
 // Route and source data for diagram
-const diagramRoutes = {{ routes | tojson | safe }};
-const diagramSources = {{ sources | tojson | safe }};
-const diagramSinks = {{ sinks | tojson | safe }};
-const diagramVS = {{ virtual_sources | tojson | safe }};
+const diagramRoutes = {{ routes_json | tojson | safe }};
+const diagramSources = {{ sources_json | tojson | safe }};
+const diagramSinks = {{ sinks_json | tojson | safe }};
+const diagramVS = {{ vs_json | tojson | safe }};
 
 function refreshDiscovery() {
     const btn = document.getElementById('refresh-btn');
