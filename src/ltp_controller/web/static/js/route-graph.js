@@ -8,8 +8,10 @@ window.LtpRouteGraph = (function() {
     let selectedNode = null;
     let dragTarget = null;
     let dragOffset = { x: 0, y: 0 };
+    let dragStartPos = { x: 0, y: 0 };
     let dragMoved = false;
     let pendingCable = null;  // For drag-to-connect
+    const DRAG_THRESHOLD = 5;  // Pixels of movement before a click becomes a drag
     let storageKey = 'ltp-route-graph-positions';
 
     const NODE_W = 160;
@@ -337,6 +339,7 @@ window.LtpRouteGraph = (function() {
         if (node) {
             dragTarget = node;
             dragMoved = false;
+            dragStartPos = { x: x, y: y };
             const pos = nodePositions[node.id];
             dragOffset = { x: x - pos.x, y: y - pos.y };
             selectedCable = null;
@@ -363,6 +366,12 @@ window.LtpRouteGraph = (function() {
         }
 
         if (dragTarget) {
+            const dx = x - dragStartPos.x;
+            const dy = y - dragStartPos.y;
+            if (!dragMoved && (dx * dx + dy * dy) < DRAG_THRESHOLD * DRAG_THRESHOLD) {
+                // Haven't moved past threshold yet - don't start dragging
+                return;
+            }
             dragMoved = true;
             nodePositions[dragTarget.id] = {
                 x: x - dragOffset.x,
