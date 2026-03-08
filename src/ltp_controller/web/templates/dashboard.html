@@ -63,10 +63,9 @@
 <div id="graph-ctx-menu" class="ctx-menu" style="display:none;"></div>
 
 <!-- Route Performance -->
-<section class="panel">
+<section class="panel" id="route-perf-section">
     <h2>Route Performance</h2>
-    {% if routes %}
-    <table class="table table-compact">
+    <table class="table table-compact" id="route-perf-table" {% if not routes %}style="display:none;"{% endif %}>
         <thead>
             <tr>
                 <th>Route</th>
@@ -86,9 +85,7 @@
             {% endfor %}
         </tbody>
     </table>
-    {% else %}
-    <p class="empty-state">No routes configured. Drag from a source port to a sink port in the graph above to create one.</p>
-    {% endif %}
+    <p class="empty-state" id="route-perf-empty" {% if routes %}style="display:none;"{% endif %}>No routes configured. Drag from a source port to a sink port in the graph above to create one.</p>
 </section>
 {% endblock %}
 
@@ -652,6 +649,8 @@ function refreshGraphData() {
 
             // Rebuild perf table so new/deleted routes appear
             const tbody = document.getElementById('route-perf-body');
+            const perfTable = document.getElementById('route-perf-table');
+            const perfEmpty = document.getElementById('route-perf-empty');
             if (tbody) {
                 tbody.innerHTML = routes.map(route => {
                     const framesCell = route.mode === 'direct' ? '<em>N/A</em>' : (route.frames_routed || 0);
@@ -663,6 +662,8 @@ function refreshGraphData() {
                     </tr>`;
                 }).join('');
             }
+            if (perfTable) perfTable.style.display = routes.length ? '' : 'none';
+            if (perfEmpty) perfEmpty.style.display = routes.length ? 'none' : '';
 
             // Update stats
             const active = routes.filter(r => r.enabled).length;
