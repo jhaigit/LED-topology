@@ -259,22 +259,26 @@ function renderSinkDetail(s) {
 
 function renderVSDetail(v) {
     const content = document.getElementById('detail-content');
+    const running = v.running || v.is_running;
     let html = `
         <div class="detail-header">
             <h3>VS: ${esc(v.name)}</h3>
             <div class="btn-group">
                 <a href="/virtual-sources" class="btn btn-sm">View All VS</a>`;
-    if (v.is_running) {
+    if (running) {
         html += `<button class="btn btn-sm btn-warning" onclick="vsAction('${v.id}', 'stop')">Stop</button>`;
     } else {
         html += `<button class="btn btn-sm btn-success" onclick="vsAction('${v.id}', 'start')">Start</button>`;
     }
     html += `</div></div>
         <div class="detail-grid">
-            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${v.is_running ? 'connected' : 'disconnected'}">${v.is_running ? 'Running' : 'Stopped'}</span></div>
-            <div class="detail-row"><span class="label">Type:</span> <span>${esc(v.source_type)}</span></div>
+            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${running ? 'connected' : 'disconnected'}">${running ? 'Running' : 'Stopped'}</span></div>
+            <div class="detail-row"><span class="label">Type:</span> <span>${esc(v.type || v.source_type)}</span></div>
             <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(v.id)}</span></div>`;
-    if (v.dimensions) html += `<div class="detail-row"><span class="label">Dimensions:</span> <span>${v.dimensions.join('x')}</span></div>`;
+    const dims = v.output_dimensions || v.dimensions;
+    if (dims) html += `<div class="detail-row"><span class="label">Dimensions:</span> <span>${dims.join('x')}</span></div>`;
+    if (v.frame_rate) html += `<div class="detail-row"><span class="label">Frame Rate:</span> <span>${v.frame_rate} Hz</span></div>`;
+    if (v.frame_count) html += `<div class="detail-row"><span class="label">Frames:</span> <span>${v.frame_count}</span></div>`;
     html += `</div>`;
     content.innerHTML = html;
 }
