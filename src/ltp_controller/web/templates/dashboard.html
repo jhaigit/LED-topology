@@ -210,11 +210,15 @@ function renderSourceDetail(s) {
     }
     html += `</div>`;
     if (s.controls && s.controls.length > 0) {
-        html += `<h4>Controls</h4><div class="detail-controls">`;
+        html += `<h4>Controls <button class="btn btn-sm btn-secondary" onclick="toggleFullControls('source', '${s.id}')">Edit Controls</button></h4>`;
+        html += `<div class="detail-controls" id="controls-summary-${s.id}">`;
         s.controls.forEach(ctrl => {
             const val = s.control_values && s.control_values[ctrl.id] !== undefined ? s.control_values[ctrl.id] : ctrl.default;
             html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
         });
+        html += `</div>`;
+        html += `<div class="detail-controls-full" id="controls-full-${s.id}" style="display:none;">`;
+        html += renderInteractiveControls(s.controls, s.control_values || {}, 'source', s.id);
         html += `</div>`;
     }
     content.innerHTML = html;
@@ -247,11 +251,15 @@ function renderSinkDetail(s) {
     }
     html += `</div>`;
     if (s.controls && s.controls.length > 0) {
-        html += `<h4>Controls</h4><div class="detail-controls">`;
+        html += `<h4>Controls <button class="btn btn-sm btn-secondary" onclick="toggleFullControls('sink', '${s.id}')">Edit Controls</button></h4>`;
+        html += `<div class="detail-controls" id="controls-summary-${s.id}">`;
         s.controls.forEach(ctrl => {
             const val = s.control_values && s.control_values[ctrl.id] !== undefined ? s.control_values[ctrl.id] : ctrl.default;
             html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
         });
+        html += `</div>`;
+        html += `<div class="detail-controls-full" id="controls-full-${s.id}" style="display:none;">`;
+        html += renderInteractiveControls(s.controls, s.control_values || {}, 'sink', s.id);
         html += `</div>`;
     }
     content.innerHTML = html;
@@ -317,6 +325,27 @@ function renderVSDetail(v) {
                 <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
             </div>
         </form>`;
+    // VS controls
+    const vsControls = v.controls || [];
+    if (vsControls.length > 0) {
+        const vsCtrlValues = v.control_values || {};
+        // Fall back to control definition value for any missing entries
+        vsControls.forEach(ctrl => {
+            if (vsCtrlValues[ctrl.id] === undefined) {
+                vsCtrlValues[ctrl.id] = ctrl.value !== undefined ? ctrl.value : ctrl.default;
+            }
+        });
+        html += `<h4>Controls <button class="btn btn-sm btn-secondary" onclick="toggleFullControls('virtual-source', '${v.id}')">Edit Controls</button></h4>`;
+        html += `<div class="detail-controls" id="controls-summary-${v.id}">`;
+        vsControls.forEach(ctrl => {
+            const val = vsCtrlValues[ctrl.id];
+            html += `<div class="detail-row"><span class="label">${esc(ctrl.name)}:</span> <span>${val}</span></div>`;
+        });
+        html += `</div>`;
+        html += `<div class="detail-controls-full" id="controls-full-${v.id}" style="display:none;">`;
+        html += renderInteractiveControls(vsControls, vsCtrlValues, 'virtual-source', v.id);
+        html += `</div>`;
+    }
     content.innerHTML = html;
     // Store whether this VS is 2D for the save handler
     content.dataset.vs2d = is2D ? '1' : '';
@@ -358,6 +387,107 @@ async function saveVSEdit(event, vsId) {
     } catch (err) {
         showToast('Error: ' + err.message, 'error');
     }
+}
+
+// --- Interactive controls ---
+function renderInteractiveControls(controls, values, deviceType, deviceId) {
+    let html = '';
+    controls.forEach(ctrl => {
+        const val = values[ctrl.id] !== undefined ? values[ctrl.id] : ctrl.default;
+        const ctrlIdAttr = `ctrl-${deviceId}-${ctrl.id}`;
+        html += `<div class="control-row">`;
+        html += `<label class="control-label" ${ctrl.description ? `title="${esc(ctrl.description)}"` : ''}>${esc(ctrl.name)}</label>`;
+
+        if (ctrl.type === 'action') {
+            html += `<button class="btn btn-sm btn-action" onclick="triggerDeviceAction('${deviceType}', '${deviceId}', '${ctrl.id}', this)">${esc(ctrl.name)}</button>`;
+        } else if (ctrl.type === 'boolean') {
+            html += `<input type="checkbox" ${val ? 'checked' : ''} onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', this.checked)">`;
+        } else if (ctrl.type === 'number') {
+            const isInt = ctrl.step !== undefined && ctrl.step >= 1;
+            const minAttr = ctrl.min !== undefined && ctrl.min !== null ? `min="${ctrl.min}"` : '';
+            const maxAttr = ctrl.max !== undefined && ctrl.max !== null ? `max="${ctrl.max}"` : '';
+            const stepAttr = ctrl.step !== undefined ? `step="${ctrl.step}"` : '';
+            // Use range slider if min/max are defined (VS-style), otherwise numeric input
+            if (ctrl.min !== undefined && ctrl.max !== undefined && ctrl.min !== null && ctrl.max !== null) {
+                const displayVal = isInt ? parseInt(val) : val;
+                html += `<input type="range" ${minAttr} ${maxAttr} ${stepAttr} value="${displayVal}" id="${ctrlIdAttr}" oninput="document.getElementById('${ctrlIdAttr}-val').textContent=this.value" onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', ${isInt ? 'parseInt(this.value)' : 'parseFloat(this.value)'})">`;
+                html += `<span class="control-value-label" id="${ctrlIdAttr}-val">${displayVal}</span>`;
+            } else {
+                html += `<input type="number" ${minAttr} ${maxAttr} ${stepAttr} value="${isInt ? parseInt(val) : val}" style="width:90px;" onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', ${isInt ? 'parseInt(this.value)' : 'parseFloat(this.value)'})">`;
+            }
+        } else if (ctrl.type === 'enum' && ctrl.options) {
+            html += `<select onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', this.value)">`;
+            ctrl.options.forEach(opt => {
+                const optVal = typeof opt === 'object' ? opt.value : opt;
+                const optLabel = typeof opt === 'object' ? opt.label : opt;
+                html += `<option value="${esc(optVal)}" ${String(val) === String(optVal) ? 'selected' : ''}>${esc(optLabel)}</option>`;
+            });
+            html += `</select>`;
+        } else if (ctrl.type === 'color') {
+            html += `<input type="color" value="${esc(val || '#000000')}" onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', this.value)">`;
+        } else if (ctrl.type === 'string') {
+            html += `<input type="text" value="${esc(val || '')}" placeholder="${esc(ctrl.description || '')}" onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', this.value)">`;
+        } else {
+            html += `<span>${val}</span>`;
+        }
+        html += `</div>`;
+    });
+    return html;
+}
+
+function toggleFullControls(deviceType, deviceId) {
+    const summary = document.getElementById('controls-summary-' + deviceId);
+    const full = document.getElementById('controls-full-' + deviceId);
+    if (!summary || !full) return;
+    if (full.style.display === 'none') {
+        summary.style.display = 'none';
+        full.style.display = '';
+    } else {
+        summary.style.display = '';
+        full.style.display = 'none';
+    }
+}
+
+function setDeviceControl(deviceType, deviceId, controlId, value) {
+    // Map device type to API path
+    const apiPath = deviceType === 'virtual-source' ? 'virtual-sources' : deviceType + 's';
+    const values = {};
+    values[controlId] = value;
+    fetch(`/api/${apiPath}/${deviceId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status !== 'ok') {
+            showToast('Error setting control: ' + JSON.stringify(data.results || data.error), 'error');
+        }
+    })
+    .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function triggerDeviceAction(deviceType, deviceId, controlId, btn) {
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+    const apiPath = deviceType === 'virtual-source' ? 'virtual-sources' : deviceType + 's';
+    const values = {};
+    values[controlId] = 1;
+    fetch(`/api/${apiPath}/${deviceId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.textContent = data.status === 'ok' ? 'Done!' : 'Error';
+        setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1000);
+    })
+    .catch(() => {
+        btn.textContent = 'Error';
+        setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 2000);
+    });
 }
 
 // --- Cable click: show route editor ---
@@ -946,6 +1076,50 @@ function esc(str) {
 .ctx-danger:hover {
     background: var(--error, #f44336);
     color: #fff;
+}
+
+/* Full controls panel */
+.detail-controls-full {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.5rem 1.5rem;
+    margin-bottom: 0.5rem;
+}
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+    font-size: 0.9rem;
+}
+.control-label {
+    color: var(--text-secondary);
+    min-width: 100px;
+    flex-shrink: 0;
+}
+.control-row input[type="range"] {
+    flex: 1;
+    min-width: 80px;
+}
+.control-row input[type="number"],
+.control-row input[type="text"],
+.control-row select {
+    flex: 1;
+    min-width: 0;
+}
+.control-value-label {
+    min-width: 40px;
+    text-align: right;
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+.control-row .btn-action {
+    flex-shrink: 0;
+}
+h4 .btn {
+    margin-left: 0.5rem;
+    vertical-align: middle;
+    font-size: 0.75rem;
 }
 </style>
 {% endblock %}
