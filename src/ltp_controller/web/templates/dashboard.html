@@ -59,6 +59,9 @@
     <div id="detail-content"></div>
 </section>
 
+<!-- Context menu (positioned absolutely) -->
+<div id="graph-ctx-menu" class="ctx-menu" style="display:none;"></div>
+
 <!-- Route Performance -->
 <section class="panel">
     <h2>Route Performance</h2>
@@ -566,6 +569,140 @@ async function bulkVS(action) {
     setTimeout(() => location.reload(), 500);
 }
 
+// --- Context menu ---
+let vsTypesCache = null;
+const ctxMenu = document.getElementById('graph-ctx-menu');
+
+function hideCtxMenu() {
+    ctxMenu.style.display = 'none';
+}
+
+document.addEventListener('click', hideCtxMenu);
+document.addEventListener('contextmenu', function(e) {
+    if (!ctxMenu.contains(e.target)) hideCtxMenu();
+});
+
+function showCtxMenu(x, y, html) {
+    ctxMenu.innerHTML = html;
+    ctxMenu.style.display = 'block';
+    ctxMenu.style.left = x + 'px';
+    ctxMenu.style.top = y + 'px';
+    // Keep menu on screen
+    const rect = ctxMenu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) ctxMenu.style.left = (x - rect.width) + 'px';
+    if (rect.bottom > window.innerHeight) ctxMenu.style.top = (y - rect.height) + 'px';
+}
+
+async function getVSTypes() {
+    if (vsTypesCache) return vsTypesCache;
+    try {
+        const resp = await fetch('/api/virtual-sources/types');
+        vsTypesCache = await resp.json();
+    } catch (e) {
+        vsTypesCache = [];
+    }
+    return vsTypesCache;
+}
+
+// Right-click on empty canvas space
+graphCanvas.addEventListener('canvas-context', async function(e) {
+    const { x, y } = e.detail;
+    const types = await getVSTypes();
+
+    // Group by category
+    const groups = {};
+    types.forEach(t => {
+        const cat = t.category || 'other';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(t);
+    });
+
+    const catLabels = {
+        pattern: 'Patterns',
+        matrix_pattern: 'Matrix Patterns',
+        visualizer: 'Visualizers',
+        monitor: 'Monitors',
+        other: 'Other'
+    };
+
+    let html = '<div class="ctx-title">Create Virtual Source</div>';
+    for (const [cat, items] of Object.entries(groups)) {
+        html += `<div class="ctx-group">${esc(catLabels[cat] || cat)}</div>`;
+        items.forEach(t => {
+            html += `<div class="ctx-item" onclick="createVSFromMenu('${esc(t.type)}')">${esc(t.name)}</div>`;
+        });
+    }
+
+    showCtxMenu(x, y, html);
+});
+
+// Right-click on a node
+graphCanvas.addEventListener('node-context', async function(e) {
+    const { node, x, y } = e.detail;
+    const isSource = graphSources.some(s => s.id === node.id);
+    const isSink = graphSinks.some(s => s.id === node.id);
+    const isVS = graphSources.some(s => s.id === node.id && s.type === 'virtual');
+
+    let html = `<div class="ctx-title">${esc(node.name)}</div>`;
+
+    if (isVS) {
+        const vs = graphSources.find(s => s.id === node.id);
+        if (vs && vs._raw && vs._raw.is_running) {
+            html += `<div class="ctx-item" onclick="hideCtxMenu();vsAction('${node.id}','stop')">Stop</div>`;
+        } else {
+            html += `<div class="ctx-item" onclick="hideCtxMenu();vsAction('${node.id}','start')">Start</div>`;
+        }
+        html += `<div class="ctx-item ctx-danger" onclick="hideCtxMenu();deleteVS('${node.id}')">Delete</div>`;
+    }
+    if (isSource) {
+        html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='${isVS ? '/virtual-sources' : '/sources'}'">View Details</div>`;
+    }
+    if (isSink) {
+        html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/paint/${encodeURIComponent(node.id)}'">Paint</div>`;
+        html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/sinks'">View Details</div>`;
+    }
+
+    showCtxMenu(x, y, html);
+});
+
+async function createVSFromMenu(typeName) {
+    hideCtxMenu();
+    const matrixTypes = ['grid','corners','sweep','checkerboard','pixel_index','coordinates','test_card','text','counter','clock'];
+    const is2D = matrixTypes.includes(typeName);
+    const dims = is2D ? [16, 16] : [60];
+    const displayName = typeName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+    try {
+        const resp = await fetch('/api/virtual-sources', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: displayName,
+                type: typeName,
+                output_dimensions: dims,
+                frame_rate: 30,
+                enabled: true
+            })
+        });
+        const data = await resp.json();
+        if (data.id) {
+            showToast('Created: ' + displayName, 'success');
+            setTimeout(() => location.reload(), 500);
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown'), 'error');
+        }
+    } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+    }
+}
+
+async function deleteVS(vsId) {
+    if (!await confirmAction('Delete this virtual source?')) return;
+    await fetch(`/api/virtual-sources/${vsId}`, { method: 'DELETE' });
+    showToast('Virtual source deleted', 'success');
+    setTimeout(() => location.reload(), 500);
+}
+
 // HTML escaping
 function esc(str) {
     if (!str) return '';
@@ -682,6 +819,52 @@ function esc(str) {
     display: flex;
     justify-content: flex-end;
     padding-top: 0.25rem;
+}
+
+/* Context menu */
+.ctx-menu {
+    position: fixed;
+    z-index: 1000;
+    background: var(--bg-secondary, #16213e);
+    border: 1px solid var(--border, #333);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    min-width: 180px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+.ctx-title {
+    padding: 6px 12px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border, #333);
+}
+.ctx-group {
+    padding: 4px 12px 2px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 4px;
+}
+.ctx-item {
+    padding: 5px 12px 5px 20px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+.ctx-item:hover {
+    background: var(--accent, #e94560);
+    color: #fff;
+}
+.ctx-danger {
+    color: var(--error, #f44336);
+}
+.ctx-danger:hover {
+    background: var(--error, #f44336);
+    color: #fff;
 }
 </style>
 {% endblock %}

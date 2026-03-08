@@ -438,7 +438,19 @@ window.LtpRouteGraph = (function() {
             canvas.dispatchEvent(new CustomEvent('cable-context', {
                 detail: { route: cable, x: e.clientX, y: e.clientY }
             }));
+            return;
         }
+        const node = getNodeAt(x, y);
+        if (node) {
+            canvas.dispatchEvent(new CustomEvent('node-context', {
+                detail: { node: node, x: e.clientX, y: e.clientY, canvasX: x, canvasY: y }
+            }));
+            return;
+        }
+        // Right-click on empty space
+        canvas.dispatchEvent(new CustomEvent('canvas-context', {
+            detail: { x: e.clientX, y: e.clientY, canvasX: x, canvasY: y }
+        }));
     }
 
     function updateRouteData(newRoutes) {
