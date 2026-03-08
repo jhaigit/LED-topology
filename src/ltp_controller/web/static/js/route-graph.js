@@ -441,6 +441,7 @@ window.LtpRouteGraph = (function() {
 
     function onContextMenu(e) {
         e.preventDefault();
+        e.stopPropagation();
         const { x, y } = getMousePos(e);
         const cable = getCableAt(x, y);
         if (cable) {

@@ -753,9 +753,8 @@ function hideCtxMenu() {
     ctxMenu.style.display = 'none';
 }
 
-document.addEventListener('click', hideCtxMenu);
-document.addEventListener('contextmenu', function(e) {
-    if (!ctxMenu.contains(e.target)) hideCtxMenu();
+document.addEventListener('click', function(e) {
+    if (ctxMenu.style.display !== 'none' && !ctxMenu.contains(e.target)) hideCtxMenu();
 });
 
 function showCtxMenu(x, y, html) {
