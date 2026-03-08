@@ -20,6 +20,9 @@ window.LtpRouteGraph = (function() {
         sinks = sinkData;
         routes = routeData;
 
+        // Size the canvas first so autoLayout has correct dimensions
+        resizeCanvas();
+
         // Load saved positions or auto-layout
         const saved = localStorage.getItem('ltp-route-graph-positions');
         if (saved) {
@@ -33,7 +36,6 @@ window.LtpRouteGraph = (function() {
         canvas.addEventListener('dblclick', onDblClick);
         canvas.addEventListener('contextmenu', onContextMenu);
 
-        resizeCanvas();
         window.addEventListener('resize', resizeCanvas);
         draw();
     }

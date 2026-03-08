@@ -447,12 +447,28 @@ function initGraph() {
 
     LtpRouteGraph.init(graphCanvas, graphSources, graphSinks, graphRoutes);
 
-    // Handle create-route event from graph
+    // Handle create-route event from graph - auto-create with default name
     graphCanvas.addEventListener('create-route', function(e) {
         const { sourceId, sinkId } = e.detail;
-        document.getElementById('source_id').value = sourceId;
-        document.getElementById('sink_id').value = sinkId;
-        showCreateModal();
+        const src = graphSources.find(s => s.id === sourceId);
+        const snk = graphSinks.find(s => s.id === sinkId);
+        const name = (src ? src.name : 'Source') + ' → ' + (snk ? snk.name : 'Sink');
+
+        fetch('/api/routes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, source_id: sourceId, sink_id: sinkId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.id) {
+                showToast('Route created: ' + name, 'success');
+                setTimeout(() => location.reload(), 500);
+            } else {
+                showToast('Error: ' + (data.error || 'Unknown error'), 'error');
+            }
+        })
+        .catch(() => showToast('Failed to create route', 'error'));
     });
 
     // Handle cable context menu
