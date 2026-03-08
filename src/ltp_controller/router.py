@@ -806,11 +806,11 @@ class RoutingEngine:
         # Simple linear scaling for now
         if len(source_dims) == 1 and len(sink_dims) == 1:
             # Linear to linear - pass as tuple
-            logger.info(f"_scale_pixels: linear {source_dims[0]} -> {sink_dims[0]}, "
-                       f"input shape={pixels.shape}, mode={transform.scale_mode.value}")
+            logger.debug(f"_scale_pixels: linear {source_dims[0]} -> {sink_dims[0]}, "
+                        f"input shape={pixels.shape}, mode={transform.scale_mode.value}")
             result = scale_buffer(pixels, (sink_dims[0],), transform.scale_mode)
-            logger.info(f"_scale_pixels: output shape={result.shape}, "
-                       f"non-zero pixels={np.count_nonzero(result.sum(axis=1))}/{len(result)}")
+            logger.debug(f"_scale_pixels: output shape={result.shape}, "
+                        f"non-zero pixels={np.count_nonzero(result.sum(axis=1))}/{len(result)}")
             return result
 
         # For matrices, reshape and scale
