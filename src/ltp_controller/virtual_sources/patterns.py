@@ -387,8 +387,8 @@ class SparklePattern(VirtualSource):
         self._controls.register(
             NumberControl(
                 id="fade_speed",
-                name="Fade Speed",
-                description="How quickly sparkles fade (0=instant, 100=very slow)",
+                name="Persistence",
+                description="How long sparkles last (0=instant, 100=very long)",
                 value=50.0,
                 min=0.0,
                 max=100.0,
@@ -413,8 +413,11 @@ class SparklePattern(VirtualSource):
 
         color = hex_to_rgb(self.get_control("color"))
         background = hex_to_rgb(self.get_control("background"))
-        density = self.get_control("density")
-        # Map 0-100 slider to exponential decay: 0→0.0 (instant), 50→0.9, 100→0.999
+        # Scale density by speed (quadratic, matching base speed curve)
+        speed_pct = self.get_control("speed") / 50.0
+        speed_factor = speed_pct * speed_pct
+        density = self.get_control("density") * speed_factor
+        # Map 0-100 persistence to decay multiplier: 0→0.0 (instant), 50→0.968, 100→0.999
         fade_pct = self.get_control("fade_speed") / 100.0
         fade_speed = 1.0 - 10.0 ** (-fade_pct * 3.0) if fade_pct > 0 else 0.0
         random_color = self.get_control("random_color")
