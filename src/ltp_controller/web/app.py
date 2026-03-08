@@ -223,13 +223,23 @@ def create_app(
     @app.route("/api/sinks/purge", methods=["POST"])
     def api_sinks_purge() -> Any:
         """Remove all offline sinks."""
+        purged_ids = [s.id for s in controller.sinks if not s.online]
         count = controller.purge_offline_sinks()
+        # Delete routes that used purged sinks
+        for route in list(router.routes):
+            if route.sink_id in purged_ids:
+                run_async(router.delete_route(route.id))
         return jsonify({"status": "ok", "removed": count})
 
     @app.route("/api/sources/purge", methods=["POST"])
     def api_sources_purge() -> Any:
         """Remove all offline sources."""
+        purged_ids = [s.id for s in controller.sources if not s.online]
         count = controller.purge_offline_sources()
+        # Delete routes that used purged sources
+        for route in list(router.routes):
+            if route.source_id in purged_ids:
+                run_async(router.delete_route(route.id))
         return jsonify({"status": "ok", "removed": count})
 
     # ==================== API: Sink Fill ====================
@@ -1202,6 +1212,10 @@ def create_app(
             return jsonify({"error": "Virtual sources not available"}), 503
 
         if virtual_source_manager.remove(source_id):
+            # Delete routes that used this source
+            for route in list(router.routes):
+                if route.source_id == source_id:
+                    run_async(router.delete_route(route.id))
             return jsonify({"status": "ok"})
         return jsonify({"error": "Virtual source not found"}), 404
 
