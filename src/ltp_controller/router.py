@@ -169,6 +169,7 @@ class RoutingEngine:
         self._route_tasks: dict[str, asyncio.Task] = {}
         self._pending_starts: set[str] = set()
         self._pending_stops: set[str] = set()
+        self._pending_restarts: set[str] = set()
         self._monitor_task: asyncio.Task | None = None
 
     def set_virtual_source_manager(self, manager: "VirtualSourceManager") -> None:
@@ -259,22 +260,27 @@ class RoutingEngine:
         if not route:
             return None
 
+        # Track whether the running route needs a restart
+        needs_restart = False
+
         if name is not None:
             route.name = name
         if transform is not None:
             route.transform = transform
-        if mode is not None:
+        if mode is not None and mode != route.mode:
             route.mode = mode
+            needs_restart = True
 
         if enabled is not None and enabled != route.enabled:
             route.enabled = enabled
             if self._running:
                 if enabled:
-                    # Mark for starting
                     self._pending_starts.add(route_id)
                 else:
-                    # Mark for stopping
                     self._pending_stops.add(route_id)
+        elif needs_restart and route.enabled and self._running:
+            # Mode changed on a running route - must stop then restart
+            self._pending_restarts.add(route_id)
 
         return route
 
@@ -944,6 +950,16 @@ class RoutingEngine:
     async def _monitor_loop(self) -> None:
         """Monitor for pending route starts/stops from sync context."""
         while self._running:
+            # Process pending restarts first (stop then start atomically)
+            while self._pending_restarts:
+                route_id = self._pending_restarts.pop()
+                route = self._routes.get(route_id)
+                if route and route.enabled:
+                    await self._stop_route(route)
+                    self._route_tasks[route_id] = asyncio.create_task(
+                        self._run_route(route)
+                    )
+
             # Process pending starts
             while self._pending_starts:
                 route_id = self._pending_starts.pop()
@@ -1004,6 +1020,7 @@ class RoutingEngine:
         self._route_tasks.clear()
         self._pending_starts.clear()
         self._pending_stops.clear()
+        self._pending_restarts.clear()
         logger.info("Routing engine stopped")
 
     def load_routes(self, routes_data: list[dict[str, Any]]) -> None:
