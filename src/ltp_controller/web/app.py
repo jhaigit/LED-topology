@@ -1191,6 +1191,12 @@ def create_app(
             source.stop()
             source.start()
 
+        # Restart any routes using this VS so they pick up new dimensions
+        if needs_restart:
+            for route in router.routes:
+                if route.source_id == source_id and route.enabled:
+                    router._pending_restarts.add(route.id)
+
         return jsonify(source.to_dict())
 
     @app.route("/api/virtual-sources/<source_id>", methods=["DELETE"])
