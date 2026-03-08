@@ -650,20 +650,18 @@ function refreshGraphData() {
             }));
             LtpRouteGraph.updateRouteData(updated);
 
-            // Update perf table
+            // Rebuild perf table so new/deleted routes appear
             const tbody = document.getElementById('route-perf-body');
             if (tbody) {
-                routes.forEach(route => {
-                    const row = tbody.querySelector(`tr[data-route-id="${route.id}"]`);
-                    if (row) {
-                        const statusEl = row.querySelector('.status-badge');
-                        if (statusEl) { statusEl.textContent = route.status; statusEl.className = 'status-badge ' + route.status; }
-                        const framesEl = row.querySelector('.frames-col');
-                        if (framesEl && route.mode !== 'direct') framesEl.textContent = route.frames_routed;
-                        const modeEl = row.querySelector('.mode-col');
-                        if (modeEl) modeEl.textContent = route.mode;
-                    }
-                });
+                tbody.innerHTML = routes.map(route => {
+                    const framesCell = route.mode === 'direct' ? '<em>N/A</em>' : (route.frames_routed || 0);
+                    return `<tr data-route-id="${route.id}">
+                        <td>${esc(route.name)}</td>
+                        <td><span class="status-badge ${route.status}">${route.status}</span></td>
+                        <td class="mode-col">${route.mode}</td>
+                        <td class="frames-col">${framesCell}</td>
+                    </tr>`;
+                }).join('');
             }
 
             // Update stats
