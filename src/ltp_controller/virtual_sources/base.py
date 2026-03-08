@@ -65,11 +65,11 @@ class VirtualSource(ABC):
             NumberControl(
                 id="speed",
                 name="Speed",
-                description="Animation speed multiplier",
-                value=1.0,
-                min=0.1,
-                max=10.0,
-                step=0.1,
+                description="Animation speed (0=stopped, 50=normal, 100=fast)",
+                value=50.0,
+                min=0.0,
+                max=100.0,
+                step=1.0,
                 group="animation",
             )
         )
@@ -233,7 +233,9 @@ class VirtualSource(ABC):
         if not self._running:
             return 0.0
         real_elapsed = time.time() - self._start_time
-        speed = self.get_control("speed")
+        # Map 0-100 slider exponentially: 0→0, 50→1.0, 100→10.0
+        speed_pct = self.get_control("speed") / 50.0
+        speed = speed_pct * speed_pct  # quadratic: gives fine control at low end
         if self.get_control("reverse"):
             speed = -speed
         return real_elapsed * speed
