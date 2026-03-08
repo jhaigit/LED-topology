@@ -16,22 +16,22 @@
 </div>
 
 <div class="stats-grid">
-    <div class="stat-card">
+    <a href="/sources" class="stat-card">
         <div class="stat-value" id="sources-stat">{{ sources|selectattr('online')|list|length }} / {{ sources|length }}</div>
         <div class="stat-label">Sources Online</div>
-    </div>
-    <div class="stat-card">
+    </a>
+    <a href="/sinks" class="stat-card">
         <div class="stat-value" id="sinks-stat">{{ sinks|selectattr('online')|list|length }} / {{ sinks|length }}</div>
         <div class="stat-label">Sinks Online</div>
-    </div>
-    <div class="stat-card">
+    </a>
+    <a href="/routes" class="stat-card">
         <div class="stat-value" id="routes-stat">{{ routes|selectattr('enabled')|list|length }} / {{ routes|length }}</div>
         <div class="stat-label">Routes Active</div>
-    </div>
-    <div class="stat-card">
+    </a>
+    <a href="/virtual-sources" class="stat-card">
         <div class="stat-value" id="vs-stat">{{ virtual_sources|selectattr('is_running')|list|length }} / {{ virtual_sources|length }}</div>
         <div class="stat-label">Virtual Sources</div>
-    </div>
+    </a>
 </div>
 
 <!-- Quick Actions -->
