@@ -260,6 +260,8 @@ function renderSinkDetail(s) {
 function renderVSDetail(v) {
     const content = document.getElementById('detail-content');
     const running = v.running || v.is_running;
+    const dims = v.output_dimensions || v.dimensions || [];
+    const is2D = dims.length >= 2;
     let html = `
         <div class="detail-header">
             <h3>VS: ${esc(v.name)}</h3>
@@ -270,17 +272,92 @@ function renderVSDetail(v) {
     } else {
         html += `<button class="btn btn-sm btn-success" onclick="vsAction('${v.id}', 'start')">Start</button>`;
     }
-    html += `</div></div>
+    html += `<button class="btn btn-sm btn-danger" onclick="deleteVS('${v.id}')">Delete</button>
+            </div>
+        </div>
         <div class="detail-grid">
             <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${running ? 'connected' : 'disconnected'}">${running ? 'Running' : 'Stopped'}</span></div>
             <div class="detail-row"><span class="label">Type:</span> <span>${esc(v.type || v.source_type)}</span></div>
             <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(v.id)}</span></div>`;
-    const dims = v.output_dimensions || v.dimensions;
-    if (dims) html += `<div class="detail-row"><span class="label">Dimensions:</span> <span>${dims.join('x')}</span></div>`;
-    if (v.frame_rate) html += `<div class="detail-row"><span class="label">Frame Rate:</span> <span>${v.frame_rate} Hz</span></div>`;
     if (v.frame_count) html += `<div class="detail-row"><span class="label">Frames:</span> <span>${v.frame_count}</span></div>`;
-    html += `</div>`;
+    html += `</div>
+
+        <h4>Settings</h4>
+        <form class="route-edit-form" onsubmit="saveVSEdit(event, '${v.id}')">
+            <div class="form-row">
+                <label for="vs-edit-name">Name</label>
+                <input type="text" id="vs-edit-name" value="${esc(v.name)}" required>
+            </div>`;
+    if (is2D) {
+        html += `
+            <div class="form-row">
+                <label>Dimensions</label>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <input type="number" id="vs-edit-w" value="${dims[0]}" min="1" max="1000" style="width:70px;">
+                    <span>x</span>
+                    <input type="number" id="vs-edit-h" value="${dims[1]}" min="1" max="1000" style="width:70px;">
+                </div>
+            </div>`;
+    } else {
+        html += `
+            <div class="form-row">
+                <label for="vs-edit-px">Pixels</label>
+                <input type="number" id="vs-edit-px" value="${dims[0] || 60}" min="1" max="10000" style="width:90px;">
+            </div>`;
+    }
+    html += `
+            <div class="form-row">
+                <label for="vs-edit-fps">Frame Rate</label>
+                <div style="display:flex;align-items:center;gap:4px;">
+                    <input type="number" id="vs-edit-fps" value="${v.frame_rate || 30}" min="1" max="120" step="1" style="width:70px;">
+                    <span>Hz</span>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Save Changes</button>
+            </div>
+        </form>`;
     content.innerHTML = html;
+    // Store whether this VS is 2D for the save handler
+    content.dataset.vs2d = is2D ? '1' : '';
+}
+
+async function saveVSEdit(event, vsId) {
+    event.preventDefault();
+    const content = document.getElementById('detail-content');
+    const is2D = content.dataset.vs2d === '1';
+    let dims;
+    if (is2D) {
+        dims = [parseInt(document.getElementById('vs-edit-w').value), parseInt(document.getElementById('vs-edit-h').value)];
+    } else {
+        dims = [parseInt(document.getElementById('vs-edit-px').value)];
+    }
+    const data = {
+        name: document.getElementById('vs-edit-name').value,
+        output_dimensions: dims,
+        frame_rate: parseFloat(document.getElementById('vs-edit-fps').value),
+    };
+    try {
+        const resp = await fetch(`/api/virtual-sources/${vsId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await resp.json();
+        if (result.id) {
+            showToast('Virtual source updated', 'success');
+            // Re-fetch and re-render the detail
+            const listResp = await fetch('/api/virtual-sources');
+            const items = await listResp.json();
+            const updated = items.find(i => i.id === vsId);
+            if (updated) renderVSDetail(updated);
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast('Error: ' + (result.error || 'Unknown'), 'error');
+        }
+    } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+    }
 }
 
 // --- Cable click: show route editor ---

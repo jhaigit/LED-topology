@@ -1161,6 +1161,17 @@ def create_app(
         if "name" in data:
             source.config.name = data["name"]
 
+        # Update dimensions (requires restart if running)
+        needs_restart = False
+        if "output_dimensions" in data:
+            source.config.output_dimensions = data["output_dimensions"]
+            needs_restart = True
+
+        # Update frame rate
+        if "frame_rate" in data:
+            source.config.frame_rate = float(data["frame_rate"])
+            needs_restart = True
+
         # Update enabled state
         if "enabled" in data:
             source.config.enabled = data["enabled"]
@@ -1168,11 +1179,17 @@ def create_app(
                 source.start()
             elif not data["enabled"] and source.is_running:
                 source.stop()
+                needs_restart = False
 
         # Update control values
         if "control_values" in data:
             for control_id, value in data["control_values"].items():
                 source.set_control(control_id, value)
+
+        # Restart if dimensions or frame rate changed while running
+        if needs_restart and source.is_running:
+            source.stop()
+            source.start()
 
         return jsonify(source.to_dict())
 
