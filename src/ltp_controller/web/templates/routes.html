@@ -7,22 +7,8 @@
 
 <p class="subtitle">Configure data flow between sources and sinks</p>
 
-<div class="actions-bar" style="display: flex; justify-content: space-between; align-items: center;">
+<div class="actions-bar">
     <button class="btn btn-primary" onclick="showCreateModal()">Create Route</button>
-    <div class="btn-group">
-        <button class="btn btn-sm" id="view-list-btn" onclick="showView('list')" style="opacity:0.5;">List View</button>
-        <button class="btn btn-sm" id="view-graph-btn" onclick="showView('graph')">Graph View</button>
-    </div>
-</div>
-
-<!-- Graph View (hidden by default) -->
-<div id="graph-view" style="display: none; margin-bottom: 1.5rem;">
-    <div style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem;">
-        <div style="display: flex; justify-content: flex-end; margin-bottom: 0.25rem;">
-            <button class="btn btn-sm btn-secondary" onclick="LtpRouteGraph.resetLayout()">Reset Layout</button>
-        </div>
-        <canvas id="routeGraphCanvas" style="width: 100%; border-radius: 4px;"></canvas>
-    </div>
 </div>
 
 {% if routes %}
@@ -376,111 +362,5 @@ function updateRouteStatus() {
 // Update every second
 setInterval(updateRouteStatus, 1000);
 
-// View toggle (list vs graph)
-let currentView = 'list';
-
-function showView(view) {
-    currentView = view;
-    const listEl = document.getElementById('routes-table');
-    const graphEl = document.getElementById('graph-view');
-    const listBtn = document.getElementById('view-list-btn');
-    const graphBtn = document.getElementById('view-graph-btn');
-    // Also hide bulk bar and search toolbar
-    const bulkBar = document.querySelector('.bulk-actions-bar');
-
-    if (view === 'graph') {
-        if (listEl) listEl.style.display = 'none';
-        if (graphEl) graphEl.style.display = 'block';
-        if (listBtn) listBtn.style.opacity = '1';
-        if (graphBtn) graphBtn.style.opacity = '0.5';
-        if (bulkBar) bulkBar.style.display = 'none';
-        // Also hide list toolbar
-        document.querySelectorAll('.list-toolbar').forEach(el => el.style.display = 'none');
-        initGraph();
-    } else {
-        if (listEl) listEl.style.display = '';
-        if (graphEl) graphEl.style.display = 'none';
-        if (listBtn) listBtn.style.opacity = '0.5';
-        if (graphBtn) graphBtn.style.opacity = '1';
-        document.querySelectorAll('.list-toolbar').forEach(el => el.style.display = '');
-    }
-}
-
-let graphInitialized = false;
-
-function initGraph() {
-    if (graphInitialized) {
-        LtpRouteGraph.resizeCanvas();
-        return;
-    }
-    graphInitialized = true;
-
-    const graphCanvas = document.getElementById('routeGraphCanvas');
-    if (!graphCanvas) return;
-
-    // Build source/sink data for graph
-    const graphSources = [];
-    const allSources = {{ sources_json | tojson | safe }};
-    const allVS = {{ vs_json | tojson | safe }};
-    const allSinks = {{ sinks_json | tojson | safe }};
-    const allRoutes = {{ routes_json | tojson | safe }};
-
-    allSources.forEach(s => {
-        graphSources.push({ id: s.id, name: s.name, online: s.online, type: 'physical' });
-    });
-    allVS.forEach(v => {
-        graphSources.push({ id: v.id, name: v.name, online: v.is_running, type: 'virtual' });
-    });
-
-    const graphSinks = allSinks.map(s => ({
-        id: s.id, name: s.name, online: s.online
-    }));
-
-    const graphRoutes = allRoutes.map(r => ({
-        id: r.id,
-        name: r.name,
-        source_id: r.source_id,
-        sink_id: r.sink_id,
-        enabled: r.enabled,
-        status: r.status ? (r.status.value || r.status) : 'disconnected'
-    }));
-
-    LtpRouteGraph.init(graphCanvas, graphSources, graphSinks, graphRoutes);
-
-    // Handle create-route event from graph - auto-create with default name
-    graphCanvas.addEventListener('create-route', function(e) {
-        const { sourceId, sinkId } = e.detail;
-        const src = graphSources.find(s => s.id === sourceId);
-        const snk = graphSinks.find(s => s.id === sinkId);
-        const name = (src ? src.name : 'Source') + ' → ' + (snk ? snk.name : 'Sink');
-
-        fetch('/api/routes', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name, source_id: sourceId, sink_id: sinkId })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.id) {
-                showToast('Route created: ' + name, 'success');
-                setTimeout(() => location.reload(), 500);
-            } else {
-                showToast('Error: ' + (data.error || 'Unknown error'), 'error');
-            }
-        })
-        .catch(() => showToast('Failed to create route', 'error'));
-    });
-
-    // Handle cable context menu
-    graphCanvas.addEventListener('cable-context', function(e) {
-        const { route, x, y } = e.detail;
-        if (confirm(`${route.enabled ? 'Disable' : 'Enable'} route "${route.name}"?`)) {
-            const action = route.enabled ? 'disable' : 'enable';
-            fetch(`/api/routes/${route.id}/${action}`, { method: 'POST' })
-                .then(() => location.reload());
-        }
-    });
-}
 </script>
-<script src="{{ url_for('static', filename='js/route-graph.js') }}"></script>
 {% endblock %}

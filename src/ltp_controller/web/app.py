@@ -100,10 +100,6 @@ def create_app(
             sources=controller.sources,
             sinks=controller.sinks,
             virtual_sources=virtual_source_manager.sources if virtual_source_manager else [],
-            sources_json=[s.to_dict() for s in controller.sources],
-            sinks_json=[s.to_dict() for s in controller.sinks],
-            routes_json=[r.to_dict() for r in router.routes],
-            vs_json=[vs.to_dict() for vs in (virtual_source_manager.sources if virtual_source_manager else [])],
         )
 
     @app.route("/virtual-sources")
