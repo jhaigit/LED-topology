@@ -378,9 +378,9 @@ class SparklePattern(VirtualSource):
                 name="Density",
                 description="Probability of sparkle per pixel per frame",
                 value=0.05,
-                min=0.01,
+                min=0.001,
                 max=0.5,
-                step=0.01,
+                step=0.001,
                 group="pattern",
             )
         )
@@ -388,11 +388,11 @@ class SparklePattern(VirtualSource):
             NumberControl(
                 id="fade_speed",
                 name="Fade Speed",
-                description="How quickly sparkles fade",
-                value=0.9,
-                min=0.5,
-                max=0.99,
-                step=0.01,
+                description="How quickly sparkles fade (0=instant, 100=very slow)",
+                value=50.0,
+                min=0.0,
+                max=100.0,
+                step=1.0,
                 group="pattern",
             )
         )
@@ -414,7 +414,9 @@ class SparklePattern(VirtualSource):
         color = hex_to_rgb(self.get_control("color"))
         background = hex_to_rgb(self.get_control("background"))
         density = self.get_control("density")
-        fade_speed = self.get_control("fade_speed")
+        # Map 0-100 slider to exponential decay: 0→0.0 (instant), 50→0.9, 100→0.999
+        fade_pct = self.get_control("fade_speed") / 100.0
+        fade_speed = 1.0 - 10.0 ** (-fade_pct * 3.0) if fade_pct > 0 else 0.0
         random_color = self.get_control("random_color")
 
         # Fade existing sparkles
