@@ -12,7 +12,7 @@
 #   make upload PORT=/dev/ttyUSB0
 
 # Configuration
-BOARD ?= arduino:avr:uno
+BOARD ?= arduino:avr:nano:cpu=atmega328old
 PORT ?= /dev/ttyUSB0
 BAUD ?= 115200
 
