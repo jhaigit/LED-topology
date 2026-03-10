@@ -362,8 +362,8 @@ class DataPacket:
         if len(data) < cls.HEADER_SIZE + cls.FRAME_HEADER_SIZE:
             raise ProtocolError(ErrorCode.INVALID_FORMAT, "Packet too small")
 
-        # Parse packet header
-        magic, ver_flags, _, sequence = struct.unpack(
+        # Parse packet header (reserved byte carries chunk_index)
+        magic, ver_flags, chunk_index, sequence = struct.unpack(
             cls.HEADER_FORMAT, data[: cls.HEADER_SIZE]
         )
 
@@ -397,7 +397,7 @@ class DataPacket:
                 ErrorCode.INVALID_FORMAT, f"Unsupported encoding: {encoding}"
             )
 
-        return cls(sequence, color_format, pixel_data, encoding, flags)
+        return cls(sequence, color_format, pixel_data, encoding, flags, chunk_index=chunk_index)
 
     @staticmethod
     def _decode_raw(

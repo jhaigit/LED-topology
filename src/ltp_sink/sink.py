@@ -425,7 +425,14 @@ class Sink:
         return control_set_response(message.seq, status, applied, errors or None)
 
     def _handle_data_packet(self, packet: DataPacket) -> None:
-        """Handle incoming data packet."""
+        """Handle incoming data packet.
+
+        Supports chunked frames: chunk_index indicates which chunk of a
+        multi-packet frame this is.  Chunk data is placed at offset
+        chunk_index * MAX_CHUNK_PIXELS.
+        """
+        from libltp.types import MAX_CHUNK_PIXELS
+
         # Only process data if there's an active stream
         if not self._stream_manager.active_streams:
             logger.debug("Ignoring data packet - no active streams")
@@ -434,14 +441,28 @@ class Sink:
         # Record stats
         self._stats.record_data_packet(packet)
 
+        # Store pixel data with chunk support
+        incoming = packet.pixel_data
+        chunk_idx = packet.chunk_index
+        buf_len = len(self._pixel_buffer)
+
+        if chunk_idx == 0 and len(incoming) >= buf_len:
+            # Single-packet frame — fast path
+            self._pixel_buffer[:] = incoming[:buf_len]
+        elif len(incoming) < buf_len:
+            # Chunked frame — place at correct offset
+            offset = chunk_idx * MAX_CHUNK_PIXELS
+            end = min(offset + len(incoming), buf_len)
+            count = end - offset
+            if count > 0:
+                self._pixel_buffer[offset:end] = incoming[:count]
+            if end < buf_len:
+                return  # Wait for remaining chunks
+        else:
+            self._pixel_buffer[:] = incoming[:buf_len]
+
         # Apply brightness
         brightness = self._controls.get_value("brightness") / 255.0
-
-        # Store pixel data
-        if len(packet.pixel_data) <= len(self._pixel_buffer):
-            self._pixel_buffer[: len(packet.pixel_data)] = packet.pixel_data
-
-        # Apply brightness
         display_pixels = (self._pixel_buffer * brightness).astype(np.uint8)
 
         # Check test mode

@@ -282,8 +282,13 @@ class ArtNetSink:
         return control_set_response(message.seq, status, applied, errors or None)
 
     def _handle_data_packet(self, packet: DataPacket) -> None:
-        """Handle incoming data packet."""
+        """Handle incoming data packet.
+
+        Supports chunked frames: chunk_index indicates which chunk of a
+        multi-packet frame this is.
+        """
         from libltp import scale_buffer
+        from libltp.types import MAX_CHUNK_PIXELS
 
         # Only process if there's an active stream
         if not self._stream_manager.active_streams:
@@ -305,28 +310,41 @@ class ArtNetSink:
 
         logger.debug(
             f"Data packet #{self._packet_count}: {pixel_count} pixels, "
-            f"{packet_bytes} bytes, format={packet.color_format.name}"
+            f"{packet_bytes} bytes, chunk={packet.chunk_index}, format={packet.color_format.name}"
         )
 
-        # Scale if pixel count differs
         incoming_pixels = packet.pixel_data
-        if len(incoming_pixels) != self._pixel_count:
-            if self._packet_count == 1:
-                logger.info(
-                    f"Scaling incoming data: {len(incoming_pixels)} -> {self._pixel_count} pixels"
-                )
-            incoming_pixels = scale_buffer(incoming_pixels, (self._pixel_count,), mode="fit")
+        chunk_idx = packet.chunk_index
+
+        if chunk_idx == 0 and len(incoming_pixels) == self._pixel_count:
+            # Single-packet frame — fast path
+            self._pixel_buffer[:] = incoming_pixels
+        elif len(incoming_pixels) < self._pixel_count:
+            # Chunked frame — place at correct offset
+            offset = chunk_idx * MAX_CHUNK_PIXELS
+            end = min(offset + len(incoming_pixels), self._pixel_count)
+            count = end - offset
+            if count > 0:
+                self._pixel_buffer[offset:end] = incoming_pixels[:count]
+            if end < self._pixel_count:
+                return  # Wait for remaining chunks
+        else:
+            # Scale if pixel count differs
+            if len(incoming_pixels) != self._pixel_count:
+                if self._packet_count == 1:
+                    logger.info(
+                        f"Scaling incoming data: {len(incoming_pixels)} -> {self._pixel_count} pixels"
+                    )
+                incoming_pixels = scale_buffer(incoming_pixels, (self._pixel_count,), mode="fit")
+            self._pixel_buffer[:] = incoming_pixels
 
         # Apply brightness
         brightness = int(self._controls.get_value("brightness"))
         if brightness < 255:
-            pixels = (incoming_pixels.astype(np.uint16) * brightness) // 255
+            pixels = (self._pixel_buffer.astype(np.uint16) * brightness) // 255
             pixels = pixels.astype(np.uint8)
         else:
-            pixels = incoming_pixels
-
-        # Store and send
-        self._pixel_buffer[:] = pixels
+            pixels = self._pixel_buffer.copy()
 
         try:
             bytes_sent = self._sender.send_pixels(pixels)

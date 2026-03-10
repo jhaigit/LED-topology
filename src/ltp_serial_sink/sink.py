@@ -530,8 +530,16 @@ class SerialSink:
         return control_set_response(message.seq, status, applied, errors or None)
 
     def _handle_data_packet(self, packet: DataPacket) -> None:
-        """Handle incoming data packet."""
+        """Handle incoming data packet.
+
+        Supports chunked frames: large frames are split by the sender into
+        multiple UDP packets, each with a chunk_index.  Chunk 0 starts a new
+        frame, subsequent chunks fill in at offset chunk_index * MAX_CHUNK_PIXELS.
+        The frame is submitted for rendering once all chunks have arrived
+        (detected when the chunk fills up to the total pixel count).
+        """
         from libltp import scale_buffer
+        from libltp.types import MAX_CHUNK_PIXELS
 
         # Only process data if there's an active stream
         if not self._stream_manager.active_streams:
@@ -550,23 +558,37 @@ class SerialSink:
 
         logger.debug(
             f"Data packet #{self._packet_count}: {pixel_count} pixels, "
-            f"{packet_bytes} bytes, format={packet.color_format.name}"
+            f"{packet_bytes} bytes, chunk={packet.chunk_index}, format={packet.color_format.name}"
         )
 
         # Get control values
         test_mode = self._controls.get_value("test_mode")
 
-        # Scale incoming data if pixel count differs
         incoming_pixels = packet.pixel_data
-        if len(incoming_pixels) != self._pixel_count:
-            if self._packet_count == 1:
-                logger.info(
-                    f"Scaling incoming data: {len(incoming_pixels)} -> {self._pixel_count} pixels"
-                )
-            incoming_pixels = scale_buffer(incoming_pixels, (self._pixel_count,), mode="fit")
+        chunk_idx = packet.chunk_index
 
-        # Store pixel data
-        self._pixel_buffer[:] = incoming_pixels
+        if chunk_idx == 0 and len(incoming_pixels) == self._pixel_count:
+            # Single-packet frame (no chunking) — fast path
+            self._pixel_buffer[:] = incoming_pixels
+        elif chunk_idx >= 0 and len(incoming_pixels) < self._pixel_count:
+            # Chunked frame — place at correct offset
+            offset = chunk_idx * MAX_CHUNK_PIXELS
+            end = min(offset + len(incoming_pixels), self._pixel_count)
+            count = end - offset
+            if count > 0:
+                self._pixel_buffer[offset:end] = incoming_pixels[:count]
+            # Don't submit frame until the last chunk fills the buffer
+            if end < self._pixel_count:
+                return
+        else:
+            # Fallback: scale if pixel count doesn't match
+            if len(incoming_pixels) != self._pixel_count:
+                if self._packet_count == 1:
+                    logger.info(
+                        f"Scaling incoming data: {len(incoming_pixels)} -> {self._pixel_count} pixels"
+                    )
+                incoming_pixels = scale_buffer(incoming_pixels, (self._pixel_count,), mode="fit")
+            self._pixel_buffer[:] = incoming_pixels
 
         # Check test mode
         if test_mode:
