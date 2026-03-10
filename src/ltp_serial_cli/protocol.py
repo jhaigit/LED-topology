@@ -140,7 +140,7 @@ CTRL_UINT16 = 0x03
 CTRL_INT8 = 0x04
 CTRL_INT16 = 0x05
 CTRL_ACTION = 0x06  # One-time action (button), no persistent value
-CTRL_ENUM = 0x10    # Reserved for future
+CTRL_ENUM = 0x10    # Enumerated: discrete named options
 CTRL_STRING = 0x11  # Reserved for future
 
 # Control flags

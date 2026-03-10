@@ -289,14 +289,57 @@ static const char cn2[] PROGMEM = "idle_timeout";  static const char cd2[] PROGM
 static const char cn3[] PROGMEM = "auto_show";     static const char cd3[] PROGMEM = "show after cmds";
 static const char cn4[] PROGMEM = "frame_ack";     static const char cd4[] PROGMEM = "ack frames";
 static const char cn5[] PROGMEM = "status_interval"; static const char cd5[] PROGMEM = "ms, 0=off";
-static const char cn6[] PROGMEM = "local_mode";    static const char cd6[] PROGMEM = "0=off, 255=cycle";
+static const char cn6[] PROGMEM = "local_mode";    static const char cd6[] PROGMEM = "idle display mode";
 static const char cn7[] PROGMEM = "cycle_time";    static const char cd7[] PROGMEM = "mode cycle, secs";
 static const char cn8[] PROGMEM = "num_pixels";    static const char cd8[] PROGMEM = "pixel count";
-static const char cn9[] PROGMEM = "active_strip";  static const char cd9[] PROGMEM = "0=WS2812, 1=APA102";
+static const char cn9[] PROGMEM = "active_strip";  static const char cd9[] PROGMEM = "output strip";
 static const char cn10[] PROGMEM = "matrix_width";  static const char cd10[] PROGMEM = "1=strip, >1=matrix";
-static const char cn11[] PROGMEM = "matrix_layout"; static const char cd11[] PROGMEM = "layout flags";
+static const char cn11[] PROGMEM = "matrix_layout"; static const char cd11[] PROGMEM = "pixel mapping";
 static const char cn12[] PROGMEM = "save";          static const char cd12[] PROGMEM = "save to EEPROM";
 static const char cn13[] PROGMEM = "reboot";        static const char cd13[] PROGMEM = "restart";
+
+// Enum option labels (PROGMEM)
+static const char el_off[]     PROGMEM = "Off";
+static const char el_cylon[]   PROGMEM = "Cylon";
+static const char el_rainbow[] PROGMEM = "Rainbow";
+static const char el_fire[]    PROGMEM = "Fire";
+static const char el_sparkle[] PROGMEM = "Sparkle";
+static const char el_chase[]   PROGMEM = "Chase";
+static const char el_cycle[]   PROGMEM = "Cycle";
+static const char el_ws2812[]  PROGMEM = "WS2812";
+static const char el_apa102[]  PROGMEM = "APA102";
+static const char el_normal[]  PROGMEM = "Normal";
+static const char el_serp[]    PROGMEM = "Serpentine";
+static const char el_vert[]    PROGMEM = "Vertical";
+static const char el_vs[]      PROGMEM = "Vert+Serp";
+static const char el_bottom[]  PROGMEM = "Bottom";
+static const char el_bs[]      PROGMEM = "Bottom+Serp";
+static const char el_bv[]      PROGMEM = "Bottom+Vert";
+static const char el_bvs[]     PROGMEM = "Bottom+V+S";
+
+// Enum option definitions: {value, label} pairs in PROGMEM
+struct EnumOption {
+    uint8_t value;
+    const char* label;  // PROGMEM pointer
+};
+
+static const EnumOption localModeOpts[] PROGMEM = {
+    { 0, el_off }, { 1, el_cylon }, { 2, el_rainbow },
+    { 3, el_fire }, { 4, el_sparkle }, { 5, el_chase },
+    { 255, el_cycle }
+};
+#define LOCAL_MODE_NUM_OPTS 7
+
+static const EnumOption activeStripOpts[] PROGMEM = {
+    { 0, el_ws2812 }, { 1, el_apa102 }
+};
+#define ACTIVE_STRIP_NUM_OPTS 2
+
+static const EnumOption matrixLayoutOpts[] PROGMEM = {
+    { 0, el_normal }, { 1, el_serp }, { 2, el_vert }, { 3, el_vs },
+    { 4, el_bottom }, { 5, el_bs }, { 6, el_bv }, { 7, el_bvs }
+};
+#define MATRIX_LAYOUT_NUM_OPTS 8
 
 struct ControlDef {
     uint8_t id;
@@ -306,23 +349,25 @@ struct ControlDef {
     int16_t maxVal;
     const char* name;        // PROGMEM pointer
     const char* description; // PROGMEM pointer
+    uint8_t numEnumOpts;     // 0 for non-enum controls
+    const EnumOption* enumOpts; // PROGMEM pointer, NULL for non-enum
 };
 
 static const ControlDef controlDefs[NUM_CONTROLS] PROGMEM = {
-    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        cn0, cd0 },
-    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,         cn1, cd1 },
-    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767,      cn2, cd2 },
-    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn3, cd3 },
-    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn4, cd4 },
-    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, cn5, cd5 },
-    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        cn6, cd6 },
-    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,       cn7, cd7 },
-    { CTRL_ID_NUM_PIXELS,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, cn8, cd8 },
-    { CTRL_ID_ACTIVE_STRIP,    CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     1,          cn9, cd9 },
-    { CTRL_ID_MATRIX_WIDTH,    CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, cn10, cd10 },
-    { CTRL_ID_MATRIX_LAYOUT,   CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     7,          cn11, cd11 },
-    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn12, cd12 },
-    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn13, cd13 },
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        cn0, cd0, 0, NULL },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,         cn1, cd1, 0, NULL },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767,      cn2, cd2, 0, NULL },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn3, cd3, 0, NULL },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn4, cd4, 0, NULL },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, cn5, cd5, 0, NULL },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_ENUM,   CTRL_FLAG_HARDWARE, 0,     255,        cn6, cd6, LOCAL_MODE_NUM_OPTS, localModeOpts },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,       cn7, cd7, 0, NULL },
+    { CTRL_ID_NUM_PIXELS,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, cn8, cd8, 0, NULL },
+    { CTRL_ID_ACTIVE_STRIP,    CTRL_TYPE_ENUM,   CTRL_FLAG_HARDWARE, 0,     1,          cn9, cd9, ACTIVE_STRIP_NUM_OPTS, activeStripOpts },
+    { CTRL_ID_MATRIX_WIDTH,    CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 1,     MAX_PIXELS, cn10, cd10, 0, NULL },
+    { CTRL_ID_MATRIX_LAYOUT,   CTRL_TYPE_ENUM,   CTRL_FLAG_HARDWARE, 0,     7,          cn11, cd11, MATRIX_LAYOUT_NUM_OPTS, matrixLayoutOpts },
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn12, cd12, 0, NULL },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn13, cd13, 0, NULL },
 };
 
 uint16_t getControlValue(uint8_t controlId, uint8_t* valueSize) {
@@ -894,12 +939,24 @@ static void sendInfoControls() {
         totalLen += 7; // id + type + flags + min(2) + max(2)
         uint8_t valueSize;
         uint8_t id = pgm_read_byte(&controlDefs[i].id);
+        uint8_t type = pgm_read_byte(&controlDefs[i].type);
         getControlValue(id, &valueSize);
         totalLen += valueSize;
         const char* name = (const char*)pgm_read_ptr(&controlDefs[i].name);
         totalLen += strlen_P(name) + 1;
         const char* desc = (const char*)pgm_read_ptr(&controlDefs[i].description);
         totalLen += strlen_P(desc) + 1;
+        // Enum options: num_options(1) + for each: value(1) + label(\0)
+        if (type == CTRL_TYPE_ENUM) {
+            uint8_t numOpts = pgm_read_byte(&controlDefs[i].numEnumOpts);
+            const EnumOption* opts = (const EnumOption*)pgm_read_ptr(&controlDefs[i].enumOpts);
+            totalLen += 1; // num_options byte
+            for (uint8_t j = 0; j < numOpts; j++) {
+                totalLen += 1; // value byte
+                const char* label = (const char*)pgm_read_ptr(&opts[j].label);
+                totalLen += strlen_P(label) + 1;
+            }
+        }
     }
 
     // Pass 2: stream the packet
@@ -940,6 +997,21 @@ static void sendInfoControls() {
             streamByte(c);
         }
         streamByte(0);
+
+        // Stream enum options after name/description
+        if (type == CTRL_TYPE_ENUM) {
+            uint8_t numOpts = pgm_read_byte(&controlDefs[i].numEnumOpts);
+            const EnumOption* opts = (const EnumOption*)pgm_read_ptr(&controlDefs[i].enumOpts);
+            streamByte(numOpts);
+            for (uint8_t j = 0; j < numOpts; j++) {
+                streamByte(pgm_read_byte(&opts[j].value));
+                const char* label = (const char*)pgm_read_ptr(&opts[j].label);
+                while ((c = pgm_read_byte(label++)) != 0) {
+                    streamByte(c);
+                }
+                streamByte(0);
+            }
+        }
     }
 
     streamEnd();

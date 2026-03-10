@@ -144,6 +144,19 @@ struct {
 #define HEARTBEAT_INTERVAL  500  // ms
 uint32_t lastHeartbeat = 0;
 
+// Enum option definitions
+struct EnumOption {
+    uint8_t value;
+    const char* label;
+};
+
+static const EnumOption localModeOpts[] = {
+    { 0, "Off" }, { 1, "Cylon" }, { 2, "Rainbow" },
+    { 3, "Fire" }, { 4, "Sparkle" }, { 5, "Chase" },
+    { 255, "Cycle" }
+};
+#define LOCAL_MODE_NUM_OPTS 7
+
 // Control metadata for INFO_CONTROLS response
 struct ControlDef {
     uint8_t id;
@@ -153,20 +166,22 @@ struct ControlDef {
     int16_t maxVal;
     const char* name;
     const char* description;
+    uint8_t numEnumOpts;
+    const EnumOption* enumOpts;
 };
 
 static const ControlDef controlDefs[NUM_CONTROLS] = {
-    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness", "0-255" },
-    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma", "x10, 10=1.0" },
-    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout", "secs, 0=off" },
-    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show", "show after cmds" },
-    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack", "ack frames" },
-    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval", "ms, 0=off" },
-    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "local_mode", "0=off, 255=cycle" },
-    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,  "cycle_time", "mode cycle, secs" },
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness", "0-255", 0, NULL },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma", "x10, 10=1.0", 0, NULL },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout", "secs, 0=off", 0, NULL },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show", "show after cmds", 0, NULL },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack", "ack frames", 0, NULL },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval", "ms, 0=off", 0, NULL },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_ENUM,   CTRL_FLAG_HARDWARE, 0,     255,   "local_mode", "idle display mode", LOCAL_MODE_NUM_OPTS, localModeOpts },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,  "cycle_time", "mode cycle, secs", 0, NULL },
     // Action controls
-    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save", "save to EEPROM" },
-    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot", "restart" },
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save", "save to EEPROM", 0, NULL },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot", "restart", 0, NULL },
 };
 
 // Get current value of a control (returns value, size in bytes via pointer)
@@ -745,7 +760,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
     }
 
     uint8_t infoType = payload[0];
-    uint8_t response[350];  // Large enough for INFO_CONTROLS with descriptions
+    uint8_t response[450];  // Large enough for INFO_CONTROLS with enum options
     uint16_t respLen = 0;
 
     switch (infoType) {
@@ -907,6 +922,18 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
                     response[respLen++] = *desc++;
                 }
                 response[respLen++] = 0;
+                // Append enum options if CTRL_TYPE_ENUM
+                if (ctrl.type == CTRL_TYPE_ENUM && ctrl.enumOpts != NULL) {
+                    response[respLen++] = ctrl.numEnumOpts;
+                    for (uint8_t j = 0; j < ctrl.numEnumOpts; j++) {
+                        response[respLen++] = ctrl.enumOpts[j].value;
+                        const char* label = ctrl.enumOpts[j].label;
+                        while (*label && respLen < sizeof(response) - 1) {
+                            response[respLen++] = *label++;
+                        }
+                        response[respLen++] = 0;
+                    }
+                }
             }
             break;
 

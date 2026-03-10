@@ -240,11 +240,23 @@ String SinkProtocol::handleCapabilityRequest(int seq) {
     JsonObject localMode = controls.add<JsonObject>();
     localMode["id"] = "local_mode";
     localMode["name"] = "Local Mode";
-    localMode["type"] = "number";
-    localMode["description"] = "0=off, 255=cycle";
+    localMode["type"] = "enum";
+    localMode["description"] = "idle display mode";
     localMode["value"] = config->localMode;
-    localMode["min"] = 0;
-    localMode["max"] = 255;
+    JsonArray lmOptions = localMode["options"].to<JsonArray>();
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "0";   o["label"] = "Off"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "1";   o["label"] = "Cylon"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "2";   o["label"] = "Rainbow"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "3";   o["label"] = "Fire"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "4";   o["label"] = "Sparkle"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "5";   o["label"] = "Chase"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "6";   o["label"] = "Mitosis"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "7";   o["label"] = "Touch"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "8";   o["label"] = "Sin Wave"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "9";   o["label"] = "Sin RGB"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "10";  o["label"] = "Sin RGB2"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "11";  o["label"] = "Clock"; }
+    { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "255"; o["label"] = "Cycle"; }
 
     JsonObject cycleTime = controls.add<JsonObject>();
     cycleTime["id"] = "cycle_time";

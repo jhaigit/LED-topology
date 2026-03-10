@@ -39,6 +39,7 @@ from .protocol import (
     CTRL_UINT16,
     CTRL_INT8,
     CTRL_INT16,
+    CTRL_ENUM,
     CTRL_ID_BRIGHTNESS,
     CTRL_ID_GAMMA,
     CTRL_ID_AUTO_SHOW,
@@ -640,7 +641,24 @@ class LtpDevice:
                     description = packet.payload[offset:desc_end].decode("utf-8", errors="replace")
                     offset = desc_end + 1  # Skip null terminator
 
-                    controls.append({
+                    # Parse enum options if CTRL_TYPE_ENUM
+                    enum_values = []
+                    if ctrl_type == CTRL_ENUM and offset < len(packet.payload):
+                        num_options = packet.payload[offset]
+                        offset += 1
+                        for _ in range(num_options):
+                            if offset >= len(packet.payload):
+                                break
+                            opt_value = packet.payload[offset]
+                            offset += 1
+                            label_end = offset
+                            while label_end < len(packet.payload) and packet.payload[label_end] != 0:
+                                label_end += 1
+                            label = packet.payload[offset:label_end].decode("utf-8", errors="replace")
+                            offset = label_end + 1
+                            enum_values.append({"value": opt_value, "label": label})
+
+                    ctrl_dict = {
                         "id": ctrl_id,
                         "type": ctrl_type,
                         "flags": ctrl_flags,
@@ -649,7 +667,10 @@ class LtpDevice:
                         "value": value,
                         "name": name,
                         "description": description,
-                    })
+                    }
+                    if enum_values:
+                        ctrl_dict["enum_values"] = enum_values
+                    controls.append(ctrl_dict)
 
         return controls
 

@@ -163,6 +163,7 @@
 #define CTRL_TYPE_INT8      0x04
 #define CTRL_TYPE_INT16     0x05
 #define CTRL_TYPE_ACTION    0x06  // One-time action (button), no persistent value
+#define CTRL_TYPE_ENUM      0x10  // Enumerated: discrete named options
 
 // Control flags for INFO_CONTROLS response
 #define CTRL_FLAG_HARDWARE  0x01  // Direct hardware control (vs high-level/derived)

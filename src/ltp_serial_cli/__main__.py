@@ -15,7 +15,7 @@ import time
 from .device import LtpDevice
 from .exceptions import LtpError, LtpTimeoutError
 from .protocol import (
-    CTRL_BOOL, CTRL_UINT8, CTRL_UINT16, CTRL_INT8, CTRL_INT16, CTRL_ACTION,
+    CTRL_BOOL, CTRL_UINT8, CTRL_UINT16, CTRL_INT8, CTRL_INT16, CTRL_ACTION, CTRL_ENUM,
     CTRL_FLAG_READONLY, CTRL_FLAG_VOLATILE, CTRL_FLAG_ACTION,
     INPUT_BUTTON, INPUT_TOUCH, INPUT_SWITCH,
 )
@@ -54,6 +54,7 @@ def cmd_info(device: LtpDevice, args: argparse.Namespace):
             type_names = {
                 CTRL_BOOL: "bool", CTRL_UINT8: "u8", CTRL_UINT16: "u16",
                 CTRL_INT8: "i8", CTRL_INT16: "i16", CTRL_ACTION: "action",
+                CTRL_ENUM: "enum",
             }
             print(f"\nControls:")
             for c in controls:
@@ -68,6 +69,9 @@ def cmd_info(device: LtpDevice, args: argparse.Namespace):
                 flag_str = f" [{','.join(flags)}]" if flags else ""
                 if c["type"] == CTRL_ACTION:
                     print(f"  [{c['id']:3d}] {c['name']}: {c['description']}{flag_str}")
+                elif c["type"] == CTRL_ENUM and "enum_values" in c:
+                    opts = ", ".join(f"{ev['value']}={ev['label']}" for ev in c["enum_values"])
+                    print(f"  [{c['id']:3d}] {c['name']} = {c['value']} (enum: {opts}){flag_str}")
                 else:
                     print(f"  [{c['id']:3d}] {c['name']} = {c['value']} ({tname}, {c['min']}..{c['max']}) {c['description']}{flag_str}")
     except (LtpError, LtpTimeoutError):

@@ -217,11 +217,15 @@ private:
         JsonObject localMode = controls.add<JsonObject>();
         localMode["id"] = "local_mode";
         localMode["name"] = "Local Mode";
-        localMode["type"] = "number";
-        localMode["description"] = "0=off, 1=info, 2=clock, 3=pattern, 255=cycle";
+        localMode["type"] = "enum";
+        localMode["description"] = "idle display mode";
         localMode["value"] = config->localMode;
-        localMode["min"] = 0;
-        localMode["max"] = 255;
+        JsonArray lmOptions = localMode["options"].to<JsonArray>();
+        { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "0";   o["label"] = "Off"; }
+        { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "1";   o["label"] = "Info"; }
+        { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "2";   o["label"] = "Clock"; }
+        { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "3";   o["label"] = "Pattern"; }
+        { JsonObject o = lmOptions.add<JsonObject>(); o["value"] = "255"; o["label"] = "Cycle"; }
 
         JsonObject cycleTime = controls.add<JsonObject>();
         cycleTime["id"] = "cycle_time";

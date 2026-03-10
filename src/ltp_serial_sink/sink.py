@@ -201,18 +201,17 @@ class SerialSink:
                     )
                 )
             elif device_ctrl.control_type == "enum":
-                # Create enum options from the device control's enum_values
+                # Create enum options from parsed {value, label} dicts
                 options = [
-                    EnumOption(value=v, label=v)
-                    for v in device_ctrl.enum_values
+                    EnumOption(value=str(ev["value"]), label=ev["label"])
+                    for ev in device_ctrl.enum_values
                 ]
-                # Map numeric value to enum string
-                if current_value is not None and current_value < len(device_ctrl.enum_values):
-                    str_value = device_ctrl.enum_values[current_value]
-                elif current_value == 255 and "cycle" in device_ctrl.enum_values:
-                    str_value = "cycle"
-                else:
-                    str_value = device_ctrl.enum_values[0] if device_ctrl.enum_values else ""
+                # Map numeric current value to the matching option's string value
+                str_value = str(current_value) if current_value is not None else "0"
+                # Verify it matches a known option, else use first
+                known_values = {str(ev["value"]) for ev in device_ctrl.enum_values}
+                if str_value not in known_values and options:
+                    str_value = options[0].value
 
                 self._controls.register(
                     EnumControl(
@@ -467,16 +466,12 @@ class SerialSink:
                         result = self._renderer.set_control(device_ctrl_id, device_value)
                         applied_value = float(value)
                     elif device_ctrl.control_type == "enum":
-                        # Map string value to numeric index
-                        if value in device_ctrl.enum_values:
-                            idx = device_ctrl.enum_values.index(value)
-                            # Special case for "cycle" mode which is 255
-                            if value == "cycle":
-                                device_value = 255
-                            else:
-                                device_value = idx
-                        else:
-                            device_value = 0
+                        # Map string option value to numeric device value
+                        device_value = 0
+                        for ev in device_ctrl.enum_values:
+                            if str(ev["value"]) == str(value):
+                                device_value = ev["value"]
+                                break
                         result = self._renderer.set_control(device_ctrl_id, device_value)
                         applied_value = value
                     elif device_ctrl.control_type == "action":
@@ -506,10 +501,11 @@ class SerialSink:
                             elif device_ctrl.name == "gamma":
                                 applied_value = float(actual_value) / 10.0
                             elif device_ctrl.control_type == "enum":
-                                if actual_value == 255 and "cycle" in device_ctrl.enum_values:
-                                    applied_value = "cycle"
-                                elif actual_value < len(device_ctrl.enum_values):
-                                    applied_value = device_ctrl.enum_values[actual_value]
+                                # Map numeric value back to string option value
+                                for ev in device_ctrl.enum_values:
+                                    if ev["value"] == actual_value:
+                                        applied_value = str(ev["value"])
+                                        break
                             else:
                                 applied_value = int(actual_value)
 

@@ -80,7 +80,7 @@
                     {% elif control.type == 'enum' %}
                     <select class="control-input" onchange="setSourceControl('{{ source.id }}', '{{ control.id }}', this.value)">
                         {% for option in control.options %}
-                        <option value="{{ option.value }}" {% if current_value == option.value %}selected{% endif %}>
+                        <option value="{{ option.value }}" {% if current_value|string == option.value|string %}selected{% endif %}>
                             {{ option.label }}
                         </option>
                         {% endfor %}

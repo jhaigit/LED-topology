@@ -45,6 +45,7 @@ from ltp_serial_cli.protocol import (
     CTRL_INT8,
     CTRL_INT16,
     CTRL_ACTION,
+    CTRL_ENUM,
     CTRL_FLAG_HARDWARE,
     CTRL_FLAG_READONLY,
     CTRL_FLAG_VOLATILE,
@@ -60,6 +61,7 @@ CTRL_TYPE_NAMES = {
     CTRL_INT8: "int8",
     CTRL_INT16: "int16",
     CTRL_ACTION: "action",
+    CTRL_ENUM: "enum",
 }
 
 logger = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ class DeviceControl:
     min_value: int | None = None
     max_value: int | None = None
     flags: int = 0  # CTRL_FLAG_* bitmask
-    enum_values: list[str] = field(default_factory=list)
+    enum_values: list = field(default_factory=list)  # list of {"value": int, "label": str}
     description: str = ""
 
     @property
@@ -270,6 +272,7 @@ class V2Renderer:
                     min_value=ctrl["min"],
                     max_value=ctrl["max"],
                     flags=ctrl.get("flags", 0),
+                    enum_values=ctrl.get("enum_values", []),
                     description=ctrl.get("description", ""),
                 )
             logger.debug(f"Device controls from INFO_CONTROLS: {list(self._controls.keys())}")
