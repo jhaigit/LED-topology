@@ -200,12 +200,14 @@ class Controller:
                 # Update existing
                 state = self._sources[device_key]
                 old_port = state.port
+                was_offline = not state.online
                 state.device = device
                 state.last_seen = datetime.now()
                 state.online = True
-                # If port changed, source was restarted - refetch capabilities
-                if state.port != old_port:
-                    logger.info(f"Source updated (port changed): {state.name}")
+                # Refetch capabilities if port changed or device came back online
+                if state.port != old_port or was_offline:
+                    reason = "port changed" if state.port != old_port else "back online"
+                    logger.info(f"Source updated ({reason}): {state.name}")
                     asyncio.create_task(self._fetch_device_info(state))
                 else:
                     logger.info(f"Source updated: {state.name}")
@@ -237,12 +239,14 @@ class Controller:
                 # Update existing
                 state = self._sinks[device_key]
                 old_port = state.port
+                was_offline = not state.online
                 state.device = device
                 state.last_seen = datetime.now()
                 state.online = True
-                # If port changed, sink was restarted - refetch capabilities
-                if state.port != old_port:
-                    logger.info(f"Sink updated (port changed): {state.name}")
+                # Refetch capabilities if port changed or device came back online
+                if state.port != old_port or was_offline:
+                    reason = "port changed" if state.port != old_port else "back online"
+                    logger.info(f"Sink updated ({reason}): {state.name}")
                     asyncio.create_task(self._fetch_device_info(state))
                 else:
                     logger.info(f"Sink updated: {state.name}")
@@ -508,9 +512,18 @@ class Controller:
     async def refresh_discovery(self) -> None:
         """Force a refresh of mDNS service discovery.
 
-        Restarts the service browser to pick up any missed announcements.
+        Restarts the service browser and refetches capabilities from all
+        online devices.
         """
         if self._browser:
             logger.info("Refreshing mDNS discovery...")
             await self._browser.refresh()
             logger.info("mDNS discovery refreshed")
+
+        # Refetch capabilities from all online devices
+        all_online = self.online_sources + self.online_sinks
+        if all_online:
+            await asyncio.gather(
+                *(self._fetch_device_info(s) for s in all_online),
+                return_exceptions=True,
+            )
