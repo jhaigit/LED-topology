@@ -137,16 +137,38 @@ bool heartbeatState = false;
 // Control definitions
 #define NUM_CONTROLS 10
 
+// Control name/description strings in PROGMEM to save RAM
+static const char cn0[] PROGMEM = "brightness";   static const char cd0[] PROGMEM = "0-255";
+static const char cn1[] PROGMEM = "gamma";         static const char cd1[] PROGMEM = "x10, 10=1.0";
+static const char cn2[] PROGMEM = "idle_timeout";  static const char cd2[] PROGMEM = "secs, 0=off";
+static const char cn3[] PROGMEM = "auto_show";     static const char cd3[] PROGMEM = "show after cmds";
+static const char cn4[] PROGMEM = "frame_ack";     static const char cd4[] PROGMEM = "ack frames";
+static const char cn5[] PROGMEM = "status_interval"; static const char cd5[] PROGMEM = "ms, 0=off";
+static const char cn6[] PROGMEM = "local_mode";    static const char cd6[] PROGMEM = "idle display mode";
+static const char cn7[] PROGMEM = "cycle_time";    static const char cd7[] PROGMEM = "mode cycle, secs";
+static const char cn8[] PROGMEM = "save";          static const char cd8[] PROGMEM = "save to EEPROM";
+static const char cn9[] PROGMEM = "reboot";        static const char cd9[] PROGMEM = "restart";
+
+// Enum option labels (PROGMEM)
+static const char el_off[]     PROGMEM = "Off";
+static const char el_cylon[]   PROGMEM = "Cylon";
+static const char el_rainbow[] PROGMEM = "Rainbow";
+static const char el_fire[]    PROGMEM = "Fire";
+static const char el_sparkle[] PROGMEM = "Sparkle";
+static const char el_chase[]   PROGMEM = "Chase";
+static const char el_mitosis[] PROGMEM = "Mitosis";
+static const char el_cycle[]   PROGMEM = "Cycle";
+
 // Enum option definitions
 struct EnumOption {
     uint8_t value;
-    const char* label;
+    const char* label;  // PROGMEM pointer
 };
 
-static const EnumOption localModeOpts[] = {
-    { 0, "Off" }, { 1, "Cylon" }, { 2, "Rainbow" },
-    { 3, "Fire" }, { 4, "Sparkle" }, { 5, "Chase" },
-    { 6, "Mitosis" }, { 255, "Cycle" }
+static const EnumOption localModeOpts[] PROGMEM = {
+    { 0, el_off }, { 1, el_cylon }, { 2, el_rainbow },
+    { 3, el_fire }, { 4, el_sparkle }, { 5, el_chase },
+    { 6, el_mitosis }, { 255, el_cycle }
 };
 #define LOCAL_MODE_NUM_OPTS 8
 
@@ -157,24 +179,24 @@ struct ControlDef {
     uint8_t flags;
     int16_t minVal;
     int16_t maxVal;
-    const char* name;
-    const char* description;
-    uint8_t numEnumOpts;
-    const EnumOption* enumOpts;
+    const char* name;        // PROGMEM pointer
+    const char* description; // PROGMEM pointer
+    uint8_t numEnumOpts;     // 0 for non-enum controls
+    const EnumOption* enumOpts; // PROGMEM pointer, NULL for non-enum
 };
 
-static const ControlDef controlDefs[NUM_CONTROLS] = {
-    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,   "brightness", "0-255", 0, NULL },
-    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,    "gamma", "x10, 10=1.0", 0, NULL },
-    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767, "idle_timeout", "secs, 0=off", 0, NULL },
-    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "auto_show", "show after cmds", 0, NULL },
-    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, "frame_ack", "ack frames", 0, NULL },
-    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, "status_interval", "ms, 0=off", 0, NULL },
-    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_ENUM,   CTRL_FLAG_HARDWARE, 0,     255,   "local_mode", "idle display mode", LOCAL_MODE_NUM_OPTS, localModeOpts },
-    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,  "cycle_time", "mode cycle, secs", 0, NULL },
+static const ControlDef controlDefs[NUM_CONTROLS] PROGMEM = {
+    { CTRL_ID_BRIGHTNESS,      CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 0,     255,        cn0, cd0, 0, NULL },
+    { CTRL_ID_GAMMA,           CTRL_TYPE_UINT8,  CTRL_FLAG_HARDWARE, 10,    30,         cn1, cd1, 0, NULL },
+    { CTRL_ID_IDLE_TIMEOUT,    CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 0,     32767,      cn2, cd2, 0, NULL },
+    { CTRL_ID_AUTO_SHOW,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn3, cd3, 0, NULL },
+    { CTRL_ID_FRAME_ACK,       CTRL_TYPE_BOOL,   CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 1, cn4, cd4, 0, NULL },
+    { CTRL_ID_STATUS_INTERVAL, CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE | CTRL_FLAG_VOLATILE, 0, 32767, cn5, cd5, 0, NULL },
+    { CTRL_ID_LOCAL_MODE,      CTRL_TYPE_ENUM,   CTRL_FLAG_HARDWARE, 0,     255,        cn6, cd6, LOCAL_MODE_NUM_OPTS, localModeOpts },
+    { CTRL_ID_CYCLE_TIME,      CTRL_TYPE_UINT16, CTRL_FLAG_HARDWARE, 1,     3600,       cn7, cd7, 0, NULL },
     // Action controls
-    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "save", "save to EEPROM", 0, NULL },
-    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, "reboot", "restart", 0, NULL },
+    { CTRL_ID_SAVE_CONFIG,     CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn8, cd8, 0, NULL },
+    { CTRL_ID_REBOOT,          CTRL_TYPE_ACTION, CTRL_FLAG_HARDWARE | CTRL_FLAG_ACTION, 0, 0, cn9, cd9, 0, NULL },
 };
 
 // Get current value of a control (returns value, size in bytes via pointer)
@@ -724,6 +746,118 @@ void sendHello() {
     protocol.sendPacket(CMD_HELLO, payload, 12);
 }
 
+// Streaming packet helpers — write directly to Serial, no buffer needed.
+// Matches the same wire format as protocol.sendPacket().
+static uint8_t streamChecksum;
+
+static void streamBegin(uint8_t cmd, uint16_t payloadLen) {
+    streamChecksum = 0;
+    Serial.write(LTP_START_BYTE);
+    uint8_t flags = 0;
+    Serial.write(flags);         streamChecksum ^= flags;
+    uint8_t lo = payloadLen & 0xFF;
+    uint8_t hi = (payloadLen >> 8) & 0xFF;
+    Serial.write(lo);           streamChecksum ^= lo;
+    Serial.write(hi);           streamChecksum ^= hi;
+    Serial.write(cmd);          streamChecksum ^= cmd;
+}
+
+static void streamByte(uint8_t b) {
+    Serial.write(b);
+    streamChecksum ^= b;
+}
+
+static void streamEnd() {
+    Serial.write(streamChecksum);
+}
+
+// Send INFO_CONTROLS response by streaming directly to Serial.
+// Avoids large stack buffer which would overflow ATmega328P RAM.
+static void sendInfoControls() {
+    // Pass 1: compute total payload length
+    uint16_t totalLen = 1; // NUM_CONTROLS byte
+    for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
+        totalLen += 7; // id + type + flags + min(2) + max(2)
+        uint8_t valueSize;
+        uint8_t id = pgm_read_byte(&controlDefs[i].id);
+        uint8_t type = pgm_read_byte(&controlDefs[i].type);
+        getControlValue(id, &valueSize);
+        totalLen += valueSize;
+        const char* name = (const char*)pgm_read_ptr(&controlDefs[i].name);
+        totalLen += strlen_P(name) + 1;
+        const char* desc = (const char*)pgm_read_ptr(&controlDefs[i].description);
+        totalLen += strlen_P(desc) + 1;
+        // Enum options: num_options(1) + for each: value(1) + label(\0)
+        if (type == CTRL_TYPE_ENUM) {
+            uint8_t numOpts = pgm_read_byte(&controlDefs[i].numEnumOpts);
+            const EnumOption* opts = (const EnumOption*)pgm_read_ptr(&controlDefs[i].enumOpts);
+            totalLen += 1; // num_options byte
+            for (uint8_t j = 0; j < numOpts; j++) {
+                totalLen += 1; // value byte
+                const char* label = (const char*)pgm_read_ptr(&opts[j].label);
+                totalLen += strlen_P(label) + 1;
+            }
+        }
+    }
+
+    // Pass 2: stream the packet
+    streamBegin(CMD_INFO_RESPONSE, totalLen);
+    streamByte(NUM_CONTROLS);
+
+    for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
+        uint8_t id = pgm_read_byte(&controlDefs[i].id);
+        uint8_t type = pgm_read_byte(&controlDefs[i].type);
+        uint8_t ctrlFlags = pgm_read_byte(&controlDefs[i].flags);
+        int16_t minVal = (int16_t)pgm_read_word(&controlDefs[i].minVal);
+        int16_t maxVal = (int16_t)pgm_read_word(&controlDefs[i].maxVal);
+
+        streamByte(id);
+        streamByte(type);
+        streamByte(ctrlFlags);
+        streamByte(minVal & 0xFF);
+        streamByte((minVal >> 8) & 0xFF);
+        streamByte(maxVal & 0xFF);
+        streamByte((maxVal >> 8) & 0xFF);
+
+        uint8_t valueSize;
+        uint16_t value = getControlValue(id, &valueSize);
+        streamByte(value & 0xFF);
+        if (valueSize > 1) {
+            streamByte((value >> 8) & 0xFF);
+        }
+
+        const char* name = (const char*)pgm_read_ptr(&controlDefs[i].name);
+        char c;
+        while ((c = pgm_read_byte(name++)) != 0) {
+            streamByte(c);
+        }
+        streamByte(0);
+
+        const char* desc = (const char*)pgm_read_ptr(&controlDefs[i].description);
+        while ((c = pgm_read_byte(desc++)) != 0) {
+            streamByte(c);
+        }
+        streamByte(0);
+
+        // Stream enum options after name/description
+        if (type == CTRL_TYPE_ENUM) {
+            uint8_t numOpts = pgm_read_byte(&controlDefs[i].numEnumOpts);
+            const EnumOption* opts = (const EnumOption*)pgm_read_ptr(&controlDefs[i].enumOpts);
+            streamByte(numOpts);
+            for (uint8_t j = 0; j < numOpts; j++) {
+                streamByte(pgm_read_byte(&opts[j].value));
+                const char* label = (const char*)pgm_read_ptr(&opts[j].label);
+                while ((c = pgm_read_byte(label++)) != 0) {
+                    streamByte(c);
+                }
+                streamByte(0);
+            }
+        }
+    }
+
+    streamEnd();
+}
+
 void handleGetInfo(const uint8_t* payload, uint16_t length) {
     if (length < 1) {
         protocol.sendNak(CMD_GET_INFO, ERR_INVALID_LENGTH);
@@ -731,7 +865,7 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
     }
 
     uint8_t infoType = payload[0];
-    uint8_t response[450];  // Large enough for INFO_CONTROLS with enum options
+    uint8_t response[64];  // Small buffer for non-CONTROLS responses
     uint16_t respLen = 0;
 
     switch (infoType) {
@@ -851,51 +985,8 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             break;
 
         case INFO_CONTROLS:
-            // Return control metadata: count, then for each:
-            // id(1), type(1), flags(1), min(2), max(2), value(1-2), name(null-term), description(null-term)
-            response[respLen++] = NUM_CONTROLS;
-            for (uint8_t i = 0; i < NUM_CONTROLS; i++) {
-                const ControlDef& ctrl = controlDefs[i];
-                response[respLen++] = ctrl.id;
-                response[respLen++] = ctrl.type;
-                response[respLen++] = ctrl.flags;
-                response[respLen++] = ctrl.minVal & 0xFF;
-                response[respLen++] = (ctrl.minVal >> 8) & 0xFF;
-                response[respLen++] = ctrl.maxVal & 0xFF;
-                response[respLen++] = (ctrl.maxVal >> 8) & 0xFF;
-                // Current value (1 or 2 bytes depending on type)
-                uint8_t valueSize;
-                uint16_t value = getControlValue(ctrl.id, &valueSize);
-                response[respLen++] = value & 0xFF;
-                if (valueSize > 1) {
-                    response[respLen++] = (value >> 8) & 0xFF;
-                }
-                // Copy name (null-terminated)
-                const char* name = ctrl.name;
-                while (*name && respLen < sizeof(response) - 2) {
-                    response[respLen++] = *name++;
-                }
-                response[respLen++] = 0;
-                // Copy description (null-terminated)
-                const char* desc = ctrl.description;
-                while (*desc && respLen < sizeof(response) - 1) {
-                    response[respLen++] = *desc++;
-                }
-                response[respLen++] = 0;
-                // Append enum options if CTRL_TYPE_ENUM
-                if (ctrl.type == CTRL_TYPE_ENUM && ctrl.enumOpts != NULL) {
-                    response[respLen++] = ctrl.numEnumOpts;
-                    for (uint8_t j = 0; j < ctrl.numEnumOpts; j++) {
-                        response[respLen++] = ctrl.enumOpts[j].value;
-                        const char* label = ctrl.enumOpts[j].label;
-                        while (*label && respLen < sizeof(response) - 1) {
-                            response[respLen++] = *label++;
-                        }
-                        response[respLen++] = 0;
-                    }
-                }
-            }
-            break;
+            sendInfoControls();
+            return;  // sendInfoControls sends its own packet
 
         default:
             protocol.sendNak(CMD_GET_INFO, ERR_INVALID_PARAM);
