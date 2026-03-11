@@ -33,6 +33,8 @@ def cmd_info(device: LtpDevice, args: argparse.Namespace):
     print(f"Firmware: v{info.firmware_version}")
     print(f"Strips: {info.strip_count}")
     print(f"Total Pixels: {info.total_pixels}")
+    if info.is_matrix:
+        print(f"Geometry: {info.matrix_width}x{info.matrix_height} matrix")
     print(f"Controls: {info.control_count}")
     print(f"Inputs: {info.input_count}")
     print(f"Capabilities:")
