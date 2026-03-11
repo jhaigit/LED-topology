@@ -406,7 +406,7 @@ function initImageCanvas(sourceId) {
     };
     imageCanvases[sourceId] = state;
 
-    // Load the source image
+    // Load the source image then fetch viewport once image is ready
     const img = new Image();
     img.onload = function() {
         state.img = img;
@@ -414,16 +414,10 @@ function initImageCanvas(sourceId) {
         state.prevH = img.naturalHeight;
         canvas.width = state.prevW;
         canvas.height = state.prevH;
+        // Viewport fetch will also set imgW/imgH
         fetchViewport(state);
     };
     img.src = `/api/virtual-sources/${sourceId}/source-image?t=` + Date.now();
-
-    // Fetch image dimensions from first response headers
-    fetch(`/api/virtual-sources/${sourceId}/source-image`)
-        .then(resp => {
-            state.imgW = parseInt(resp.headers.get('X-Image-Width') || '0');
-            state.imgH = parseInt(resp.headers.get('X-Image-Height') || '0');
-        });
 
     // Mouse events for dragging
     canvas.addEventListener('mousedown', (e) => onCanvasMouseDown(e, state));
@@ -486,10 +480,19 @@ function drawImageCanvas(state) {
     ctx.setLineDash([]);
 }
 
+function canvasMouseCoords(e, canvas) {
+    // Convert CSS mouse coords to canvas pixel coords
+    // (canvas may be CSS-scaled via max-width:100%)
+    const rect = canvas.getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    const cssY = e.clientY - rect.top;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return { x: cssX * scaleX, y: cssY * scaleY };
+}
+
 function onCanvasMouseDown(e, state) {
-    const rect = state.canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const { x: mx, y: my } = canvasMouseCoords(e, state.canvas);
 
     const { scale, vpX, vpY, vpW, vpH } = state;
     const rx = vpX * scale;
@@ -507,9 +510,7 @@ function onCanvasMouseDown(e, state) {
 }
 
 function onCanvasMouseMove(e, state) {
-    const rect = state.canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
+    const { x: mx, y: my } = canvasMouseCoords(e, state.canvas);
 
     if (!state.dragging) {
         // Update cursor if hovering over viewport
