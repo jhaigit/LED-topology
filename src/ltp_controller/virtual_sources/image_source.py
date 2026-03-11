@@ -46,6 +46,13 @@ class ImageSource(VirtualSource):
         self._image_path = ""
         super().__init__(config)
 
+        # Ensure 2D dimensions — default to square if 1D
+        dims = self.config.output_dimensions
+        if len(dims) < 2 or dims[1] <= 1:
+            n = dims[0]
+            side = max(1, int(math.isqrt(n)))
+            self.config.output_dimensions = [side, side]
+
         # Load image from saved path if present
         saved_path = self.config.control_values.get("_image_path", "")
         if saved_path and os.path.isfile(saved_path):
