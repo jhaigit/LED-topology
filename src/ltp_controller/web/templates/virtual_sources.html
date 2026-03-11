@@ -320,13 +320,24 @@ function refreshPreview(sourceId) {
     }
 }
 
-// Refresh all previews periodically for animated sources
-setInterval(() => {
-    document.querySelectorAll('.preview-img').forEach(img => {
-        const src = img.src.split('?')[0];
-        img.src = src + '?t=' + Date.now();
-    });
-}, 200);
+// Refresh previews only when page is visible, at 2 fps
+let previewTimer = null;
+function startPreviewRefresh() {
+    if (previewTimer) return;
+    previewTimer = setInterval(() => {
+        document.querySelectorAll('.preview-img').forEach(img => {
+            const src = img.src.split('?')[0];
+            img.src = src + '?t=' + Date.now();
+        });
+    }, 500);
+}
+function stopPreviewRefresh() {
+    if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
+}
+document.addEventListener('visibilitychange', () => {
+    document.hidden ? stopPreviewRefresh() : startPreviewRefresh();
+});
+if (!document.hidden) startPreviewRefresh();
 
 function startSource(id) {
     fetch(`/api/virtual-sources/${id}/start`, { method: 'POST' })
