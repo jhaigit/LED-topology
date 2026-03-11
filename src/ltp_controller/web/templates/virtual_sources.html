@@ -28,7 +28,14 @@
             </div>
             <div class="detail-row">
                 <span class="label">Dimensions:</span>
-                <span class="value">{{ vs.config.output_dimensions|join('x') }}</span>
+                <span class="value dims-display" id="dims-display-{{ vs.id }}"
+                      onclick="editDimensions('{{ vs.id }}', {{ vs.config.output_dimensions }})">{{ vs.config.output_dimensions|join('x') }}</span>
+                <span class="dims-edit" id="dims-edit-{{ vs.id }}" style="display:none">
+                    <input type="number" id="dims-w-{{ vs.id }}" min="1" max="10000" style="width:60px"
+                           value="{{ vs.config.output_dimensions[0] }}">x<input type="number" id="dims-h-{{ vs.id }}" min="1" max="10000" style="width:60px"
+                           value="{{ vs.config.output_dimensions[1] if vs.config.output_dimensions|length > 1 else 1 }}">
+                    <button class="btn btn-sm" onclick="saveDimensions('{{ vs.id }}')">Set</button>
+                </span>
             </div>
             <div class="detail-row">
                 <span class="label">Frame Rate:</span>
@@ -295,6 +302,26 @@ function createSource(event) {
             showToast('Error creating source: ' + (data.error || 'Unknown error'), 'error');
         }
     });
+}
+
+function editDimensions(sourceId, currentDims) {
+    document.getElementById('dims-display-' + sourceId).style.display = 'none';
+    document.getElementById('dims-edit-' + sourceId).style.display = '';
+    document.getElementById('dims-w-' + sourceId).value = currentDims[0];
+    document.getElementById('dims-h-' + sourceId).value = currentDims.length > 1 ? currentDims[1] : 1;
+}
+
+function saveDimensions(sourceId) {
+    const w = parseInt(document.getElementById('dims-w-' + sourceId).value) || 1;
+    const h = parseInt(document.getElementById('dims-h-' + sourceId).value) || 1;
+    const dims = h > 1 ? [w, h] : [w];
+    fetch(`/api/virtual-sources/${sourceId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ output_dimensions: dims })
+    })
+    .then(r => r.json())
+    .then(() => location.reload());
 }
 
 function updateControl(sourceId, controlId, value) {
@@ -637,6 +664,10 @@ function reloadImageCanvas(sourceId) {
 }
 </script>
 <style>
+.dims-display { cursor: pointer; text-decoration: underline dotted; }
+.dims-display:hover { color: var(--accent, #4a9eff); }
+.dims-edit { display: inline-flex; align-items: center; gap: 4px; }
+.dims-edit input { text-align: center; }
 .page-header {
     display: flex;
     justify-content: space-between;
