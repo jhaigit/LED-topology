@@ -264,6 +264,11 @@ function onTypeChange(type) {
     const is2D = matrixPatterns.includes(type);
     document.getElementById('dimensions-1d').style.display = is2D ? 'none' : 'block';
     document.getElementById('dimensions-2d').style.display = is2D ? 'block' : 'none';
+    // Image sources default to square geometry
+    if (type === 'image') {
+        document.getElementById('vs-width').value = 16;
+        document.getElementById('vs-height').value = 16;
+    }
 }
 
 function createSource(event) {

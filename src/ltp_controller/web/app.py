@@ -1434,33 +1434,17 @@ def create_app(
         if not isinstance(source, ImageSource) or source._image is None:
             return jsonify({"error": "No image loaded"}), 400
 
-        img_w = source._image_width
-        img_h = source._image_height
-        zoom = source.get_control("zoom")
-        vp_w = img_w / zoom
-        vp_h = img_h / zoom
-
-        pan_mode = source.get_control("pan_mode")
-        if pan_mode != "none" and source.is_running:
-            t = source.get_time_elapsed()
-            vp_x, vp_y = source._calc_pan_position(
-                t, pan_mode, img_w, img_h, vp_w, vp_h
-            )
-        else:
-            max_x = max(0, img_w - vp_w)
-            max_y = max(0, img_h - vp_h)
-            vp_x = source.get_control("viewport_x") * max_x
-            vp_y = source.get_control("viewport_y") * max_y
+        vp_x, vp_y, vp_w, vp_h = source.get_viewport_rect()
 
         return jsonify({
-            "image_width": img_w,
-            "image_height": img_h,
+            "image_width": source._image_width,
+            "image_height": source._image_height,
             "viewport_x": vp_x,
             "viewport_y": vp_y,
             "viewport_width": vp_w,
             "viewport_height": vp_h,
-            "zoom": zoom,
-            "pan_mode": pan_mode,
+            "zoom": source.get_control("zoom"),
+            "pan_mode": source.get_control("pan_mode"),
         })
 
     # ==================== Page: Scalar Sources ====================

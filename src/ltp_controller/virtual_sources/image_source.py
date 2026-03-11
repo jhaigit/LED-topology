@@ -225,6 +225,63 @@ class ImageSource(VirtualSource):
         self._image = np.array(img, dtype=np.uint8)
         self._image_height, self._image_width = self._image.shape[:2]
 
+    def get_viewport_rect(
+        self, time_elapsed: float | None = None
+    ) -> tuple[float, float, float, float]:
+        """Calculate the current viewport rectangle in image coordinates.
+
+        Returns (vp_x, vp_y, vp_w, vp_h).  The viewport aspect ratio
+        matches the output dimensions so it shows exactly what will
+        appear on the LEDs (unless fit_mode is 'stretch').
+        """
+        dims = self.config.output_dimensions
+        out_w = dims[0]
+        out_h = dims[1] if len(dims) >= 2 else 1
+
+        img_w = self._image_width
+        img_h = self._image_height
+        zoom = self.get_control("zoom")
+        fit_mode = self.get_control("fit_mode")
+
+        if fit_mode == "stretch" or out_h <= 0:
+            # Stretch: viewport covers the full image at zoom=1
+            vp_w = img_w / zoom
+            vp_h = img_h / zoom
+        else:
+            # Non-stretch: viewport matches output aspect ratio.
+            # At zoom=1 the largest such rectangle fits within the image.
+            out_aspect = out_w / out_h
+            img_aspect = img_w / max(1, img_h)
+
+            if out_aspect > img_aspect:
+                # Output wider than image - constrained by width
+                base_w = img_w
+                base_h = img_w / out_aspect
+            else:
+                # Output taller than image - constrained by height
+                base_h = img_h
+                base_w = img_h * out_aspect
+
+            vp_w = base_w / zoom
+            vp_h = base_h / zoom
+
+        # Get viewport position
+        if time_elapsed is None:
+            time_elapsed = self.get_time_elapsed()
+
+        pan_mode = self.get_control("pan_mode")
+        if pan_mode != "none":
+            vp_x, vp_y = self._calc_pan_position(
+                time_elapsed, pan_mode, img_w, img_h, vp_w, vp_h
+            )
+        else:
+            max_x = max(0, img_w - vp_w)
+            max_y = max(0, img_h - vp_h)
+            vp_x = self.get_control("viewport_x") * max_x
+            vp_y = self.get_control("viewport_y") * max_y
+
+        return vp_x, vp_y, vp_w, vp_h
+
     def render(self, num_pixels: int, time_elapsed: float) -> np.ndarray:
         pixels = np.zeros((num_pixels, 3), dtype=np.uint8)
 
@@ -239,27 +296,7 @@ class ImageSource(VirtualSource):
             out_w = dims[0]
             out_h = 1
 
-        img_w = self._image_width
-        img_h = self._image_height
-        zoom = self.get_control("zoom")
-
-        # Viewport size in image pixels (inverse of zoom)
-        # At zoom=1.0, viewport covers the whole image
-        vp_w = img_w / zoom
-        vp_h = img_h / zoom
-
-        # Get viewport position
-        pan_mode = self.get_control("pan_mode")
-        if pan_mode != "none":
-            vp_x, vp_y = self._calc_pan_position(
-                time_elapsed, pan_mode, img_w, img_h, vp_w, vp_h
-            )
-        else:
-            # Manual position - viewport_x/y are 0-1 fractions
-            max_x = max(0, img_w - vp_w)
-            max_y = max(0, img_h - vp_h)
-            vp_x = self.get_control("viewport_x") * max_x
-            vp_y = self.get_control("viewport_y") * max_y
+        vp_x, vp_y, vp_w, vp_h = self.get_viewport_rect(time_elapsed)
 
         # Extract viewport region and resize to output
         tile = self.get_control("tile")
