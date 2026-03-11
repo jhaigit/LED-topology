@@ -86,11 +86,11 @@ class ImageSource(VirtualSource):
             NumberControl(
                 id="zoom",
                 name="Zoom",
-                description="Viewport zoom (1.0 = fit image, higher = zoom in)",
-                value=1.0,
-                min=1.0,
-                max=20.0,
-                step=0.1,
+                description="Viewport zoom (0 = fit, 100 = max zoom)",
+                value=0.0,
+                min=0.0,
+                max=100.0,
+                step=1.0,
                 group="viewport",
             )
         )
@@ -245,7 +245,9 @@ class ImageSource(VirtualSource):
 
         img_w = self._image_width
         img_h = self._image_height
-        zoom = self.get_control("zoom")
+        # Exponential zoom: 0→1x, 50→~4.5x, 100→20x
+        zoom_pct = self.get_control("zoom")
+        zoom = math.exp(zoom_pct / 100.0 * math.log(20.0))
         fit_mode = self.get_control("fit_mode")
 
         if fit_mode == "stretch" or out_h <= 0:
