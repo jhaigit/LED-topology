@@ -1080,6 +1080,7 @@ def create_app(
         """List available virtual source types."""
         # Categorization mapping
         matrix_patterns = {"grid", "corners", "sweep", "checkerboard", "pixel_index", "coordinates", "test_card"}
+        media_sources = {"image"}
         visualizers = {"bar_graph", "multi_bar", "vu_meter"}
         monitors = {"system_monitor", "cpu_cores"}
 
@@ -1087,6 +1088,8 @@ def create_app(
         for type_name, type_class in VIRTUAL_SOURCE_TYPES.items():
             if type_name in matrix_patterns:
                 category = "matrix_pattern"
+            elif type_name in media_sources:
+                category = "media"
             elif type_name in visualizers:
                 category = "visualizer"
             elif type_name in monitors:
@@ -1260,6 +1263,53 @@ def create_app(
 
         source.set_data(data)
         return jsonify({"status": "ok"})
+
+    @app.route("/api/virtual-sources/<source_id>/image", methods=["POST"])
+    def api_virtual_source_image(source_id: str) -> Any:
+        """Upload an image to an image virtual source.
+
+        Accepts multipart form data with:
+        - file: Image file (png, jpg, jpeg, bmp, webp, gif)
+        Or JSON with:
+        - path: Filesystem path to an image file
+        """
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        from ltp_controller.virtual_sources.image_source import ImageSource
+
+        if not isinstance(source, ImageSource):
+            return jsonify({"error": "Source is not an image source"}), 400
+
+        # Handle file upload
+        if "file" in request.files:
+            file = request.files["file"]
+            if not file.filename:
+                return jsonify({"error": "No file selected"}), 400
+
+            image_data = file.read()
+            if source.load_image_bytes(image_data):
+                return jsonify({
+                    "status": "ok",
+                    "image": source.to_dict().get("image_info", {}),
+                })
+            return jsonify({"error": "Failed to load image"}), 400
+
+        # Handle JSON path
+        data = request.get_json(silent=True)
+        if data and "path" in data:
+            if source._load_image_file(data["path"]):
+                return jsonify({
+                    "status": "ok",
+                    "image": source.to_dict().get("image_info", {}),
+                })
+            return jsonify({"error": f"Failed to load image from path: {data['path']}"}), 400
+
+        return jsonify({"error": "No file or path provided"}), 400
 
     @app.route("/api/virtual-sources/<source_id>/start", methods=["POST"])
     def api_virtual_source_start(source_id: str) -> Any:

@@ -30,6 +30,7 @@ from ltp_controller.virtual_sources.monitors import (
     SystemMonitor,
     CPUCoreMonitor,
 )
+from ltp_controller.virtual_sources.image_source import ImageSource
 from ltp_controller.virtual_sources.text_source import (
     TextSource,
     CounterSource,
@@ -78,6 +79,8 @@ __all__ = [
     # Monitors
     "SystemMonitor",
     "CPUCoreMonitor",
+    # Image source
+    "ImageSource",
     # Text sources
     "TextSource",
     "CounterSource",
@@ -122,6 +125,8 @@ VIRTUAL_SOURCE_TYPES: dict[str, type[VirtualSource]] = {
     # Monitors
     "system_monitor": SystemMonitor,
     "cpu_cores": CPUCoreMonitor,
+    # Image
+    "image": ImageSource,
     # Text sources
     "text": TextSource,
     "counter": CounterSource,
