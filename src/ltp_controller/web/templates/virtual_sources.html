@@ -50,6 +50,30 @@
             </div>
         </div>
 
+        {% if vs.source_type == 'image' %}
+        <div class="image-upload-section">
+            <h4>Image</h4>
+            {% if vs.to_dict().get('image_info', {}).get('loaded') %}
+            <div class="image-info">
+                {{ vs.to_dict()['image_info']['width'] }}x{{ vs.to_dict()['image_info']['height'] }}
+                {% if vs.to_dict()['image_info'].get('path') %}
+                <span class="image-path" title="{{ vs.to_dict()['image_info']['path'] }}">{{ vs.to_dict()['image_info']['path']|truncate(30) }}</span>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="image-info">No image loaded</div>
+            {% endif %}
+            <div class="image-upload-row">
+                <input type="file" id="image-file-{{ vs.id }}" accept="image/*" style="display:none"
+                       onchange="uploadImage('{{ vs.id }}', this)">
+                <button class="btn btn-sm" onclick="document.getElementById('image-file-{{ vs.id }}').click()">Upload File</button>
+                <input type="text" class="control-text" id="image-path-{{ vs.id }}"
+                       placeholder="/path/to/image.png" style="flex:1">
+                <button class="btn btn-sm" onclick="loadImagePath('{{ vs.id }}')">Load Path</button>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="device-controls">
             <h4>Controls</h4>
             <ul class="control-list" id="controls-{{ vs.id }}">
@@ -171,6 +195,9 @@
                         <option value="system_monitor">System Monitor (CPU/Mem/Net)</option>
                         <option value="cpu_cores">CPU Cores</option>
                     </optgroup>
+                    <optgroup label="Media">
+                        <option value="image">Image - Display image with viewport panning</option>
+                    </optgroup>
                     <optgroup label="Text">
                         <option value="text">Text Display - Static/scrolling text</option>
                         <option value="counter">Counter - Counting number display</option>
@@ -210,7 +237,7 @@ if (document.getElementById('vs-grid')) {
     LtpListTools.initSearch('vs-grid', { type: 'cards', placeholder: 'Search virtual sources...' });
 }
 
-const matrixPatterns = ['grid', 'corners', 'sweep', 'checkerboard', 'pixel_index', 'coordinates', 'test_card', 'text', 'counter', 'clock'];
+const matrixPatterns = ['grid', 'corners', 'sweep', 'checkerboard', 'pixel_index', 'coordinates', 'test_card', 'image', 'text', 'counter', 'clock'];
 
 function showCreateModal() {
     document.getElementById('createModal').style.display = 'flex';
@@ -316,6 +343,45 @@ async function deleteSource(id) {
         fetch(`/api/virtual-sources/${id}`, { method: 'DELETE' })
             .then(() => location.reload());
     }
+}
+
+function uploadImage(sourceId, input) {
+    if (!input.files || !input.files[0]) return;
+    const formData = new FormData();
+    formData.append('file', input.files[0]);
+    fetch(`/api/virtual-sources/${sourceId}/image`, {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            showToast('Image loaded: ' + data.image.width + 'x' + data.image.height, 'success');
+            location.reload();
+        } else {
+            showToast('Error: ' + (data.error || 'Failed to load image'), 'error');
+        }
+    });
+}
+
+function loadImagePath(sourceId) {
+    const pathInput = document.getElementById('image-path-' + sourceId);
+    const path = pathInput.value.trim();
+    if (!path) { showToast('Enter a file path', 'error'); return; }
+    fetch(`/api/virtual-sources/${sourceId}/image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: path })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            showToast('Image loaded: ' + data.image.width + 'x' + data.image.height, 'success');
+            location.reload();
+        } else {
+            showToast('Error: ' + (data.error || 'Failed to load image'), 'error');
+        }
+    });
 }
 </script>
 <style>
@@ -423,6 +489,30 @@ async function deleteSource(id) {
     max-width: 100%;
     height: auto;
     image-rendering: pixelated;
+}
+.image-upload-section {
+    margin-bottom: 1rem;
+}
+.image-upload-section h4 {
+    margin: 0 0 0.5rem 0;
+    font-size: 0.9em;
+    color: var(--text-secondary, #9ca3af);
+}
+.image-info {
+    font-size: 0.85em;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary, #9ca3af);
+}
+.image-path {
+    margin-left: 0.5em;
+    opacity: 0.7;
+    font-family: monospace;
+    font-size: 0.85em;
+}
+.image-upload-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
 }
 </style>
 {% endblock %}
