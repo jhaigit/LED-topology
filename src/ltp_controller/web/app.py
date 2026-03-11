@@ -1366,6 +1366,103 @@ def create_app(
 
         return _generate_led_svg_2d(pixels, width, height)
 
+    @app.route("/api/virtual-sources/<source_id>/source-image")
+    def api_virtual_source_image_get(source_id: str) -> Any:
+        """Get the full source image as JPEG for image sources.
+
+        Returns the loaded image scaled to a reasonable preview size.
+        Also returns viewport info as custom headers.
+        """
+        from flask import Response
+
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        from ltp_controller.virtual_sources.image_source import ImageSource
+
+        if not isinstance(source, ImageSource) or source._image is None:
+            # Return a 1x1 transparent pixel
+            return Response(
+                b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01'
+                b'\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00'
+                b'\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00'
+                b'\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82',
+                mimetype="image/png",
+            )
+
+        import io
+        from PIL import Image as PILImage
+
+        # Scale image to reasonable preview size (max 400px wide)
+        img = PILImage.fromarray(source._image)
+        max_preview = 400
+        if img.width > max_preview:
+            scale = max_preview / img.width
+            img = img.resize(
+                (max_preview, max(1, int(img.height * scale))),
+                PILImage.LANCZOS,
+            )
+
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=80)
+        buf.seek(0)
+
+        resp = Response(buf.read(), mimetype="image/jpeg")
+        # Pass image and viewport info as headers for the JS overlay
+        resp.headers["X-Image-Width"] = str(source._image_width)
+        resp.headers["X-Image-Height"] = str(source._image_height)
+        resp.headers["X-Preview-Width"] = str(img.width)
+        resp.headers["X-Preview-Height"] = str(img.height)
+        return resp
+
+    @app.route("/api/virtual-sources/<source_id>/viewport")
+    def api_virtual_source_viewport(source_id: str) -> Any:
+        """Get current viewport rectangle in image coordinates."""
+        if not virtual_source_manager:
+            return jsonify({"error": "Virtual sources not available"}), 503
+
+        source = virtual_source_manager.get(source_id)
+        if not source:
+            return jsonify({"error": "Virtual source not found"}), 404
+
+        from ltp_controller.virtual_sources.image_source import ImageSource
+
+        if not isinstance(source, ImageSource) or source._image is None:
+            return jsonify({"error": "No image loaded"}), 400
+
+        img_w = source._image_width
+        img_h = source._image_height
+        zoom = source.get_control("zoom")
+        vp_w = img_w / zoom
+        vp_h = img_h / zoom
+
+        pan_mode = source.get_control("pan_mode")
+        if pan_mode != "none" and source.is_running:
+            t = source.get_time_elapsed()
+            vp_x, vp_y = source._calc_pan_position(
+                t, pan_mode, img_w, img_h, vp_w, vp_h
+            )
+        else:
+            max_x = max(0, img_w - vp_w)
+            max_y = max(0, img_h - vp_h)
+            vp_x = source.get_control("viewport_x") * max_x
+            vp_y = source.get_control("viewport_y") * max_y
+
+        return jsonify({
+            "image_width": img_w,
+            "image_height": img_h,
+            "viewport_x": vp_x,
+            "viewport_y": vp_y,
+            "viewport_width": vp_w,
+            "viewport_height": vp_h,
+            "zoom": zoom,
+            "pan_mode": pan_mode,
+        })
+
     # ==================== Page: Scalar Sources ====================
 
     @app.route("/scalar-sources")

@@ -42,12 +42,18 @@
 
         <div class="device-preview" id="preview-container-{{ vs.id }}">
             <h4>Preview</h4>
+            {% if vs.source_type == 'image' %}
+            <div class="preview-frame image-preview-frame">
+                <canvas id="image-canvas-{{ vs.id }}" class="image-canvas"></canvas>
+            </div>
+            {% else %}
             <div class="preview-frame">
                 <img src="/api/virtual-sources/{{ vs.id }}/preview"
                      alt="Preview"
                      class="preview-img"
                      id="preview-{{ vs.id }}">
             </div>
+            {% endif %}
         </div>
 
         {% if vs.source_type == 'image' %}
@@ -325,10 +331,13 @@ let previewTimer = null;
 function startPreviewRefresh() {
     if (previewTimer) return;
     previewTimer = setInterval(() => {
+        // Refresh standard SVG previews (non-image sources)
         document.querySelectorAll('.preview-img').forEach(img => {
             const src = img.src.split('?')[0];
             img.src = src + '?t=' + Date.now();
         });
+        // Refresh image canvas viewport overlays
+        refreshImageCanvases();
     }, 500);
 }
 function stopPreviewRefresh() {
@@ -368,11 +377,213 @@ function uploadImage(sourceId, input) {
     .then(data => {
         if (data.status === 'ok') {
             showToast('Image loaded: ' + data.image.width + 'x' + data.image.height, 'success');
-            location.reload();
+            reloadImageCanvas(sourceId);
         } else {
             showToast('Error: ' + (data.error || 'Failed to load image'), 'error');
         }
     });
+}
+
+// ========== Image viewport canvas ==========
+const imageCanvases = {};
+
+function initImageCanvas(sourceId) {
+    const canvas = document.getElementById('image-canvas-' + sourceId);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const state = {
+        sourceId,
+        canvas,
+        ctx,
+        img: null,
+        imgW: 0, imgH: 0,       // original image size
+        prevW: 0, prevH: 0,     // preview image size
+        vpX: 0, vpY: 0,         // viewport in image coords
+        vpW: 0, vpH: 0,
+        dragging: false,
+        dragOffX: 0, dragOffY: 0,
+        scale: 1,               // canvas pixels per image pixel
+    };
+    imageCanvases[sourceId] = state;
+
+    // Load the source image
+    const img = new Image();
+    img.onload = function() {
+        state.img = img;
+        state.prevW = img.naturalWidth;
+        state.prevH = img.naturalHeight;
+        canvas.width = state.prevW;
+        canvas.height = state.prevH;
+        fetchViewport(state);
+    };
+    img.src = `/api/virtual-sources/${sourceId}/source-image?t=` + Date.now();
+
+    // Fetch image dimensions from first response headers
+    fetch(`/api/virtual-sources/${sourceId}/source-image`)
+        .then(resp => {
+            state.imgW = parseInt(resp.headers.get('X-Image-Width') || '0');
+            state.imgH = parseInt(resp.headers.get('X-Image-Height') || '0');
+        });
+
+    // Mouse events for dragging
+    canvas.addEventListener('mousedown', (e) => onCanvasMouseDown(e, state));
+    canvas.addEventListener('mousemove', (e) => onCanvasMouseMove(e, state));
+    canvas.addEventListener('mouseup', () => onCanvasMouseUp(state));
+    canvas.addEventListener('mouseleave', () => onCanvasMouseUp(state));
+    // Touch events
+    canvas.addEventListener('touchstart', (e) => { e.preventDefault(); onCanvasMouseDown(e.touches[0], state); });
+    canvas.addEventListener('touchmove', (e) => { e.preventDefault(); onCanvasMouseMove(e.touches[0], state); });
+    canvas.addEventListener('touchend', () => onCanvasMouseUp(state));
+}
+
+function fetchViewport(state) {
+    fetch(`/api/virtual-sources/${state.sourceId}/viewport`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) return;
+            state.imgW = data.image_width;
+            state.imgH = data.image_height;
+            state.vpX = data.viewport_x;
+            state.vpY = data.viewport_y;
+            state.vpW = data.viewport_width;
+            state.vpH = data.viewport_height;
+            state.scale = state.imgW > 0 ? state.prevW / state.imgW : 1;
+            drawImageCanvas(state);
+        });
+}
+
+function drawImageCanvas(state) {
+    const { ctx, canvas, img, scale, vpX, vpY, vpW, vpH } = state;
+    if (!img) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw image
+    ctx.drawImage(img, 0, 0);
+
+    // Darken area outside viewport
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw the viewport region (clear the darkening)
+    const rx = vpX * scale;
+    const ry = vpY * scale;
+    const rw = vpW * scale;
+    const rh = vpH * scale;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rx, ry, rw, rh);
+    ctx.clip();
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+
+    // Draw viewport rectangle border
+    ctx.strokeStyle = '#00ff88';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 2]);
+    ctx.strokeRect(rx, ry, rw, rh);
+    ctx.setLineDash([]);
+}
+
+function onCanvasMouseDown(e, state) {
+    const rect = state.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const { scale, vpX, vpY, vpW, vpH } = state;
+    const rx = vpX * scale;
+    const ry = vpY * scale;
+    const rw = vpW * scale;
+    const rh = vpH * scale;
+
+    // Check if click is inside viewport rect
+    if (mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh) {
+        state.dragging = true;
+        state.dragOffX = mx - rx;
+        state.dragOffY = my - ry;
+        state.canvas.style.cursor = 'grabbing';
+    }
+}
+
+function onCanvasMouseMove(e, state) {
+    const rect = state.canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    if (!state.dragging) {
+        // Update cursor if hovering over viewport
+        const { scale, vpX, vpY, vpW, vpH } = state;
+        const rx = vpX * scale;
+        const ry = vpY * scale;
+        const rw = vpW * scale;
+        const rh = vpH * scale;
+        if (mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh) {
+            state.canvas.style.cursor = 'grab';
+        } else {
+            state.canvas.style.cursor = 'default';
+        }
+        return;
+    }
+
+    // Move viewport
+    const { scale, imgW, imgH, vpW, vpH } = state;
+    const maxX = Math.max(0, imgW - vpW);
+    const maxY = Math.max(0, imgH - vpH);
+
+    let newX = (mx - state.dragOffX) / scale;
+    let newY = (my - state.dragOffY) / scale;
+    newX = Math.max(0, Math.min(newX, maxX));
+    newY = Math.max(0, Math.min(newY, maxY));
+
+    state.vpX = newX;
+    state.vpY = newY;
+    drawImageCanvas(state);
+}
+
+function onCanvasMouseUp(state) {
+    if (!state.dragging) return;
+    state.dragging = false;
+    state.canvas.style.cursor = 'grab';
+
+    // Send new viewport position to server
+    const { sourceId, imgW, imgH, vpW, vpH, vpX, vpY } = state;
+    const maxX = Math.max(0.001, imgW - vpW);
+    const maxY = Math.max(0.001, imgH - vpH);
+    const normX = vpX / maxX;
+    const normY = vpY / maxY;
+
+    // Also set pan_mode to none when manually dragging
+    fetch(`/api/virtual-sources/${sourceId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            viewport_x: Math.max(0, Math.min(1, normX)),
+            viewport_y: Math.max(0, Math.min(1, normY)),
+            pan_mode: 'none',
+        })
+    }).then(() => {
+        // Update the pan_mode dropdown if visible
+        const sel = document.querySelector(`#controls-${sourceId} [data-control-id="pan_mode"] select, select[data-source-id="${sourceId}"][data-control-id="pan_mode"]`);
+        if (sel) sel.value = 'none';
+    });
+}
+
+// Initialize all image canvases on load
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[id^="image-canvas-"]').forEach(canvas => {
+        const sourceId = canvas.id.replace('image-canvas-', '');
+        initImageCanvas(sourceId);
+    });
+});
+
+// Refresh viewport overlay for panning sources
+function refreshImageCanvases() {
+    for (const [sourceId, state] of Object.entries(imageCanvases)) {
+        if (!state.dragging && state.img) {
+            fetchViewport(state);
+        }
+    }
 }
 
 function loadImagePath(sourceId) {
@@ -388,11 +599,40 @@ function loadImagePath(sourceId) {
     .then(data => {
         if (data.status === 'ok') {
             showToast('Image loaded: ' + data.image.width + 'x' + data.image.height, 'success');
-            location.reload();
+            reloadImageCanvas(sourceId);
         } else {
             showToast('Error: ' + (data.error || 'Failed to load image'), 'error');
         }
     });
+}
+
+function reloadImageCanvas(sourceId) {
+    const state = imageCanvases[sourceId];
+    if (!state) { location.reload(); return; }
+    const img = new Image();
+    img.onload = function() {
+        state.img = img;
+        state.prevW = img.naturalWidth;
+        state.prevH = img.naturalHeight;
+        state.canvas.width = state.prevW;
+        state.canvas.height = state.prevH;
+        fetch(`/api/virtual-sources/${sourceId}/source-image`)
+            .then(resp => {
+                state.imgW = parseInt(resp.headers.get('X-Image-Width') || '0');
+                state.imgH = parseInt(resp.headers.get('X-Image-Height') || '0');
+                fetchViewport(state);
+            });
+    };
+    img.src = `/api/virtual-sources/${sourceId}/source-image?t=` + Date.now();
+    // Update image info text
+    fetch(`/api/virtual-sources/${sourceId}`)
+        .then(r => r.json())
+        .then(d => {
+            const info = d.image_info || {};
+            const card = state.canvas.closest('.device-card');
+            const infoEl = card ? card.querySelector('.image-info') : null;
+            if (infoEl) infoEl.textContent = info.loaded ? `${info.width}x${info.height}` : 'No image loaded';
+        });
 }
 </script>
 <style>
@@ -524,6 +764,15 @@ function loadImagePath(sourceId) {
     display: flex;
     gap: 0.5rem;
     align-items: center;
+}
+.image-preview-frame {
+    position: relative;
+}
+.image-canvas {
+    max-width: 100%;
+    height: auto;
+    image-rendering: pixelated;
+    border-radius: 4px;
 }
 </style>
 {% endblock %}
