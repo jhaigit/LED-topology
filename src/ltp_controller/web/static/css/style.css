@@ -332,9 +332,7 @@ h2 {
 .detail-row > span:last-child {
     font-family: monospace;
     text-align: right;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    word-break: break-all;
     min-width: 0;
 }
 
@@ -342,7 +340,6 @@ h2 {
     font-family: monospace;
     font-size: 0.75em;
     word-break: break-all;
-    white-space: normal;
 }
 
 .device-controls {
