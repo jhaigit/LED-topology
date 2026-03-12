@@ -319,21 +319,30 @@ h2 {
 .detail-row {
     display: flex;
     justify-content: space-between;
+    gap: 0.5rem;
     padding: 0.25rem 0;
 }
 
 .detail-row .label {
     color: var(--text-secondary);
+    flex-shrink: 0;
 }
 
-.detail-row .value {
+.detail-row .value,
+.detail-row > span:last-child {
     font-family: monospace;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 .id-value {
     font-family: monospace;
     font-size: 0.75em;
     word-break: break-all;
+    white-space: normal;
 }
 
 .device-controls {
