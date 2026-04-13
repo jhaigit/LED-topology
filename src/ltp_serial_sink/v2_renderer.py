@@ -300,8 +300,9 @@ class V2Renderer:
         if not self._device or not self._device_info:
             return
 
-        # Always try to query inputs - some devices may not properly report
-        # has_inputs capability but still support inputs
+        if not self._device.has_inputs:
+            return
+
         try:
             # Query all inputs from device
             inputs_data = self._device.get_inputs()
