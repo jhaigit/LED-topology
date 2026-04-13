@@ -63,17 +63,30 @@ window.LtpRouteGraph = (function() {
         const pad = 20;
         const spacing = 50;
 
-        sources.forEach((s, i) => {
+        function nextFreeY(usedY) {
+            let y = pad;
+            while (usedY.has(y)) y += spacing;
+            usedY.add(y);
+            return y;
+        }
+
+        const usedSrcY = new Set(
+            sources.filter(s => nodePositions[s.id]).map(s => nodePositions[s.id].y)
+        );
+        sources.forEach(s => {
             if (!nodePositions[s.id]) {
-                nodePositions[s.id] = { x: pad, y: pad + i * spacing };
+                nodePositions[s.id] = { x: pad, y: nextFreeY(usedSrcY) };
             }
         });
 
-        sinks.forEach((s, i) => {
+        const usedSinkY = new Set(
+            sinks.filter(s => nodePositions[s.id]).map(s => nodePositions[s.id].y)
+        );
+        sinks.forEach(s => {
             if (!nodePositions[s.id]) {
                 nodePositions[s.id] = {
                     x: (canvas ? canvas.width : 600) - NODE_W - pad,
-                    y: pad + i * spacing
+                    y: nextFreeY(usedSinkY)
                 };
             }
         });
