@@ -45,6 +45,11 @@ window.LtpRouteGraph = (function() {
 
         window.addEventListener('resize', resizeCanvas);
         draw();
+
+        // Re-measure after the browser completes layout — container.clientWidth
+        // may not reflect the final width when init() runs synchronously from
+        // an inline script before the first paint.
+        requestAnimationFrame(() => resizeCanvas());
     }
 
     function resizeCanvas() {
