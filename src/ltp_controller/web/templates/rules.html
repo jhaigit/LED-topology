@@ -52,6 +52,9 @@
                         {% if action.type == 'disable_route' %}Disable route <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
                         {% if action.type == 'enable_source' %}Enable source <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
                         {% if action.type == 'disable_source' %}Disable source <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'set_pixel' %}Set pixel <strong>{{ action.value.index }}</strong> to <span class="color-swatch" style="background:{{ action.value.color }}"></span> on <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'fill_solid' %}Fill <strong class="id-value">{{ action.target_id }}</strong> with <span class="color-swatch" style="background:{{ action.value.color }}"></span>{% endif %}
+                        {% if action.type == 'clear' %}Clear <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
                     </li>
                     {% endfor %}
                 </ul>
@@ -341,6 +344,15 @@
 .action-row .action-target { flex: 1; min-width: 150px; }
 .action-row .action-control { width: 120px; }
 .action-row .action-value { width: 100px; }
+.action-row .action-pixel-index { width: 70px; }
+.action-row .action-color { width: 50px; height: 32px; padding: 2px; cursor: pointer; }
+.color-swatch {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border: 1px solid #666;
+    border-radius: 2px;
+    vertical-align: middle;
+}
 .action-row .remove-btn {
     background: var(--danger-color, #ef4444);
     color: white;
@@ -554,6 +566,9 @@ function addAction(action = null) {
     row.innerHTML = `
         <select class="action-type" onchange="updateActionTargets(${id})">
             <option value="set_control">Set Control</option>
+            <option value="set_pixel">Set Pixel</option>
+            <option value="fill_solid">Fill Solid</option>
+            <option value="clear">Clear</option>
             <option value="enable_route">Enable Route</option>
             <option value="disable_route">Disable Route</option>
             <option value="enable_source">Enable Source</option>
@@ -562,6 +577,8 @@ function addAction(action = null) {
         <select class="action-target" data-type="sink" onchange="loadSinkControls(${id})">${sinkOptions}</select>
         <select class="action-control"><option value="">Select control...</option></select>
         <input type="text" class="action-value" placeholder="Value">
+        <input type="number" class="action-pixel-index" placeholder="Pixel" min="0" style="display:none">
+        <input type="color" class="action-color" value="#ffffff" style="display:none">
         <button type="button" class="remove-btn" onclick="removeAction(${id})">X</button>
     `;
 
@@ -573,17 +590,20 @@ function addAction(action = null) {
         updateActionTargets(id);
         row.querySelector('.action-target').value = action.target_id;
 
-        // For set_control, load controls then set value
         if (action.type === 'set_control' && action.target_id) {
             loadSinkControls(id).then(() => {
                 if (action.control_id) {
                     row.querySelector('.action-control').value = action.control_id;
                 }
             });
-        }
-
-        if (action.value !== null && action.value !== undefined) {
-            row.querySelector('.action-value').value = action.value;
+            if (action.value !== null && action.value !== undefined) {
+                row.querySelector('.action-value').value = action.value;
+            }
+        } else if (action.type === 'set_pixel' && action.value) {
+            row.querySelector('.action-pixel-index').value = action.value.index || 0;
+            row.querySelector('.action-color').value = action.value.color || '#ffffff';
+        } else if (action.type === 'fill_solid' && action.value) {
+            row.querySelector('.action-color').value = action.value.color || '#ffffff';
         }
     } else {
         // For new actions, initialize UI state (set_control is default)
@@ -602,10 +622,18 @@ function updateActionTargets(id) {
     const targetSelect = row.querySelector('.action-target');
     const controlSelect = row.querySelector('.action-control');
     const valueInput = row.querySelector('.action-value');
+    const pixelIndex = row.querySelector('.action-pixel-index');
+    const colorPicker = row.querySelector('.action-color');
 
     // Build options based on action type
     let options = '';
     let targetType = 'sink';
+
+    // Hide all optional fields first
+    controlSelect.style.display = 'none';
+    valueInput.style.display = 'none';
+    pixelIndex.style.display = 'none';
+    colorPicker.style.display = 'none';
 
     if (actionType === 'enable_route' || actionType === 'disable_route') {
         targetType = 'route';
@@ -613,26 +641,31 @@ function updateActionTargets(id) {
         for (const route of routes) {
             options += `<option value="${route.id}">${route.name}</option>`;
         }
-        controlSelect.style.display = 'none';
-        valueInput.style.display = 'none';
     } else if (actionType === 'enable_source' || actionType === 'disable_source') {
         targetType = 'source';
         options = '<option value="">Select source...</option>';
         for (const vs of virtualSources) {
             options += `<option value="${vs.id}">${vs.name}</option>`;
         }
-        controlSelect.style.display = 'none';
-        valueInput.style.display = 'none';
     } else {
-        // set_control
+        // Sink-targeted actions
         targetType = 'sink';
         options = '<option value="">Select sink...</option>';
         for (const sink of sinks) {
             options += `<option value="${sink.id}">${sink.name}</option>`;
         }
-        controlSelect.style.display = '';
-        controlSelect.innerHTML = '<option value="">Select control...</option>';
-        valueInput.style.display = '';
+
+        if (actionType === 'set_control') {
+            controlSelect.style.display = '';
+            controlSelect.innerHTML = '<option value="">Select control...</option>';
+            valueInput.style.display = '';
+        } else if (actionType === 'set_pixel') {
+            pixelIndex.style.display = '';
+            colorPicker.style.display = '';
+        } else if (actionType === 'fill_solid') {
+            colorPicker.style.display = '';
+        }
+        // 'clear' needs only the target sink
     }
 
     targetSelect.innerHTML = options;
@@ -684,21 +717,30 @@ function submitRule(event) {
     document.querySelectorAll('.action-row').forEach(row => {
         const actionType = row.querySelector('.action-type').value;
         const targetId = row.querySelector('.action-target').value;
-        const controlId = row.querySelector('.action-control').value;
-        let value = row.querySelector('.action-value').value;
 
-        // Parse value
-        if (value === 'true') value = true;
-        else if (value === 'false') value = false;
-        else if (value !== '' && !isNaN(parseFloat(value))) value = parseFloat(value);
-        else if (value === '') value = null;
+        if (!targetId) return;
 
-        if (targetId) {
-            const action = { type: actionType, target_id: targetId };
+        const action = { type: actionType, target_id: targetId };
+
+        if (actionType === 'set_control') {
+            const controlId = row.querySelector('.action-control').value;
+            let value = row.querySelector('.action-value').value;
+            if (value === 'true') value = true;
+            else if (value === 'false') value = false;
+            else if (value !== '' && !isNaN(parseFloat(value))) value = parseFloat(value);
+            else if (value === '') value = null;
             if (controlId) action.control_id = controlId;
             if (value !== null) action.value = value;
-            actions.push(action);
+        } else if (actionType === 'set_pixel') {
+            action.value = {
+                index: parseInt(row.querySelector('.action-pixel-index').value) || 0,
+                color: row.querySelector('.action-color').value,
+            };
+        } else if (actionType === 'fill_solid') {
+            action.value = { color: row.querySelector('.action-color').value };
         }
+
+        actions.push(action);
     });
 
     if (actions.length === 0) {

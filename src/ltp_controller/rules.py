@@ -21,6 +21,9 @@ class ActionType(str, Enum):
     DISABLE_ROUTE = "disable_route"
     ENABLE_SOURCE = "enable_source"
     DISABLE_SOURCE = "disable_source"
+    SET_PIXEL = "set_pixel"
+    FILL_SOLID = "fill_solid"
+    CLEAR = "clear"
 
 
 class ComparisonOp(str, Enum):

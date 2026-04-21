@@ -282,6 +282,7 @@ def main() -> int:
         router=router,
         virtual_source_manager=virtual_source_manager,
         input_manager=input_manager,
+        sink_controller=sink_controller,
     )
 
     # Load pre-configured rules

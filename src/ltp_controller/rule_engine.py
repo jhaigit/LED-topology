@@ -16,6 +16,7 @@ from ltp_controller.rules import (
     Trigger,
     TriggerType,
 )
+from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager
 
 logger = logging.getLogger(__name__)
@@ -35,11 +36,13 @@ class RuleEngine:
         router: RoutingEngine,
         virtual_source_manager: VirtualSourceManager | None,
         input_manager: InputEventManager,
+        sink_controller: SinkController | None = None,
     ):
         self.controller = controller
         self.router = router
         self.virtual_source_manager = virtual_source_manager
         self.input_manager = input_manager
+        self.sink_controller = sink_controller
         self._rules: dict[str, Rule] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
 
@@ -277,6 +280,12 @@ class RuleEngine:
             await self._action_enable_source(action)
         elif action.type == ActionType.DISABLE_SOURCE:
             await self._action_disable_source(action)
+        elif action.type == ActionType.SET_PIXEL:
+            await self._action_set_pixel(action)
+        elif action.type == ActionType.FILL_SOLID:
+            await self._action_fill_solid(action)
+        elif action.type == ActionType.CLEAR:
+            await self._action_clear(action)
         else:
             logger.warning(f"Unknown action type: {action.type}")
 
@@ -342,3 +351,62 @@ class RuleEngine:
 
         source.stop()
         logger.info(f"Disabled virtual source: {source.name}")
+
+    @staticmethod
+    def _parse_color(value: str | list | tuple) -> tuple[int, int, int]:
+        """Parse a color from hex string or RGB list."""
+        if isinstance(value, str) and value.startswith("#"):
+            h = value.lstrip("#")
+            return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+        if isinstance(value, (list, tuple)) and len(value) >= 3:
+            return (int(value[0]), int(value[1]), int(value[2]))
+        return (255, 255, 255)
+
+    async def _action_set_pixel(self, action: Action) -> None:
+        """Set a single pixel on a sink, preserving other pixels."""
+        if not self.sink_controller:
+            logger.warning("Sink controller not available for SET_PIXEL")
+            return
+
+        if not isinstance(action.value, dict):
+            logger.warning("SET_PIXEL action requires value dict with index and color")
+            return
+
+        index = int(action.value.get("index", 0))
+        color = list(self._parse_color(action.value.get("color", "#ffffff")))
+        result = await self.sink_controller.paint_pixels(
+            action.target_id,
+            {"index": index, "color": color},
+        )
+        if result.get("status") == "ok":
+            logger.info(f"Set pixel {index} to {color} on {action.target_id}")
+        else:
+            logger.warning(f"Failed to set pixel: {result.get('message')}")
+
+    async def _action_fill_solid(self, action: Action) -> None:
+        """Fill a sink with a solid color."""
+        if not self.sink_controller:
+            logger.warning("Sink controller not available for FILL_SOLID")
+            return
+
+        if isinstance(action.value, dict):
+            color = self._parse_color(action.value.get("color", "#ffffff"))
+        else:
+            color = self._parse_color(action.value)
+        result = await self.sink_controller.fill_solid(action.target_id, color)
+        if result.get("status") == "ok":
+            logger.info(f"Filled {action.target_id} with {color}")
+        else:
+            logger.warning(f"Failed to fill: {result.get('message')}")
+
+    async def _action_clear(self, action: Action) -> None:
+        """Clear a sink (fill black)."""
+        if not self.sink_controller:
+            logger.warning("Sink controller not available for CLEAR")
+            return
+
+        result = await self.sink_controller.clear(action.target_id)
+        if result.get("status") == "ok":
+            logger.info(f"Cleared {action.target_id}")
+        else:
+            logger.warning(f"Failed to clear: {result.get('message')}")
