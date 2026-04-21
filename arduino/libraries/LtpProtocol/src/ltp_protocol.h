@@ -106,6 +106,7 @@
 #define LED_TYPE_APA102     0x02
 #define LED_TYPE_LPD8806    0x03
 #define LED_TYPE_DOTSTAR    0x04
+#define LED_TYPE_PWM        0x10
 
 // Capabilities flags byte 1
 #define CAPS_BRIGHTNESS     0x01

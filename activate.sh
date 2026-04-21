@@ -20,6 +20,10 @@ if [ ! -d "$VENV_DIR" ]; then
     source "$VENV_DIR/bin/activate"
     echo "Installing dependencies..."
     pip install -r requirements.txt
+    if [ -f /proc/device-tree/model ] && grep -qi raspberry /proc/device-tree/model; then
+        echo "Raspberry Pi detected — installing Pi dependencies..."
+        pip install -r requirements-pi.txt
+    fi
 else
     source "$VENV_DIR/bin/activate"
 fi

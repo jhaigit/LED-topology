@@ -716,6 +716,11 @@ class SinkController:
                     w = dimensions[0]
                     h = 1
 
+                # Guard against nonsensical dimensions
+                if w * h > pixel_count:
+                    w = pixel_count
+                    h = 1
+
                 if fit == "stretch":
                     img = img.resize((w, h), PILImage.LANCZOS)
                 elif fit == "cover":

@@ -45,7 +45,7 @@ from .protocol import (
     # Control flags
     CTRL_FLAG_HARDWARE, CTRL_FLAG_READONLY, CTRL_FLAG_VOLATILE, CTRL_FLAG_ACTION, CTRL_FLAG_HIDDEN,
     # LED types
-    LED_TYPE_WS2812, LED_TYPE_SK6812, LED_TYPE_APA102, LED_TYPE_LPD8806,
+    LED_TYPE_WS2812, LED_TYPE_SK6812, LED_TYPE_APA102, LED_TYPE_LPD8806, LED_TYPE_PWM,
 )
 
 from .device import LtpDevice, DeviceInfo, StripInfo, DeviceStatus, DeviceStats, BuildInfo

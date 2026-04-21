@@ -253,9 +253,17 @@ class SerialSink:
         # Update dimensions from device if not specified in config
         if not self._dimensions:
             if device_info.is_matrix:
-                self._dimensions = device_info.dimensions
-                self._device_type = DeviceType.MATRIX
-                logger.info(f"Auto-detected matrix dimensions: {self._dimensions[0]}x{self._dimensions[1]}")
+                w, h = device_info.dimensions
+                if w * h <= self._pixel_count:
+                    self._dimensions = [w, h]
+                    self._device_type = DeviceType.MATRIX
+                    logger.info(f"Auto-detected matrix dimensions: {w}x{h}")
+                else:
+                    logger.warning(
+                        f"Ignoring nonsensical matrix dimensions {w}x{h} "
+                        f"({w * h} pixels) for {self._pixel_count}-pixel device"
+                    )
+                    self._dimensions = [self._pixel_count]
             else:
                 self._dimensions = [self._pixel_count]
 

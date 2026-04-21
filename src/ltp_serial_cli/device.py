@@ -1039,8 +1039,12 @@ class LtpDevice:
 
         # Parse matrix dimensions if present (4 bytes: width_lo, width_hi, height_lo, height_hi)
         if offset + 4 <= len(p):
-            info.matrix_width = struct.unpack("<H", p[offset:offset + 2])[0]
-            info.matrix_height = struct.unpack("<H", p[offset + 2:offset + 4])[0]
+            w = struct.unpack("<H", p[offset:offset + 2])[0]
+            h = struct.unpack("<H", p[offset + 2:offset + 4])[0]
+            # Sanity check: dimensions must not exceed total pixel count
+            if w > 0 and h > 0 and info.total_pixels > 0 and w * h <= info.total_pixels:
+                info.matrix_width = w
+                info.matrix_height = h
 
         return info
 

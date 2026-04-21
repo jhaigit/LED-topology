@@ -15,6 +15,9 @@ from libltp import ControlRegistry, NumberControl, BooleanControl, EnumControl, 
 logger = logging.getLogger(__name__)
 
 
+MAX_OUTPUT_PIXELS = 65536
+
+
 @dataclass
 class VirtualSourceConfig:
     """Configuration for a virtual source."""
@@ -27,6 +30,21 @@ class VirtualSourceConfig:
     adaptive_dimensions: bool = False
     enabled: bool = True
     control_values: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self._clamp_dimensions()
+
+    def _clamp_dimensions(self) -> None:
+        """Clamp dimensions to prevent excessive memory allocation."""
+        product = 1
+        for d in self.output_dimensions:
+            product *= max(1, d)
+        if product > MAX_OUTPUT_PIXELS:
+            logger.warning(
+                f"Clamping output_dimensions {self.output_dimensions} "
+                f"({product} pixels) to [{MAX_OUTPUT_PIXELS}]"
+            )
+            self.output_dimensions = [MAX_OUTPUT_PIXELS]
 
 
 class VirtualSource(ABC):

@@ -1174,6 +1174,7 @@ def create_app(
         needs_restart = False
         if "output_dimensions" in data:
             source.config.output_dimensions = data["output_dimensions"]
+            source.config._clamp_dimensions()
             needs_restart = True
 
         # Update frame rate

@@ -156,6 +156,9 @@ def create_linear_topology(length: int) -> LinearTopology:
     return LinearTopology(dimensions=(length,))
 
 
+MAX_TOPOLOGY_PIXELS = 65536
+
+
 def create_matrix_topology(
     width: int,
     height: int,
@@ -164,6 +167,13 @@ def create_matrix_topology(
     serpentine: bool = False,
 ) -> MatrixTopology:
     """Create a matrix (2D) topology."""
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Matrix dimensions must be positive, got {width}x{height}")
+    if width * height > MAX_TOPOLOGY_PIXELS:
+        raise ValueError(
+            f"Matrix dimensions {width}x{height} ({width * height} pixels) "
+            f"exceed maximum of {MAX_TOPOLOGY_PIXELS}"
+        )
     return MatrixTopology(
         dimensions=(width, height),
         origin=origin,
