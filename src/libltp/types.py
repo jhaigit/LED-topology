@@ -167,6 +167,10 @@ class MessageType(str, Enum):
     # Input events
     INPUT_EVENT = "input_event"
 
+    # Pixel readback
+    PIXEL_READ = "pixel_read"
+    PIXEL_READ_RESPONSE = "pixel_read_response"
+
     # Error
     ERROR = "error"
 

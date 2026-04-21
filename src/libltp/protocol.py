@@ -203,6 +203,18 @@ def input_event(
     )
 
 
+def pixel_read(seq: int, start: int = 0, count: int = 0) -> Message:
+    """Create a pixel read request."""
+    return Message(MessageType.PIXEL_READ, seq, start=start, count=count)
+
+
+def pixel_read_response(
+    seq: int, status: str, pixels: list[list[int]]
+) -> Message:
+    """Create a pixel read response."""
+    return Message(MessageType.PIXEL_READ_RESPONSE, seq, status=status, pixels=pixels)
+
+
 def subscribe(
     seq: int,
     dimensions: list[int],

@@ -16,6 +16,7 @@ except ImportError:
 
 from libltp import (
     DataSender,
+    pixel_read,
     stream_control,
     stream_setup,
 )
@@ -282,6 +283,7 @@ class SinkController:
 
                 # Send frame
                 stream.sender.send(pixels, stream.color_format, Encoding.RAW)
+                self._paint_buffers[sink_id] = pixels.copy()
                 logger.debug(f"Sent {len(pixels)} pixels to {sink.name} UDP:{stream.udp_port}")
 
             logger.info(f"Filled sink {sink.name} with color {color}")
@@ -340,6 +342,7 @@ class SinkController:
 
                 # Send frame
                 stream.sender.send(pixels, stream.color_format, Encoding.RAW)
+                self._paint_buffers[sink_id] = pixels.copy()
 
             logger.info(f"Filled sink {sink.name} with gradient ({len(colors)} colors)")
             return {"status": "ok", "pixels": stream.pixel_count}
@@ -393,6 +396,7 @@ class SinkController:
 
                 # Send frame
                 stream.sender.send(pixels, stream.color_format, Encoding.RAW)
+                self._paint_buffers[sink_id] = pixels.copy()
 
             logger.info(f"Filled sink {sink.name} with {len(sections)} sections")
             return {"status": "ok", "pixels": stream.pixel_count, "sections": len(sections)}
@@ -802,6 +806,26 @@ class SinkController:
             "has_ttf": HAS_PIL,
             "has_buffer": sink_id in self._paint_buffers,
         }
+
+    async def read_device_pixels(self, sink_id: str) -> dict[str, Any]:
+        """Read actual pixel values from the device via the sink."""
+        if not self._pool:
+            return {"status": "error", "message": "No connection pool"}
+
+        sink = self.controller.get_sink(sink_id)
+        if not sink:
+            return {"status": "error", "message": "Sink not found"}
+
+        req = pixel_read(0)
+        resp = await self._pool.request(sink_id, req, timeout=5.0)
+        if resp is None:
+            return {"status": "error", "message": "No response from sink"}
+
+        status = resp.data.get("status", "error")
+        pixels = resp.data.get("pixels", [])
+        if status == "ok" and pixels:
+            self._paint_buffers[sink_id] = np.array(pixels, dtype=np.uint8)
+        return {"status": status, "pixels": pixels}
 
     async def cleanup_all(self) -> None:
         """Clean up all active streams."""

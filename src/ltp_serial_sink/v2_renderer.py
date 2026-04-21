@@ -300,7 +300,7 @@ class V2Renderer:
         if not self._device or not self._device_info:
             return
 
-        if not self._device.has_inputs:
+        if not self._device_info.has_inputs:
             return
 
         try:
@@ -492,6 +492,20 @@ class V2Renderer:
             "enum": CTRL_UINT8,  # Enums are stored as uint8
         }
         return type_map.get(type_name, CTRL_UINT8)
+
+    def get_pixels(self, start: int = 0, count: int = 0) -> list[list[int]] | None:
+        """Read pixel RGB values from the device."""
+        if not self.is_connected() or not self._device:
+            return None
+        try:
+            raw = self._device.get_pixels(start, count)
+            pixels = []
+            for i in range(0, len(raw) - 2, 3):
+                pixels.append([raw[i], raw[i + 1], raw[i + 2]])
+            return pixels
+        except LtpError as e:
+            logger.warning(f"Failed to read pixels: {e}")
+            return None
 
     def set_brightness(self, value: int) -> bool:
         """Set device brightness (0-255)."""

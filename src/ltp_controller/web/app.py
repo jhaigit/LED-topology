@@ -453,6 +453,18 @@ def create_app(
             "pixel_count": pixel_count,
         })
 
+    @app.route("/api/sinks/<sink_id>/paint/sync", methods=["POST"])
+    def api_sink_paint_sync(sink_id: str) -> Any:
+        """Read actual pixel values from the device and update paint buffer."""
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not initialized"}), 503
+
+        result = run_async(sink_controller.read_device_pixels(sink_id))
+        if result.get("status") == "error":
+            return jsonify(result), 502
+
+        return jsonify(result)
+
     @app.route("/api/sinks/<sink_id>/paint/info")
     def api_sink_paint_info(sink_id: str) -> Any:
         """Get sink info for painting (dimensions, pixel count, fonts)."""

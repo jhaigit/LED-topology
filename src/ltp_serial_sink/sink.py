@@ -30,6 +30,7 @@ from libltp import (
     control_get_response,
     control_set_response,
     create_linear_topology,
+    pixel_read_response,
     stream_setup_response,
 )
 from libltp.types import StreamAction
@@ -329,6 +330,8 @@ class SerialSink:
             return self._handle_control_get(message)
         elif message.type == MessageType.CONTROL_SET:
             return self._handle_control_set(message)
+        elif message.type == MessageType.PIXEL_READ:
+            return self._handle_pixel_read(message)
 
         return None
 
@@ -536,6 +539,18 @@ class SerialSink:
 
         status = "ok" if not errors else "partial"
         return control_set_response(message.seq, status, applied, errors or None)
+
+    def _handle_pixel_read(self, message: Message) -> Message:
+        """Handle pixel read request — read actual pixels from device."""
+        start = message.data.get("start", 0)
+        count = message.data.get("count", 0)
+
+        if self._renderer is not None and self._renderer.is_connected():
+            pixels = self._renderer.get_pixels(start, count)
+            if pixels is not None:
+                return pixel_read_response(message.seq, "ok", pixels)
+
+        return pixel_read_response(message.seq, "error", [])
 
     def _handle_data_packet(self, packet: DataPacket) -> None:
         """Handle incoming data packet.

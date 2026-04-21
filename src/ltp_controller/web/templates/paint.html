@@ -745,11 +745,24 @@ async function refreshFromSink() {
 }
 
 async function syncFromDevice() {
-    // Manually sync local canvas from device state
+    // Read actual pixel values from the device via serial
     document.getElementById('lastAction').textContent = 'Syncing...';
-    await fetchBuffer();
-    refreshPreview();
-    document.getElementById('lastAction').textContent = 'Synced from device';
+    try {
+        const response = await fetch(`/api/sinks/${sinkId}/paint/sync`, { method: 'POST' });
+        const data = await response.json();
+        if (data.pixels) {
+            for (let i = 0; i < data.pixels.length && i < pixels.length; i++) {
+                pixels[i] = data.pixels[i];
+            }
+            drawCanvas();
+            refreshPreview();
+            document.getElementById('lastAction').textContent = 'Synced from device';
+        } else {
+            document.getElementById('lastAction').textContent = 'Sync failed: ' + (data.message || 'no data');
+        }
+    } catch (err) {
+        document.getElementById('lastAction').textContent = 'Sync failed: ' + err.message;
+    }
 }
 
 // Initialize on load
