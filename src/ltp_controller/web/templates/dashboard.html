@@ -107,7 +107,9 @@ rawVS.forEach(v => {
 });
 
 const graphSinks = rawSinks.map(s => ({
-    id: s.id, name: s.name, online: s.online, _raw: s
+    id: s.id, name: s.name, online: s.online,
+    backend_connected: s.backend_connected,
+    _raw: s
 }));
 
 const graphRoutes = rawRoutes.map(r => ({

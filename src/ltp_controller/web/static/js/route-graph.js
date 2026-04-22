@@ -136,13 +136,13 @@ window.LtpRouteGraph = (function() {
         sinks.forEach(s => {
             const pos = nodePositions[s.id];
             if (!pos) return;
-            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false, selectedNode === s.id);
+            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false, selectedNode === s.id, s.backend_connected);
             // Input port (left side)
             drawPort(pos.x, pos.y + NODE_H / 2, s.online);
         });
     }
 
-    function drawNode(x, y, name, online, type, isVirtual, isSelected) {
+    function drawNode(x, y, name, online, type, isVirtual, isSelected, backendConnected) {
         const borderColor = isSelected ?
             (getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e94560') :
             online ?
@@ -177,13 +177,27 @@ window.LtpRouteGraph = (function() {
         ctx.arc(x + 14, y + NODE_H / 2, 4, 0, Math.PI * 2);
         ctx.fill();
 
+        // Serial status dot (sinks only, when backend state is known)
+        if (type === 'sink' && backendConnected !== undefined && backendConnected !== null) {
+            const serialColor = backendConnected ?
+                (getComputedStyle(document.documentElement).getPropertyValue('--success').trim() || '#4caf50') :
+                (getComputedStyle(document.documentElement).getPropertyValue('--error').trim() || '#e94560');
+            ctx.fillStyle = serialColor;
+            ctx.beginPath();
+            ctx.arc(x + NODE_W - 12, y + NODE_H / 2, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
         // Name
         ctx.fillStyle = textColor;
         ctx.font = '12px -apple-system, sans-serif';
         ctx.textBaseline = 'middle';
         let label = name;
         if (isVirtual) label = 'VS: ' + label;
-        if (label.length > 18) label = label.substring(0, 17) + '...';
+        const maxLabelW = NODE_W - 24 - 12 - (type === 'sink' && backendConnected !== undefined ? 14 : 0);
+        while (label.length > 3 && ctx.measureText(label).width > maxLabelW) {
+            label = label.substring(0, label.length - 2) + '\u2026';
+        }
         ctx.fillText(label, x + 24, y + NODE_H / 2);
     }
 
