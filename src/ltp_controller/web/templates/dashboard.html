@@ -712,7 +712,7 @@ function updateStatus() {
         const online = sinks.filter(s => s.online).length;
         const el = document.getElementById('sinks-stat');
         if (el) el.textContent = `${online} / ${sinks.length}`;
-        LtpRouteGraph.updateSinkData(sinks.map(s => ({ id: s.id, name: s.name, online: s.online, _raw: s })));
+        LtpRouteGraph.updateSinkData(sinks.map(s => ({ id: s.id, name: s.name, online: s.online, backend_connected: s.backend_connected, _raw: s })));
     }).catch(() => {});
 
     refreshGraphData();
