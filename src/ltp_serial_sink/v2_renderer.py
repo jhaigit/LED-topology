@@ -461,6 +461,7 @@ class V2Renderer:
             ctrl = self._controls.get(control_id)
             ctrl_name = ctrl.name if ctrl else f"id={control_id}"
             logger.warning(f"Failed to get control {ctrl_name}: {e}")
+            self._connected = False
             return None
 
     def set_control(self, control_id: int, value: Any) -> bool:
@@ -478,6 +479,7 @@ class V2Renderer:
             ctrl = self._controls.get(control_id)
             ctrl_name = ctrl.name if ctrl else f"id={control_id}"
             logger.warning(f"Failed to set control {ctrl_name} to {value!r}: {e}")
+            self._connected = False
             return False
 
     def _get_control_type_code(self, type_name: str) -> int:
@@ -505,6 +507,7 @@ class V2Renderer:
             return pixels
         except LtpError as e:
             logger.warning(f"Failed to read pixels: {e}")
+            self._connected = False
             return None
 
     def set_brightness(self, value: int) -> bool:
@@ -600,6 +603,7 @@ class V2Renderer:
             return True
         except LtpError as e:
             logger.error(f"Error filling: {e}")
+            self._connected = False
             return False
 
     def show(self) -> bool:
@@ -612,6 +616,7 @@ class V2Renderer:
             return True
         except LtpError as e:
             logger.error(f"Error showing: {e}")
+            self._connected = False
             return False
 
     def get_stats(self) -> dict[str, Any]:

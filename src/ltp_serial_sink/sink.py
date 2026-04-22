@@ -683,6 +683,16 @@ class SerialSink:
 
         return pixels
 
+    def _broadcast_serial_state(self, connected: bool) -> None:
+        """Broadcast serial connection state change to connected controllers."""
+        if self._control_server:
+            from libltp import control_changed
+            msg = control_changed({"__serial_connected__": connected})
+            asyncio.run_coroutine_threadsafe(
+                self._control_server.broadcast(msg),
+                self._loop,
+            )
+
     async def _serial_monitor(self) -> None:
         """Monitor serial connection and reconnect if needed."""
         # Skip if no serial mode
@@ -695,7 +705,13 @@ class SerialSink:
         was_connected = False
 
         while self._running:
-            if not self._renderer.is_connected():
+            now_connected = self._renderer.is_connected()
+
+            if was_connected and not now_connected:
+                logger.warning("Serial device disconnected")
+                self._broadcast_serial_state(False)
+
+            if not now_connected:
                 try:
                     self._renderer.open()
                     logger.info(f"Serial device connected via v2 protocol")
@@ -708,8 +724,11 @@ class SerialSink:
                     self._update_from_device()
                     self._setup_device_controls()
                     was_connected = True
+                    self._broadcast_serial_state(True)
 
                 except Exception as e:
+                    if was_connected:
+                        was_connected = False
                     logger.warning(f"Serial connection failed: {e}")
                     await asyncio.sleep(reconnect_delay)
                     reconnect_delay = min(reconnect_delay * 2, max_delay)

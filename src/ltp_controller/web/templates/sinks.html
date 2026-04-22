@@ -21,6 +21,11 @@
         <div class="device-header">
             <span class="status-dot"></span>
             <h3>{{ sink.name }}</h3>
+            {% if sink.backend_connected is not none %}
+            <span class="serial-status {% if sink.backend_connected %}serial-ok{% else %}serial-err{% endif %}" title="Serial: {% if sink.backend_connected %}connected{% else %}disconnected{% endif %}">
+                &#x2b24;
+            </span>
+            {% endif %}
         </div>
         <p class="device-description">{{ sink.description or 'No description' }}</p>
 
@@ -38,6 +43,12 @@
         </div>
 
         <div class="device-details">
+            {% if sink.backend_connected is not none %}
+            <div class="detail-row">
+                <span class="label">Serial:</span>
+                <span class="value {% if sink.backend_connected %}serial-ok{% else %}serial-err{% endif %}">{{ 'Connected' if sink.backend_connected else 'Disconnected' }}</span>
+            </div>
+            {% endif %}
             <div class="detail-row">
                 <span class="label">Address:</span>
                 <span class="value">{{ sink.host }}:{{ sink.port }}</span>

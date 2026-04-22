@@ -227,8 +227,11 @@ function renderSinkDetail(s) {
             </div>
         </div>
         <div class="detail-grid">
-            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${s.online ? 'connected' : 'disconnected'}">${s.online ? 'Online' : 'Offline'}</span></div>
-            <div class="detail-row"><span class="label">Address:</span> <span>${esc(s.host)}:${s.port}</span></div>
+            <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${s.online ? 'connected' : 'disconnected'}">${s.online ? 'Online' : 'Offline'}</span></div>`;
+    if (s.backend_connected !== undefined && s.backend_connected !== null) {
+        html += `<div class="detail-row"><span class="label">Serial:</span> <span class="status-badge ${s.backend_connected ? 'connected' : 'disconnected'}">${s.backend_connected ? 'Connected' : 'Disconnected'}</span></div>`;
+    }
+    html += `<div class="detail-row"><span class="label">Address:</span> <span>${esc(s.host)}:${s.port}</span></div>
             <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(s.id)}</span></div>`;
     if (props.dim) html += `<div class="detail-row"><span class="label">Dimensions:</span> <span>${esc(props.dim)} (${props.pixels || '?'} pixels)</span></div>`;
     else if (props.pixels) html += `<div class="detail-row"><span class="label">Pixels:</span> <span>${props.pixels}</span></div>`;

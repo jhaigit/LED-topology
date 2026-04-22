@@ -11,6 +11,8 @@ from libltp import (
     ControlClient,
     ControllerAdvertiser,
     DiscoveredDevice,
+    Message,
+    MessageType,
     ServiceBrowser,
     capability_request,
     control_get,
@@ -35,6 +37,7 @@ class DeviceState:
     first_seen: datetime = field(default_factory=datetime.now)
     last_seen: datetime = field(default_factory=datetime.now)
     online: bool = True
+    backend_connected: bool | None = None
     capabilities: dict[str, Any] | None = None
     controls: dict[str, Any] | None = None
     control_values: dict[str, Any] = field(default_factory=dict)
@@ -87,7 +90,7 @@ class DeviceState:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API responses."""
-        return {
+        result = {
             "id": self.id,
             "name": self.name,
             "description": self.description,
@@ -101,6 +104,9 @@ class DeviceState:
             "controls": self.controls,
             "control_values": self.control_values,
         }
+        if self.backend_connected is not None:
+            result["backend_connected"] = self.backend_connected
+        return result
 
 
 DeviceCallback = Callable[[DeviceState, bool], None]  # device, is_added
@@ -139,6 +145,7 @@ class Controller:
     def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
         """Set the connection pool for shared sink connections."""
         self._connection_pool = pool
+        pool.add_unsolicited_listener(self._handle_unsolicited_message)
 
     @property
     def sources(self) -> list[DeviceState]:
@@ -269,6 +276,19 @@ class Controller:
                 if self._on_sink_change:
                     self._on_sink_change(state, False)
 
+    def _handle_unsolicited_message(self, sink_id: str, message: Message) -> None:
+        """Handle unsolicited messages from sinks (via pool)."""
+        if message.type == MessageType.CONTROL_CHANGED:
+            values = message.data.get("values", {})
+            if "__serial_connected__" in values:
+                connected = values["__serial_connected__"]
+                state = self.get_sink(sink_id)
+                if state:
+                    state.backend_connected = connected
+                    logger.info(
+                        f"Sink {state.name} serial {'connected' if connected else 'disconnected'}"
+                    )
+
     async def _fetch_device_info(self, state: DeviceState) -> None:
         """Fetch capabilities and controls from a device."""
         try:
@@ -281,6 +301,9 @@ class Controller:
                     state.capabilities = cap_resp.data["device"]
                     if "controls" in cap_resp.data["device"]:
                         state.controls = cap_resp.data["device"]["controls"]
+                    backend = cap_resp.data["device"].get("backend", {})
+                    if "connected" in backend:
+                        state.backend_connected = backend["connected"]
                     logger.debug(f"Got capabilities from {state.name}")
 
                 # Get control values

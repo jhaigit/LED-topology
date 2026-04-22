@@ -304,6 +304,19 @@ h2 {
     font-size: 1.25rem;
 }
 
+.serial-status {
+    font-size: 0.5rem;
+    margin-left: 0.5rem;
+}
+
+.serial-ok {
+    color: var(--success);
+}
+
+.serial-err {
+    color: var(--error);
+}
+
 .device-description {
     color: var(--text-secondary);
     margin-bottom: 1rem;
