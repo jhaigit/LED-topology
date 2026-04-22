@@ -713,6 +713,13 @@ function updateStatus() {
         const el = document.getElementById('sinks-stat');
         if (el) el.textContent = `${online} / ${sinks.length}`;
         LtpRouteGraph.updateSinkData(sinks.map(s => ({ id: s.id, name: s.name, online: s.online, backend_connected: s.backend_connected, _raw: s })));
+
+        // Refresh detail panel if a sink is currently selected
+        const selId = LtpRouteGraph.getSelectedNode();
+        if (selId) {
+            const item = sinks.find(s => s.id === selId);
+            if (item) renderSinkDetail(item);
+        }
     }).catch(() => {});
 
     refreshGraphData();
