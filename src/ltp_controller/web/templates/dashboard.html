@@ -245,12 +245,57 @@ function renderSinkDetail(s) {
         html += `</span></div>`;
     }
     html += `</div>`;
+    if (s.online) {
+        html += `<div class="detail-actions">
+            <button class="btn btn-sm" onclick="refreshSinkDetail('${esc(s.id)}')">Refresh</button>
+            <button class="btn btn-sm btn-primary" onclick="showSinkFill('${esc(s.id)}')">Fill</button>
+            <a href="/paint/${encodeURIComponent(s.id)}" class="btn btn-sm">Paint</a>
+            <button class="btn btn-sm" onclick="clearSink('${esc(s.id)}')">Clear</button>
+        </div>`;
+    }
     if (s.controls && s.controls.length > 0) {
         html += `<h4>Controls</h4><div class="detail-controls-full">`;
         html += renderInteractiveControls(s.controls, s.control_values || {}, 'sink', s.id);
         html += `</div>`;
     }
     content.innerHTML = html;
+}
+
+function refreshSinkDetail(sinkId) {
+    fetch('/api/sinks').then(r => r.json()).then(sinks => {
+        const item = sinks.find(s => s.id === sinkId);
+        if (item) renderSinkDetail(item);
+    });
+}
+
+function clearSink(sinkId) {
+    fetch(`/api/sinks/${sinkId}/clear`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') showToast('Cleared', 'success');
+            else showToast('Error: ' + (data.message || data.error), 'error');
+        })
+        .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function showSinkFill(sinkId) {
+    const color = prompt('Fill color (hex)', '#ff8800');
+    if (!color) return;
+    const h = color.replace('#', '');
+    const r = parseInt(h.substring(0, 2), 16) || 0;
+    const g = parseInt(h.substring(2, 4), 16) || 0;
+    const b = parseInt(h.substring(4, 6), 16) || 0;
+    fetch(`/api/sinks/${sinkId}/fill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'solid', color: [r, g, b] })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'ok') showToast('Filled', 'success');
+        else showToast('Error: ' + (data.message || data.error), 'error');
+    })
+    .catch(err => showToast('Error: ' + err.message, 'error'));
 }
 
 function renderVSDetail(v) {
@@ -845,7 +890,9 @@ graphCanvas.addEventListener('node-context', async function(e) {
         html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='${isVS ? '/virtual-sources' : '/sources'}'">View Details</div>`;
     }
     if (isSink) {
+        html += `<div class="ctx-item" onclick="hideCtxMenu();showSinkFill('${node.id}')">Fill</div>`;
         html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/paint/${encodeURIComponent(node.id)}'">Paint</div>`;
+        html += `<div class="ctx-item" onclick="hideCtxMenu();clearSink('${node.id}')">Clear</div>`;
         html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/sinks'">View Details</div>`;
     }
 
