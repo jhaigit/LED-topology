@@ -231,7 +231,7 @@ function renderSinkDetail(s) {
         <div class="detail-grid">
             <div class="detail-row"><span class="label">Status:</span> <span class="status-badge ${s.online ? 'connected' : 'disconnected'}">${s.online ? 'Online' : 'Offline'}</span></div>`;
     if (s.backend_connected !== undefined && s.backend_connected !== null) {
-        html += `<div class="detail-row"><span class="label">Serial:</span> <span class="status-badge ${s.backend_connected ? 'connected' : 'disconnected'}">${s.backend_connected ? 'Connected' : 'Disconnected'}</span></div>`;
+        html += `<div class="detail-row"><span class="label">Serial:</span> <span class="status-badge ${s.backend_connected ? 'connected' : 'disconnected'}">${s.backend_connected ? 'OK' : 'Down'}</span></div>`;
     }
     html += `<div class="detail-row"><span class="label">Address:</span> <span>${esc(s.host)}:${s.port}</span></div>
             <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(s.id)}</span></div>`;
