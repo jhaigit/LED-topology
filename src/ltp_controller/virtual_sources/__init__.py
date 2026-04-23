@@ -36,6 +36,11 @@ from ltp_controller.virtual_sources.text_source import (
     CounterSource,
     ClockSource,
 )
+from ltp_controller.virtual_sources.effects import (
+    FlakeyPower,
+    FailingBulb,
+    Lightning,
+)
 from ltp_controller.virtual_sources.text_renderer import (
     TextRenderer,
     TextAlign,
@@ -76,6 +81,10 @@ __all__ = [
     "BarGraph",
     "MultiBar",
     "VUMeter",
+    # Effects
+    "FlakeyPower",
+    "FailingBulb",
+    "Lightning",
     # Monitors
     "SystemMonitor",
     "CPUCoreMonitor",
@@ -118,6 +127,10 @@ VIRTUAL_SOURCE_TYPES: dict[str, type[VirtualSource]] = {
     "pixel_index": PixelIndex,
     "coordinates": CoordinateDisplay,
     "test_card": TestCard,
+    # Effects
+    "flakey_power": FlakeyPower,
+    "failing_bulb": FailingBulb,
+    "lightning": Lightning,
     # Visualizers
     "bar_graph": BarGraph,
     "multi_bar": MultiBar,

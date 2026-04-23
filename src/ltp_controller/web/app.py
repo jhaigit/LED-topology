@@ -1095,6 +1095,7 @@ def create_app(
         media_sources = {"image"}
         visualizers = {"bar_graph", "multi_bar", "vu_meter"}
         monitors = {"system_monitor", "cpu_cores"}
+        effects = {"flakey_power", "failing_bulb", "lightning"}
 
         types = []
         for type_name, type_class in VIRTUAL_SOURCE_TYPES.items():
@@ -1106,6 +1107,8 @@ def create_app(
                 category = "visualizer"
             elif type_name in monitors:
                 category = "monitor"
+            elif type_name in effects:
+                category = "effect"
             else:
                 category = "pattern"
 
