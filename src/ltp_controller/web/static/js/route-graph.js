@@ -458,10 +458,18 @@ window.LtpRouteGraph = (function() {
             } else if (!e.shiftKey) {
                 selectedNode = clicked.id;
                 selectedCable = null;
-                selectedNodes.clear();
+                const isSink = sinks.some(s => s.id === clicked.id);
+                if (isSink && clicked.type !== 'group') {
+                    selectedNodes.clear();
+                    selectedNodes.add(clicked.id);
+                } else {
+                    selectedNodes.clear();
+                }
                 draw();
                 canvas.dispatchEvent(new CustomEvent('node-clicked', { detail: clicked }));
-                canvas.dispatchEvent(new CustomEvent('selection-changed', { detail: { ids: [] } }));
+                canvas.dispatchEvent(new CustomEvent('selection-changed', {
+                    detail: { ids: [...selectedNodes] }
+                }));
             }
             return;
         }
