@@ -258,6 +258,12 @@ def main() -> int:
     # Wire pool to controller
     controller.set_connection_pool(connection_pool)
 
+    # Load sink groups
+    sg_config = config.get("sink_groups", [])
+    if sg_config:
+        controller.sink_group_manager.load_from_config(sg_config)
+        logger.info(f"Loaded {len(sg_config)} sink groups from config")
+
     # Create virtual source manager
     virtual_source_manager = VirtualSourceManager()
 

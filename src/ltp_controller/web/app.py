@@ -79,6 +79,7 @@ def create_app(
             sinks_json=[s.to_dict() for s in controller.sinks],
             routes_json=[r.to_dict() for r in router.routes],
             vs_json=[vs.to_dict() for vs in (virtual_source_manager.sources if virtual_source_manager else [])],
+            groups_json=[g.to_dict() for g in controller.sink_group_manager.groups],
         )
 
     @app.route("/sources")
@@ -547,7 +548,15 @@ def create_app(
             route_dict["source_type"] = "physical"
 
         sink = controller.get_sink(route_dict["sink_id"])
-        route_dict["sink_name"] = sink.name if sink else "Unknown"
+        if sink:
+            route_dict["sink_name"] = sink.name
+        else:
+            group = controller.get_sink_group(route_dict["sink_id"])
+            if group:
+                route_dict["sink_name"] = group.name
+                route_dict["sink_type"] = "group"
+            else:
+                route_dict["sink_name"] = "Unknown"
         return route_dict
 
     @app.route("/api/routes", methods=["GET", "POST"])
@@ -703,6 +712,7 @@ def create_app(
             "virtual_sources": virtual_source_manager.to_config() if virtual_source_manager else [],
             "routes": [],
             "rules": rule_engine.to_config() if rule_engine else [],
+            "sink_groups": controller.sink_group_manager.to_config(),
         }
 
         # Export routes
@@ -734,6 +744,81 @@ def create_app(
         if not rule_engine:
             return jsonify({"error": "Rule engine not available"}), 503
         return jsonify(rule_engine.to_config())
+
+    # ==================== API: Sink Groups ====================
+
+    @app.route("/api/sink-groups")
+    def api_sink_groups_list() -> Any:
+        """List all sink groups."""
+        return jsonify([g.to_dict() for g in controller.sink_group_manager.groups])
+
+    @app.route("/api/sink-groups", methods=["POST"])
+    def api_sink_groups_create() -> Any:
+        """Create a new sink group."""
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        name = data.get("name")
+        if not name:
+            return jsonify({"error": "Missing 'name' field"}), 400
+
+        member_ids = data.get("members", [])
+        if len(member_ids) < 2:
+            return jsonify({"error": "A group requires at least 2 members"}), 400
+
+        reversed_flags = data.get("reversed")
+
+        group = controller.sink_group_manager.create(
+            name=name,
+            member_sink_ids=member_ids,
+            reversed_flags=reversed_flags,
+        )
+
+        return jsonify(group.to_dict()), 201
+
+    @app.route("/api/sink-groups/<group_id>")
+    def api_sink_group_get(group_id: str) -> Any:
+        """Get a sink group."""
+        group = controller.sink_group_manager.get(group_id)
+        if not group:
+            return jsonify({"error": "Sink group not found"}), 404
+        return jsonify(group.to_dict())
+
+    @app.route("/api/sink-groups/<group_id>", methods=["PUT"])
+    def api_sink_group_update(group_id: str) -> Any:
+        """Update a sink group."""
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        group = controller.sink_group_manager.update(
+            group_id,
+            name=data.get("name"),
+            member_sink_ids=data.get("members"),
+            reversed_flags=data.get("reversed"),
+        )
+
+        if not group:
+            return jsonify({"error": "Sink group not found"}), 404
+
+        # Restart routes targeting this group so they pick up new members
+        for route in router.routes:
+            if route.sink_id == group_id and route.enabled:
+                router._pending_restarts.add(route.id)
+
+        return jsonify(group.to_dict())
+
+    @app.route("/api/sink-groups/<group_id>", methods=["DELETE"])
+    def api_sink_group_delete(group_id: str) -> Any:
+        """Delete a sink group and its routes."""
+        for route in list(router.routes):
+            if route.sink_id == group_id:
+                run_async(router.delete_route(route.id))
+
+        if controller.sink_group_manager.delete(group_id):
+            return jsonify({"status": "ok"})
+        return jsonify({"error": "Sink group not found"}), 404
 
     # ==================== Scenes API ====================
 
@@ -908,9 +993,10 @@ def create_app(
         except Exception as e:
             logger.warning(f"Could not read existing config: {e}")
 
-        # Update only the routes, rules, and virtual_sources sections
+        # Update only the routes, rules, virtual_sources, and sink_groups sections
         existing_config["virtual_sources"] = virtual_source_manager.to_config() if virtual_source_manager else []
         existing_config["rules"] = rule_engine.to_config() if rule_engine else []
+        existing_config["sink_groups"] = controller.sink_group_manager.to_config()
 
         # Export routes
         existing_config["routes"] = []

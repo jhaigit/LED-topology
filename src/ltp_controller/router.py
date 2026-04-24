@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ltp_controller.virtual_sources import VirtualSourceManager
     from ltp_controller.sink_connection_pool import SinkConnectionPool
+    from ltp_controller.sink_group import SinkGroup
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,10 @@ class Route:
     _scaling_active: bool = field(default=False, repr=False)
     _no_data_warning: bool = field(default=False, repr=False)
     _connected_at: datetime | None = field(default=None, repr=False)
+
+    # Group route state
+    _group_senders: dict[str, DataSender] = field(default_factory=dict, repr=False)
+    _group_stream_ids: dict[str, str] = field(default_factory=dict, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -330,12 +335,28 @@ class RoutingEngine:
             try:
                 # Check if source is a virtual source
                 if self._is_virtual_source(route.source_id):
-                    # Virtual source route
                     virtual_source = self._virtual_source_manager.get(route.source_id)
-                    sink = self.controller.get_sink(route.sink_id)
-
                     if not virtual_source:
                         raise ValueError(f"Virtual source not found: {route.source_id}")
+
+                    # Check if target is a sink group
+                    group = self.controller.get_sink_group(route.sink_id)
+                    if group:
+                        group.recompute(self.controller)
+                        any_online = any(
+                            (s := self.controller.get_sink(m.sink_id)) and s.online
+                            for m in group.members
+                        )
+                        if not any_online:
+                            route.status = RouteStatus.DISCONNECTED
+                            route.error_message = "Waiting for group members"
+                            logger.info(f"Route {route.name}: {route.error_message}")
+                            await asyncio.sleep(reconnect_delay)
+                            continue
+                        await self._run_group_route(route, virtual_source, group)
+                        break
+
+                    sink = self.controller.get_sink(route.sink_id)
                     if not sink:
                         raise ValueError(f"Sink not found: {route.sink_id}")
 
@@ -739,6 +760,113 @@ class RoutingEngine:
 
             await asyncio.sleep(frame_interval)
 
+    async def _run_group_route(
+        self, route: Route, virtual_source: "VirtualSource", group: "SinkGroup"
+    ) -> None:
+        """Run a route from a virtual source to a sink group."""
+        from ltp_controller.virtual_sources.base import VirtualSource
+
+        logger.info(
+            f"Starting group route: {route.name} -> {group.name} "
+            f"({group.total_pixels} pixels, {len(group.members)} members)"
+        )
+
+        route._sink_color_format = ColorFormat.RGB
+
+        for member in group.members:
+            sink = self.controller.get_sink(member.sink_id)
+            if not sink or not sink.online:
+                logger.warning(f"Group member {member.sink_id} not available, skipping")
+                continue
+
+            try:
+                setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
+                if self._pool:
+                    setup_resp = await self._pool.request(sink.id, setup_req)
+                    if not setup_resp or setup_resp.data.get("status") != "ok":
+                        logger.warning(f"Stream setup failed for group member {sink.name}")
+                        continue
+                else:
+                    continue
+
+                udp_port = setup_resp.data["udp_port"]
+                stream_id = setup_resp.data["stream_id"]
+
+                sender = DataSender(sink.host, udp_port)
+                await sender.start()
+
+                start_req = stream_control(0, stream_id, StreamAction.START)
+                await self._pool.request(sink.id, start_req)
+
+                route._group_senders[member.sink_id] = sender
+                route._group_stream_ids[member.sink_id] = stream_id
+                logger.info(f"Group member {sink.name}: stream to :{udp_port}")
+            except Exception as e:
+                logger.warning(f"Failed to set up group member {sink.name}: {e}")
+
+        if not route._group_senders:
+            raise ValueError("No group members available")
+
+        source_dims = virtual_source.config.output_dimensions
+        route._source_dims = source_dims
+        route._sink_dims = [group.total_pixels]
+        route._scaling_active = False
+        route._connected_at = datetime.now()
+        route._no_data_warning = False
+
+        if not virtual_source.is_running:
+            virtual_source.start()
+
+        route.status = RouteStatus.CONNECTED
+        logger.info(
+            f"Group route {route.name} connected: "
+            f"{virtual_source.name} -> {group.name} "
+            f"({len(route._group_senders)}/{len(group.members)} members)"
+        )
+
+        frame_interval = 1.0 / virtual_source.config.frame_rate
+
+        while route.enabled and self._running:
+            try:
+                pixels = virtual_source.render_frame(group.total_pixels)
+
+                if route.transform.brightness != 1.0:
+                    pixels = (pixels * route.transform.brightness).astype(np.uint8)
+
+                if route.transform.gamma != 1.0:
+                    normalized = pixels / 255.0
+                    corrected = np.power(normalized, route.transform.gamma)
+                    pixels = (corrected * 255).astype(np.uint8)
+
+                route._last_frame = pixels.tolist()
+
+                for member in group.members:
+                    sender = route._group_senders.get(member.sink_id)
+                    if not sender:
+                        continue
+                    start_idx = member.pixel_offset
+                    end_idx = start_idx + member.pixel_count
+                    segment = pixels[start_idx:end_idx]
+                    if member.reversed:
+                        segment = segment[::-1].copy()
+                    sender.send(segment, ColorFormat.RGB, Encoding.RAW)
+
+                route._frames_routed += 1
+                route._last_frame_time = datetime.now()
+
+            except Exception as e:
+                logger.warning(f"Error rendering group route {route.name}: {e}")
+
+            if route._frames_routed % max(1, int(1.0 / frame_interval)) == 0:
+                any_online = any(
+                    (s := self.controller.get_sink(m.sink_id)) and s.online
+                    for m in group.members
+                )
+                if not any_online:
+                    raise ConnectionError("All group members went offline")
+
+            await asyncio.sleep(frame_interval)
+
     def _handle_packet(
         self,
         route: Route,
@@ -903,6 +1031,19 @@ class RoutingEngine:
         if route._sender:
             await route._sender.stop()
             route._sender = None
+
+        # Stop group senders and streams (sink group routes)
+        for sender in route._group_senders.values():
+            await sender.stop()
+        for sink_id, stream_id in list(route._group_stream_ids.items()):
+            try:
+                stop_req = stream_control(0, stream_id, StreamAction.STOP)
+                if self._pool:
+                    await self._pool.request(sink_id, stop_req, timeout=2.0)
+            except Exception as e:
+                logger.warning(f"Failed to stop group stream for {sink_id}: {e}")
+        route._group_senders.clear()
+        route._group_stream_ids.clear()
 
         # Stop stream on sink — skip if another active route uses the same sink
         skip_sink_stop = self._sink_has_other_active_routes(route)

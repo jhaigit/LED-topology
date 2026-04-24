@@ -136,17 +136,20 @@ window.LtpRouteGraph = (function() {
         sinks.forEach(s => {
             const pos = nodePositions[s.id];
             if (!pos) return;
-            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false, selectedNode === s.id, s.backend_connected);
+            const isGroup = s.type === 'group';
+            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false, selectedNode === s.id, isGroup ? undefined : s.backend_connected, isGroup);
             // Input port (left side)
             drawPort(pos.x, pos.y + NODE_H / 2, s.online);
         });
     }
 
-    function drawNode(x, y, name, online, type, isVirtual, isSelected, backendConnected) {
+    function drawNode(x, y, name, online, type, isVirtual, isSelected, backendConnected, isGroup) {
         const serialDown = type === 'sink' && backendConnected === false;
         const errorColor = getComputedStyle(document.documentElement).getPropertyValue('--error').trim() || '#e94560';
+        const groupColor = '#4dc9f6';
         const borderColor = isSelected ?
             (getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e94560') :
+            isGroup ? groupColor :
             online ?
             (getComputedStyle(document.documentElement).getPropertyValue('--success').trim() || '#4caf50') :
             (getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#a0a0a0');
@@ -156,7 +159,7 @@ window.LtpRouteGraph = (function() {
         // Tint the fill when serial backend is down
         ctx.fillStyle = serialDown ? '#3a1020' : cardColor;
         ctx.strokeStyle = serialDown && !isSelected ? errorColor : borderColor;
-        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.lineWidth = isSelected ? 2.5 : (isGroup ? 2 : 1.5);
         if (serialDown && !isSelected) ctx.setLineDash([4, 3]);
 
         // Rounded rect
@@ -176,11 +179,19 @@ window.LtpRouteGraph = (function() {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Status dot
-        ctx.fillStyle = borderColor;
-        ctx.beginPath();
-        ctx.arc(x + 14, y + NODE_H / 2, 4, 0, Math.PI * 2);
-        ctx.fill();
+        // Status dot / group icon
+        if (isGroup) {
+            ctx.fillStyle = groupColor;
+            const cx = x + 14, cy = y + NODE_H / 2;
+            ctx.fillRect(cx - 5, cy - 5, 7, 4);
+            ctx.fillRect(cx - 3, cy - 1, 7, 4);
+            ctx.fillRect(cx - 1, cy + 3, 7, 4);
+        } else {
+            ctx.fillStyle = borderColor;
+            ctx.beginPath();
+            ctx.arc(x + 14, y + NODE_H / 2, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
 
         // Name
         ctx.fillStyle = serialDown ? errorColor : textColor;

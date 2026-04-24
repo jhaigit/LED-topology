@@ -88,6 +88,30 @@
     <p class="empty-state" id="route-perf-empty" {% if routes %}style="display:none;"{% endif %}>No routes configured. Drag from a source port to a sink port in the graph above to create one.</p>
 </section>
 
+<!-- Sink Group Modal -->
+<div id="groupModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="groupModalTitle">Create Sink Group</h2>
+            <button class="close-btn" onclick="hideGroupModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="groupEditId">
+            <div class="form-group">
+                <label for="groupName">Group Name</label>
+                <input type="text" id="groupName" placeholder="My Strip Group" required>
+            </div>
+            <div class="form-group">
+                <label>Member Sinks (order determines pixel layout)</label>
+                <div id="groupMembersList"></div>
+            </div>
+            <div class="form-group" style="display:flex;justify-content:flex-end;">
+                <button class="btn btn-primary" onclick="saveGroup()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Fill Modal -->
 <div id="fillModal" class="modal" style="display: none;">
     <div class="modal-content">
@@ -149,6 +173,7 @@ const rawSources = {{ sources_json | tojson | safe }};
 const rawSinks = {{ sinks_json | tojson | safe }};
 const rawRoutes = {{ routes_json | tojson | safe }};
 const rawVS = {{ vs_json | tojson | safe }};
+const rawGroups = {{ groups_json | tojson | safe }};
 
 // Build graph data - ALL sources and sinks, not just routed ones
 const graphSources = [];
@@ -159,11 +184,20 @@ rawVS.forEach(v => {
     graphSources.push({ id: v.id, name: v.name, online: v.is_running, type: 'virtual', _raw: v });
 });
 
-const graphSinks = rawSinks.map(s => ({
+let graphSinks = rawSinks.map(s => ({
     id: s.id, name: s.name, online: s.online,
     backend_connected: s.backend_connected,
     _raw: s
 }));
+rawGroups.forEach(g => {
+    graphSinks.push({
+        id: g.id, name: g.name, online: true,
+        type: 'group', total_pixels: g.total_pixels,
+        members: g.members, _raw: g
+    });
+});
+
+let currentGroupData = null;
 
 const graphRoutes = rawRoutes.map(r => ({
     id: r.id,
@@ -218,6 +252,22 @@ graphCanvas.addEventListener('node-clicked', function(e) {
             })
             .catch(() => {
                 content.innerHTML = `<h3>${node.name}</h3><p>Could not load details</p>`;
+                panel.style.display = '';
+            });
+    } else if (snk && snk.type === 'group') {
+        fetch(`/api/sink-groups/${node.id}`)
+            .then(r => r.json())
+            .then(group => {
+                if (group.error) {
+                    content.innerHTML = `<h3>${esc(node.name)}</h3><p class="empty-state">Group not found</p>`;
+                } else {
+                    currentGroupData = group;
+                    renderGroupDetail(group);
+                }
+                panel.style.display = '';
+            })
+            .catch(() => {
+                content.innerHTML = `<h3>${esc(node.name)}</h3><p>Could not load details</p>`;
                 panel.style.display = '';
             });
     } else if (snk) {
@@ -430,6 +480,123 @@ function addSection() {
 
 function removeSection(btn) {
     if (document.querySelectorAll('.section-row').length > 1) btn.parentElement.remove();
+}
+
+// --- Sink Groups ---
+function renderGroupDetail(g) {
+    const content = document.getElementById('detail-content');
+    let html = `
+        <div class="detail-header">
+            <h3>Group: ${esc(g.name)}</h3>
+            <div class="btn-group">
+                <button class="btn btn-sm" onclick="showGroupModal(currentGroupData)">Edit</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteGroup('${esc(g.id)}')">Delete</button>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-row"><span class="label">Total Pixels:</span> <span>${g.total_pixels}</span></div>
+            <div class="detail-row"><span class="label">Members:</span> <span>${g.members.length} sinks</span></div>
+            <div class="detail-row"><span class="label">ID:</span> <span class="id-value">${esc(g.id)}</span></div>
+        </div>
+        <h4>Members</h4>
+        <table class="table table-compact" style="margin-top:0.5rem;">
+            <thead><tr><th>#</th><th>Sink</th><th>Pixels</th><th>Offset</th><th>Rev</th></tr></thead>
+            <tbody>`;
+    g.members.forEach((m, i) => {
+        const sinkNode = graphSinks.find(s => s.id === m.sink_id);
+        const sinkName = sinkNode ? sinkNode.name : m.sink_id;
+        html += `<tr>
+            <td>${i + 1}</td>
+            <td>${esc(sinkName)}</td>
+            <td>${m.pixel_count}</td>
+            <td>${m.pixel_offset}</td>
+            <td>${m.reversed ? 'Yes' : ''}</td>
+        </tr>`;
+    });
+    html += `</tbody></table>`;
+    content.innerHTML = html;
+}
+
+function showGroupModal(editGroup) {
+    const physicalSinks = graphSinks.filter(s => s.type !== 'group');
+    const membersList = document.getElementById('groupMembersList');
+
+    let html = '';
+    physicalSinks.forEach(sink => {
+        const member = editGroup ? editGroup.members.find(m => m.sink_id === sink.id) : null;
+        html += `<div class="group-member-row">
+            <label>
+                <input type="checkbox" class="group-member-check" value="${sink.id}" ${member ? 'checked' : ''}>
+                ${esc(sink.name)}
+            </label>
+            <label class="reverse-label">
+                <input type="checkbox" class="group-member-rev" ${member && member.reversed ? 'checked' : ''}> Rev
+            </label>
+        </div>`;
+    });
+
+    membersList.innerHTML = html;
+
+    if (editGroup) {
+        document.getElementById('groupEditId').value = editGroup.id;
+        document.getElementById('groupName').value = editGroup.name;
+        document.getElementById('groupModalTitle').textContent = 'Edit Sink Group';
+    } else {
+        document.getElementById('groupEditId').value = '';
+        document.getElementById('groupName').value = '';
+        document.getElementById('groupModalTitle').textContent = 'Create Sink Group';
+    }
+
+    document.getElementById('groupModal').style.display = 'flex';
+}
+
+function hideGroupModal() {
+    document.getElementById('groupModal').style.display = 'none';
+}
+
+async function saveGroup() {
+    const name = document.getElementById('groupName').value;
+    if (!name) { showToast('Name required', 'error'); return; }
+
+    const members = [];
+    const reversed = [];
+    document.querySelectorAll('.group-member-check:checked').forEach(cb => {
+        members.push(cb.value);
+        const revCb = cb.closest('.group-member-row').querySelector('.group-member-rev');
+        reversed.push(revCb.checked);
+    });
+
+    if (members.length < 2) { showToast('Select at least 2 sinks', 'error'); return; }
+
+    const editId = document.getElementById('groupEditId').value;
+    const url = editId ? `/api/sink-groups/${editId}` : '/api/sink-groups';
+    const method = editId ? 'PUT' : 'POST';
+
+    try {
+        const resp = await fetch(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, members, reversed })
+        });
+        const data = await resp.json();
+        if (data.id || data.status === 'ok') {
+            hideGroupModal();
+            showToast(editId ? 'Group updated' : 'Group created', 'success');
+            setTimeout(() => location.reload(), 500);
+        } else {
+            showToast('Error: ' + (data.error || 'Unknown'), 'error');
+        }
+    } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+    }
+}
+
+async function deleteGroup(groupId) {
+    if (!await confirmAction('Delete this sink group and its routes?')) return;
+    await fetch(`/api/sink-groups/${groupId}`, { method: 'DELETE' });
+    showToast('Group deleted', 'success');
+    document.getElementById('detail-panel').style.display = 'none';
+    setTimeout(() => location.reload(), 500);
 }
 
 function renderVSDetail(v) {
@@ -887,17 +1054,36 @@ function updateStatus() {
         LtpRouteGraph.updateSourceData(updated);
     }).catch(() => {});
 
-    fetch('/api/sinks').then(r => r.json()).then(sinks => {
+    Promise.all([
+        fetch('/api/sinks').then(r => r.json()),
+        fetch('/api/sink-groups').then(r => r.json())
+    ]).then(([sinks, groups]) => {
         const online = sinks.filter(s => s.online).length;
         const el = document.getElementById('sinks-stat');
         if (el) el.textContent = `${online} / ${sinks.length}`;
-        LtpRouteGraph.updateSinkData(sinks.map(s => ({ id: s.id, name: s.name, online: s.online, backend_connected: s.backend_connected, _raw: s })));
 
-        // Refresh detail panel if a sink is currently selected
+        const sinkNodes = sinks.map(s => ({
+            id: s.id, name: s.name, online: s.online,
+            backend_connected: s.backend_connected, _raw: s
+        }));
+        groups.forEach(g => {
+            sinkNodes.push({
+                id: g.id, name: g.name, online: true,
+                type: 'group', total_pixels: g.total_pixels,
+                members: g.members, _raw: g
+            });
+        });
+
+        graphSinks.length = 0;
+        sinkNodes.forEach(s => graphSinks.push(s));
+        LtpRouteGraph.updateSinkData(sinkNodes);
+
         const selId = LtpRouteGraph.getSelectedNode();
         if (selId) {
             const item = sinks.find(s => s.id === selId);
             if (item) renderSinkDetail(item);
+            const grp = groups.find(g => g.id === selId);
+            if (grp) { currentGroupData = grp; renderGroupDetail(grp); }
         }
     }).catch(() => {});
 
@@ -992,7 +1178,9 @@ graphCanvas.addEventListener('canvas-context', async function(e) {
         other: 'Other'
     };
 
-    let html = '<div class="ctx-title">Create Virtual Source</div>';
+    let html = '<div class="ctx-group">Sink Groups</div>';
+    html += '<div class="ctx-item" onclick="hideCtxMenu();showGroupModal()">Create Sink Group</div>';
+    html += '<div class="ctx-title">Create Virtual Source</div>';
     for (const [cat, items] of Object.entries(groups)) {
         html += `<div class="ctx-group">${esc(catLabels[cat] || cat)}</div>`;
         items.forEach(t => {
@@ -1025,10 +1213,16 @@ graphCanvas.addEventListener('node-context', async function(e) {
         html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='${isVS ? '/virtual-sources' : '/sources'}'">View Details</div>`;
     }
     if (isSink) {
-        html += `<div class="ctx-item" onclick="hideCtxMenu();showSinkFill('${node.id}')">Fill</div>`;
-        html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/paint/${encodeURIComponent(node.id)}'">Paint</div>`;
-        html += `<div class="ctx-item" onclick="hideCtxMenu();clearSink('${node.id}')">Clear</div>`;
-        html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/sinks'">View Details</div>`;
+        const isGroupNode = graphSinks.find(s => s.id === node.id && s.type === 'group');
+        if (isGroupNode) {
+            html += `<div class="ctx-item" onclick="hideCtxMenu();fetch('/api/sink-groups/${node.id}').then(r=>r.json()).then(g=>{currentGroupData=g;showGroupModal(g);})">Edit Group</div>`;
+            html += `<div class="ctx-item ctx-danger" onclick="hideCtxMenu();deleteGroup('${node.id}')">Delete Group</div>`;
+        } else {
+            html += `<div class="ctx-item" onclick="hideCtxMenu();showSinkFill('${node.id}')">Fill</div>`;
+            html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/paint/${encodeURIComponent(node.id)}'">Paint</div>`;
+            html += `<div class="ctx-item" onclick="hideCtxMenu();clearSink('${node.id}')">Clear</div>`;
+            html += `<div class="ctx-item" onclick="hideCtxMenu();window.location.href='/sinks'">View Details</div>`;
+        }
     }
 
     showCtxMenu(x, y, html);
@@ -1309,6 +1503,27 @@ function esc(str) {
 }
 #sectionsList {
     margin-bottom: 12px;
+}
+
+/* Sink group modal */
+.group-member-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid var(--border, #333);
+    border-radius: 4px;
+    margin-bottom: 4px;
+}
+.group-member-row label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: normal;
+}
+.reverse-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
 }
 </style>
 {% endblock %}

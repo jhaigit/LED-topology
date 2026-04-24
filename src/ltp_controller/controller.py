@@ -19,6 +19,7 @@ from libltp import (
     control_set,
 )
 from libltp.types import SERVICE_TYPE_SINK, SERVICE_TYPE_SOURCE
+from ltp_controller.sink_group import SinkGroupManager
 
 # Avoid circular import
 from typing import TYPE_CHECKING
@@ -141,6 +142,7 @@ class Controller:
         self._on_source_change: DeviceCallback | None = None
         self._on_sink_change: DeviceCallback | None = None
         self._connection_pool: "SinkConnectionPool | None" = None
+        self._sink_group_manager = SinkGroupManager(self)
 
     def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
         """Set the connection pool for shared sink connections."""
@@ -190,6 +192,13 @@ class Controller:
     def on_sink_change(self, callback: DeviceCallback) -> None:
         """Set callback for sink changes."""
         self._on_sink_change = callback
+
+    @property
+    def sink_group_manager(self) -> SinkGroupManager:
+        return self._sink_group_manager
+
+    def get_sink_group(self, identifier: str):
+        return self._sink_group_manager.get(identifier)
 
     def _on_device_discovered(self, device: DiscoveredDevice, is_added: bool) -> None:
         """Handle device discovery events."""
@@ -268,6 +277,7 @@ class Controller:
 
             if self._on_sink_change:
                 self._on_sink_change(state, True)
+            self._sink_group_manager.on_member_sink_changed(state.id)
         else:
             if device_key in self._sinks:
                 state = self._sinks[device_key]
