@@ -531,6 +531,32 @@ function showGroupModalFromSelection() {
     showGroupModal({ id: '', name: '', members });
 }
 
+async function addSelectedToGroup(groupId) {
+    const selIds = LtpRouteGraph.getSelectedNodes();
+    LtpRouteGraph.clearSelection();
+    try {
+        const resp = await fetch(`/api/sink-groups/${groupId}`);
+        const group = await resp.json();
+        if (group.error) { showToast('Group not found', 'error'); return; }
+        const existingIds = new Set(group.members.map(m => m.sink_id));
+        const newIds = selIds.filter(id => !existingIds.has(id) && graphSinks.some(s => s.id === id && s.type !== 'group'));
+        if (newIds.length === 0) { showToast('Selected sinks already in group', 'info'); return; }
+        const members = [...group.members.map(m => m.sink_id), ...newIds];
+        const reversed = [...group.members.map(m => m.reversed), ...newIds.map(() => false)];
+        const putResp = await fetch(`/api/sink-groups/${groupId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ members, reversed })
+        });
+        const data = await putResp.json();
+        if (data.error) { showToast(data.error, 'error'); return; }
+        showToast(`Added ${newIds.length} sink${newIds.length > 1 ? 's' : ''} to group`, 'success');
+        setTimeout(() => location.reload(), 500);
+    } catch (e) {
+        showToast('Failed to update group', 'error');
+    }
+}
+
 let dragSrcRow = null;
 function initGroupDragDrop(container) {
     container.querySelectorAll('.group-member-row').forEach(row => {
@@ -650,7 +676,6 @@ async function saveGroup() {
         reversed.push(revCb ? revCb.checked : false);
     });
 
-    if (members.length < 1) { showToast('Add at least 1 sink', 'error'); return; }
 
     const editId = document.getElementById('groupEditId').value;
     const url = editId ? `/api/sink-groups/${editId}` : '/api/sink-groups';
@@ -1305,6 +1330,11 @@ graphCanvas.addEventListener('node-context', async function(e) {
     if (isSink) {
         const isGroupNode = graphSinks.find(s => s.id === node.id && s.type === 'group');
         if (isGroupNode) {
+            const selIds = LtpRouteGraph.getSelectedNodes();
+            const selSinks = selIds.filter(id => graphSinks.some(s => s.id === id && s.type !== 'group'));
+            if (selSinks.length > 0) {
+                html += `<div class="ctx-item" onclick="hideCtxMenu();addSelectedToGroup('${node.id}')">Add ${selSinks.length} Selected Sink${selSinks.length > 1 ? 's' : ''}</div>`;
+            }
             html += `<div class="ctx-item" onclick="hideCtxMenu();fetch('/api/sink-groups/${node.id}').then(r=>r.json()).then(g=>{currentGroupData=g;showGroupModal(g);})">Edit Group</div>`;
             html += `<div class="ctx-item ctx-danger" onclick="hideCtxMenu();deleteGroup('${node.id}')">Delete Group</div>`;
         } else {

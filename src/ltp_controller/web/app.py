@@ -764,8 +764,8 @@ def create_app(
             return jsonify({"error": "Missing 'name' field"}), 400
 
         member_ids = data.get("members", [])
-        if len(member_ids) < 2:
-            return jsonify({"error": "A group requires at least 2 members"}), 400
+        if not isinstance(member_ids, list):
+            return jsonify({"error": "members must be a list"}), 400
 
         reversed_flags = data.get("reversed")
 

@@ -344,6 +344,7 @@ window.LtpRouteGraph = (function() {
 
     // Event handlers
     function onMouseDown(e) {
+        if (e.button === 2) return;  // right-click handled by onContextMenu
         const { x, y } = getMousePos(e);
 
         // Check if clicking a source port (start cable)
