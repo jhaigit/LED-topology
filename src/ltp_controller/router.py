@@ -373,10 +373,34 @@ class RoutingEngine:
 
                 # Get source and sink devices
                 source = self.controller.get_source(route.source_id)
-                sink = self.controller.get_sink(route.sink_id)
 
                 if not source:
                     raise ValueError(f"Source not found: {route.source_id}")
+
+                # Check if target is a sink group
+                group = self.controller.get_sink_group(route.sink_id)
+                if group:
+                    if not source.online:
+                        route.status = RouteStatus.DISCONNECTED
+                        route.error_message = f"Waiting for: {source.name}"
+                        logger.info(f"Route {route.name}: {route.error_message}")
+                        await asyncio.sleep(reconnect_delay)
+                        continue
+                    group.recompute(self.controller)
+                    any_online = any(
+                        (s := self.controller.get_sink(m.sink_id)) and s.online
+                        for m in group.members
+                    )
+                    if not any_online:
+                        route.status = RouteStatus.DISCONNECTED
+                        route.error_message = "Waiting for group members"
+                        logger.info(f"Route {route.name}: {route.error_message}")
+                        await asyncio.sleep(reconnect_delay)
+                        continue
+                    await self._run_proxy_group_route(route, source, group)
+                    break
+
+                sink = self.controller.get_sink(route.sink_id)
                 if not sink:
                     raise ValueError(f"Sink not found: {route.sink_id}")
 
@@ -866,6 +890,158 @@ class RoutingEngine:
                     raise ConnectionError("All group members went offline")
 
             await asyncio.sleep(frame_interval)
+
+    async def _run_proxy_group_route(
+        self, route: Route, source: DeviceState, group: "SinkGroup"
+    ) -> None:
+        """Run a proxy route from a physical source to a sink group."""
+        logger.info(
+            f"Starting proxy group route: {route.name} -> {group.name} "
+            f"({group.total_pixels} pixels, {len(group.members)} members)"
+        )
+
+        route._sink_color_format = ColorFormat.RGB
+
+        # Set up streams to each online member
+        for member in group.members:
+            sink = self.controller.get_sink(member.sink_id)
+            if not sink or not sink.online:
+                logger.warning(f"Group member {member.sink_id} not available, skipping")
+                continue
+            try:
+                setup_req = stream_setup(0, ColorFormat.RGB, Encoding.RAW)
+                if self._pool:
+                    setup_resp = await self._pool.request(sink.id, setup_req)
+                    if not setup_resp or setup_resp.data.get("status") != "ok":
+                        logger.warning(f"Stream setup failed for group member {sink.name}")
+                        continue
+                else:
+                    continue
+
+                udp_port = setup_resp.data["udp_port"]
+                stream_id = setup_resp.data["stream_id"]
+
+                sender = DataSender(sink.host, udp_port)
+                await sender.start()
+
+                start_req = stream_control(0, stream_id, StreamAction.START)
+                await self._pool.request(sink.id, start_req)
+
+                route._group_senders[member.sink_id] = sender
+                route._group_stream_ids[member.sink_id] = stream_id
+                logger.info(f"Group member {sink.name}: stream to :{udp_port}")
+            except Exception as e:
+                logger.warning(f"Failed to set up group member {sink.name}: {e}")
+
+        if not route._group_senders:
+            raise ValueError("No group members available")
+
+        # Subscribe to source — request at group total pixels
+        source_dims = self._get_dimensions(source)
+        route._receiver = DataReceiver(dual_stack_bind_address(), 0)
+
+        def on_data(packet: DataPacket) -> None:
+            self._handle_group_packet(route, packet, source_dims, group)
+
+        route._receiver.handler = on_data
+        await route._receiver.start()
+
+        receiver_port = route._receiver.actual_port
+        local_ip = self._get_local_ip(source.host)
+
+        route._source_client = ControlClient(source.host, source.port)
+        await route._source_client.connect()
+
+        logger.info(f"Subscribing to source with callback {format_address_port(local_ip, receiver_port)}")
+        sub_req = subscribe(
+            0, [group.total_pixels], "rgb", 30,
+            callback_host=local_ip,
+            callback_port=receiver_port,
+        )
+        sub_resp = await route._source_client.request(sub_req)
+
+        if sub_resp.data.get("status") != "ok":
+            raise ValueError(f"Source subscribe failed: {sub_resp.data}")
+
+        route._source_stream_id = sub_resp.data["stream_id"]
+
+        route._source_dims = source_dims
+        route._sink_dims = [group.total_pixels]
+        route._scaling_active = False
+        route._connected_at = datetime.now()
+        route._no_data_warning = False
+
+        route.status = RouteStatus.CONNECTED
+        logger.info(
+            f"Proxy group route {route.name} connected: "
+            f"{source.name} -> {group.name} "
+            f"({len(route._group_senders)}/{len(group.members)} members)"
+        )
+
+        no_data_check_time = datetime.now()
+        initial_frames = route._frames_routed
+
+        while route.enabled:
+            await asyncio.sleep(1.0)
+
+            current_source = self.controller.get_source(route.source_id)
+            if not current_source or not current_source.online:
+                raise ConnectionError("Source went offline")
+
+            any_online = any(
+                (s := self.controller.get_sink(m.sink_id)) and s.online
+                for m in group.members
+            )
+            if not any_online:
+                raise ConnectionError("All group members went offline")
+
+            elapsed = (datetime.now() - no_data_check_time).total_seconds()
+            if elapsed >= 5.0 and route._frames_routed == initial_frames:
+                if not route._no_data_warning:
+                    route._no_data_warning = True
+                    route.error_message = "No data received - check source output"
+                    logger.warning(f"Route {route.name}: {route.error_message}")
+            elif route._frames_routed > initial_frames:
+                if route._no_data_warning:
+                    route._no_data_warning = False
+                    route.error_message = None
+                no_data_check_time = datetime.now()
+                initial_frames = route._frames_routed
+
+    def _handle_group_packet(
+        self, route: Route, packet: DataPacket,
+        source_dims: list[int], group: "SinkGroup"
+    ) -> None:
+        """Handle an incoming packet and fan out to group member sinks."""
+        try:
+            pixels = packet.pixel_data
+
+            if route.transform.brightness != 1.0:
+                pixels = (pixels * route.transform.brightness).astype(np.uint8)
+
+            if route.transform.gamma != 1.0:
+                normalized = pixels / 255.0
+                corrected = np.power(normalized, route.transform.gamma)
+                pixels = (corrected * 255).astype(np.uint8)
+
+            route._last_frame = pixels.tolist()
+
+            for member in group.members:
+                sender = route._group_senders.get(member.sink_id)
+                if not sender:
+                    continue
+                start_idx = member.pixel_offset
+                end_idx = start_idx + member.pixel_count
+                segment = pixels[start_idx:end_idx]
+                if member.reversed:
+                    segment = segment[::-1].copy()
+                sender.send(segment, ColorFormat.RGB, Encoding.RAW)
+
+            route._frames_routed += 1
+            route._last_frame_time = datetime.now()
+
+        except Exception as e:
+            logger.warning(f"Error forwarding group packet for route {route.name}: {e}")
 
     def _handle_packet(
         self,
