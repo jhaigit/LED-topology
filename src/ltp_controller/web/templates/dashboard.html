@@ -1056,7 +1056,7 @@ function updateStatus() {
 
     Promise.all([
         fetch('/api/sinks').then(r => r.json()),
-        fetch('/api/sink-groups').then(r => r.json())
+        fetch('/api/sink-groups').then(r => r.json()).catch(() => [])
     ]).then(([sinks, groups]) => {
         const online = sinks.filter(s => s.online).length;
         const el = document.getElementById('sinks-stat');

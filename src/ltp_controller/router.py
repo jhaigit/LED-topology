@@ -954,7 +954,7 @@ class RoutingEngine:
 
         logger.info(f"Subscribing to source with callback {format_address_port(local_ip, receiver_port)}")
         sub_req = subscribe(
-            0, [group.total_pixels], "rgb", 30,
+            0, source_dims, "rgb", 30,
             callback_host=local_ip,
             callback_port=receiver_port,
         )
@@ -967,7 +967,13 @@ class RoutingEngine:
 
         route._source_dims = source_dims
         route._sink_dims = [group.total_pixels]
-        route._scaling_active = False
+        source_pixel_count = int(np.prod(source_dims))
+        route._scaling_active = source_pixel_count != group.total_pixels
+        if route._scaling_active:
+            logger.info(
+                f"Route {route.name}: Scaling active "
+                f"({source_dims} -> [{group.total_pixels}])"
+            )
         route._connected_at = datetime.now()
         route._no_data_warning = False
 
@@ -1015,6 +1021,13 @@ class RoutingEngine:
         """Handle an incoming packet and fan out to group member sinks."""
         try:
             pixels = packet.pixel_data
+
+            # Scale source data to group total pixels if sizes differ
+            source_count = int(np.prod(source_dims))
+            if source_count != group.total_pixels:
+                pixels = self._scale_pixels(
+                    pixels, source_dims, [group.total_pixels], route.transform
+                )
 
             if route.transform.brightness != 1.0:
                 pixels = (pixels * route.transform.brightness).astype(np.uint8)
