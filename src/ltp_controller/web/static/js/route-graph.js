@@ -6,6 +6,7 @@ window.LtpRouteGraph = (function() {
     let selectedCable = null;
     let hoveredCable = null;
     let selectedNode = null;
+    let selectedNodes = new Set();
     let dragTarget = null;
     let dragOffset = { x: 0, y: 0 };
     let dragStartPos = { x: 0, y: 0 };
@@ -127,7 +128,8 @@ window.LtpRouteGraph = (function() {
         sources.forEach(s => {
             const pos = nodePositions[s.id];
             if (!pos) return;
-            drawNode(pos.x, pos.y, s.name, s.online, 'source', s.type === 'virtual', selectedNode === s.id);
+            const isSel = selectedNode === s.id || selectedNodes.has(s.id);
+            drawNode(pos.x, pos.y, s.name, s.online, 'source', s.type === 'virtual', isSel);
             // Output port (right side)
             drawPort(pos.x + NODE_W, pos.y + NODE_H / 2, s.online);
         });
@@ -137,7 +139,8 @@ window.LtpRouteGraph = (function() {
             const pos = nodePositions[s.id];
             if (!pos) return;
             const isGroup = s.type === 'group';
-            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false, selectedNode === s.id, isGroup ? undefined : s.backend_connected, isGroup);
+            const isSel = selectedNode === s.id || selectedNodes.has(s.id);
+            drawNode(pos.x, pos.y, s.name, s.online, 'sink', false, isSel, isGroup ? undefined : s.backend_connected, isGroup);
             // Input port (left side)
             drawPort(pos.x, pos.y + NODE_H / 2, s.online);
         });
@@ -368,9 +371,20 @@ window.LtpRouteGraph = (function() {
             return;
         }
 
-        // Check if clicking a node (start drag)
+        // Check if clicking a node (start drag or shift-select)
         const node = getNodeAt(x, y);
         if (node) {
+            const isSink = sinks.some(s => s.id === node.id);
+            if (e.shiftKey && isSink && node.type !== 'group') {
+                if (selectedNodes.has(node.id)) selectedNodes.delete(node.id);
+                else selectedNodes.add(node.id);
+                selectedCable = null;
+                draw();
+                canvas.dispatchEvent(new CustomEvent('selection-changed', {
+                    detail: { ids: [...selectedNodes] }
+                }));
+                return;
+            }
             dragTarget = node;
             dragMoved = false;
             dragStartPos = { x: x, y: y };
@@ -384,9 +398,11 @@ window.LtpRouteGraph = (function() {
         // Click on empty space - deselect
         selectedCable = null;
         selectedNode = null;
+        selectedNodes.clear();
         draw();
         canvas.dispatchEvent(new CustomEvent('cable-selected', { detail: null }));
         canvas.dispatchEvent(new CustomEvent('node-clicked', { detail: null }));
+        canvas.dispatchEvent(new CustomEvent('selection-changed', { detail: { ids: [] } }));
     }
 
     function onMouseMove(e) {
@@ -438,12 +454,13 @@ window.LtpRouteGraph = (function() {
             dragTarget = null;
             if (dragMoved) {
                 savePositions();
-            } else {
-                // Click without drag - select the node
+            } else if (!e.shiftKey) {
                 selectedNode = clicked.id;
                 selectedCable = null;
+                selectedNodes.clear();
                 draw();
                 canvas.dispatchEvent(new CustomEvent('node-clicked', { detail: clicked }));
+                canvas.dispatchEvent(new CustomEvent('selection-changed', { detail: { ids: [] } }));
             }
             return;
         }
@@ -529,6 +546,15 @@ window.LtpRouteGraph = (function() {
         return selectedNode;
     }
 
+    function getSelectedNodes() {
+        return [...selectedNodes];
+    }
+
+    function clearSelection() {
+        selectedNodes.clear();
+        draw();
+    }
+
     return {
         init,
         draw,
@@ -538,6 +564,8 @@ window.LtpRouteGraph = (function() {
         resetLayout,
         resizeCanvas,
         getSelectedCable,
-        getSelectedNode
+        getSelectedNode,
+        getSelectedNodes,
+        clearSelection
     };
 })();

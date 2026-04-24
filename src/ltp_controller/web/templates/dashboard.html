@@ -102,8 +102,12 @@
                 <input type="text" id="groupName" placeholder="My Strip Group" required>
             </div>
             <div class="form-group">
-                <label>Member Sinks (order determines pixel layout)</label>
+                <label>Members (drag to reorder)</label>
                 <div id="groupMembersList"></div>
+                <div id="groupAddRow" style="margin-top:6px;display:flex;gap:6px;">
+                    <select id="groupAddSelect" style="flex:1;"><option value="">Add a sink...</option></select>
+                    <button class="btn btn-sm" onclick="addGroupMember()">Add</button>
+                </div>
             </div>
             <div class="form-group" style="display:flex;justify-content:flex-end;">
                 <button class="btn btn-primary" onclick="saveGroup()">Save</button>
@@ -517,6 +521,16 @@ function renderGroupDetail(g) {
     content.innerHTML = html;
 }
 
+function showGroupModalFromSelection() {
+    const selIds = LtpRouteGraph.getSelectedNodes();
+    const members = selIds.map(id => {
+        const sink = graphSinks.find(s => s.id === id && s.type !== 'group');
+        return sink ? { sink_id: sink.id } : null;
+    }).filter(Boolean);
+    LtpRouteGraph.clearSelection();
+    showGroupModal({ id: '', name: '', members });
+}
+
 let dragSrcRow = null;
 function initGroupDragDrop(container) {
     container.querySelectorAll('.group-member-row').forEach(row => {
@@ -551,51 +565,73 @@ function initGroupDragDrop(container) {
 }
 
 function showGroupModal(editGroup) {
-    const physicalSinks = graphSinks.filter(s => s.type !== 'group');
     const membersList = document.getElementById('groupMembersList');
+    membersList.innerHTML = '';
 
-    // Build ordered list: checked members first (in group order), then unchecked
-    let ordered = [];
-    if (editGroup) {
+    if (editGroup && editGroup.members) {
         editGroup.members.forEach(m => {
-            const sink = physicalSinks.find(s => s.id === m.sink_id);
-            if (sink) ordered.push({ sink, checked: true, reversed: m.reversed });
+            const sink = graphSinks.find(s => s.id === m.sink_id);
+            if (sink) appendGroupMemberRow(sink.id, sink.name, m.reversed || false);
         });
     }
-    physicalSinks.forEach(sink => {
-        if (!ordered.find(o => o.sink.id === sink.id)) {
-            ordered.push({ sink, checked: false, reversed: false });
-        }
-    });
 
-    let html = '';
-    ordered.forEach(({ sink, checked, reversed }) => {
-        html += `<div class="group-member-row" draggable="true" data-sink-id="${sink.id}">
-            <span class="drag-handle" title="Drag to reorder">⠿</span>
-            <label>
-                <input type="checkbox" class="group-member-check" value="${sink.id}" ${checked ? 'checked' : ''}>
-                ${esc(sink.name)}
-            </label>
-            <label class="reverse-label">
-                <input type="checkbox" class="group-member-rev" ${reversed ? 'checked' : ''}> Rev
-            </label>
-        </div>`;
-    });
+    refreshGroupAddSelect();
 
-    membersList.innerHTML = html;
-    initGroupDragDrop(membersList);
-
-    if (editGroup) {
+    if (editGroup && editGroup.id) {
         document.getElementById('groupEditId').value = editGroup.id;
-        document.getElementById('groupName').value = editGroup.name;
+        document.getElementById('groupName').value = editGroup.name || '';
         document.getElementById('groupModalTitle').textContent = 'Edit Sink Group';
     } else {
         document.getElementById('groupEditId').value = '';
-        document.getElementById('groupName').value = '';
+        document.getElementById('groupName').value = editGroup && editGroup.name ? editGroup.name : '';
         document.getElementById('groupModalTitle').textContent = 'Create Sink Group';
     }
 
     document.getElementById('groupModal').style.display = 'flex';
+}
+
+function appendGroupMemberRow(sinkId, sinkName, reversed) {
+    const membersList = document.getElementById('groupMembersList');
+    const row = document.createElement('div');
+    row.className = 'group-member-row';
+    row.draggable = true;
+    row.dataset.sinkId = sinkId;
+    row.innerHTML = `
+        <span class="drag-handle" title="Drag to reorder">&#x2807;</span>
+        <span class="member-name">${esc(sinkName)}</span>
+        <label class="reverse-label">
+            <input type="checkbox" class="group-member-rev" ${reversed ? 'checked' : ''}> Rev
+        </label>
+        <button class="btn-remove" title="Remove" onclick="removeGroupMember(this)">&times;</button>
+    `;
+    membersList.appendChild(row);
+    initGroupDragDrop(membersList);
+    refreshGroupAddSelect();
+}
+
+function removeGroupMember(btn) {
+    btn.closest('.group-member-row').remove();
+    refreshGroupAddSelect();
+}
+
+function addGroupMember() {
+    const sel = document.getElementById('groupAddSelect');
+    const sinkId = sel.value;
+    if (!sinkId) return;
+    const sink = graphSinks.find(s => s.id === sinkId);
+    if (sink) appendGroupMemberRow(sink.id, sink.name, false);
+}
+
+function refreshGroupAddSelect() {
+    const membersList = document.getElementById('groupMembersList');
+    const usedIds = new Set([...membersList.querySelectorAll('.group-member-row')].map(r => r.dataset.sinkId));
+    const available = graphSinks.filter(s => s.type !== 'group' && !usedIds.has(s.id));
+    const sel = document.getElementById('groupAddSelect');
+    sel.innerHTML = '<option value="">Add a sink...</option>';
+    available.forEach(s => {
+        sel.innerHTML += `<option value="${s.id}">${esc(s.name)}</option>`;
+    });
+    document.getElementById('groupAddRow').style.display = available.length ? 'flex' : 'none';
 }
 
 function hideGroupModal() {
@@ -608,13 +644,13 @@ async function saveGroup() {
 
     const members = [];
     const reversed = [];
-    document.querySelectorAll('.group-member-check:checked').forEach(cb => {
-        members.push(cb.value);
-        const revCb = cb.closest('.group-member-row').querySelector('.group-member-rev');
-        reversed.push(revCb.checked);
+    document.querySelectorAll('.group-member-row').forEach(row => {
+        members.push(row.dataset.sinkId);
+        const revCb = row.querySelector('.group-member-rev');
+        reversed.push(revCb ? revCb.checked : false);
     });
 
-    if (members.length < 2) { showToast('Select at least 2 sinks', 'error'); return; }
+    if (members.length < 1) { showToast('Add at least 1 sink', 'error'); return; }
 
     const editId = document.getElementById('groupEditId').value;
     const url = editId ? `/api/sink-groups/${editId}` : '/api/sink-groups';
@@ -1226,8 +1262,14 @@ graphCanvas.addEventListener('canvas-context', async function(e) {
         other: 'Other'
     };
 
+    const selIds = LtpRouteGraph.getSelectedNodes();
+    const selSinks = selIds.map(id => graphSinks.find(s => s.id === id && s.type !== 'group')).filter(Boolean);
+
     let html = '<div class="ctx-group">Sink Groups</div>';
-    html += '<div class="ctx-item" onclick="hideCtxMenu();showGroupModal()">Create Sink Group</div>';
+    if (selSinks.length > 0) {
+        html += `<div class="ctx-item" onclick="hideCtxMenu();showGroupModalFromSelection()">Group ${selSinks.length} Selected Sink${selSinks.length > 1 ? 's' : ''}</div>`;
+    }
+    html += '<div class="ctx-item" onclick="hideCtxMenu();showGroupModal()">Create Empty Group</div>';
     html += '<div class="ctx-title">Create Virtual Source</div>';
     for (const [cat, items] of Object.entries(groups)) {
         html += `<div class="ctx-group">${esc(catLabels[cat] || cat)}</div>`;
@@ -1567,13 +1609,7 @@ function esc(str) {
 }
 .group-member-row.dragging { opacity: 0.4; }
 .group-member-row.drag-over { border-color: var(--accent, #4dc9f6); }
-.group-member-row label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: normal;
-}
-.group-member-row label:first-of-type { flex: 1; }
+.member-name { flex: 1; }
 .drag-handle {
     cursor: grab;
     color: var(--text-secondary, #888);
@@ -1582,9 +1618,18 @@ function esc(str) {
     line-height: 1;
 }
 .reverse-label {
+    display: flex; align-items: center; gap: 4px;
     font-size: 0.85rem;
     color: var(--text-secondary);
     white-space: nowrap;
+    font-weight: normal;
 }
+.btn-remove {
+    background: none; border: none;
+    color: var(--text-secondary, #888);
+    font-size: 1.1rem; cursor: pointer;
+    padding: 0 4px; line-height: 1;
+}
+.btn-remove:hover { color: var(--error, #e94560); }
 </style>
 {% endblock %}
