@@ -235,6 +235,11 @@ class SinkConnectionPool:
                              f"(connected={conn.connected}, is_connected={conn.client.is_connected})")
                 result = await conn.client.request(message, timeout=timeout)
                 logger.debug(f"Pool: Got response for {sink_id}: {result.type.value if result else 'None'}")
+                if result:
+                    sink = self.controller.get_sink(sink_id)
+                    if sink and sink.backend_connected is False:
+                        sink.backend_connected = None
+                        asyncio.create_task(self.controller._fetch_device_info(sink))
                 return result
             except Exception as e:
                 logger.warning(f"Pool: Request to {sink_id} failed: {type(e).__name__}: {e!r}")
