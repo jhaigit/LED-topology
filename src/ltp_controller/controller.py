@@ -220,13 +220,9 @@ class Controller:
                 state.device = device
                 state.last_seen = datetime.now()
                 state.online = True
-                # Refetch capabilities if port changed or device came back online
-                if state.port != old_port or was_offline:
-                    reason = "port changed" if state.port != old_port else "back online"
-                    logger.info(f"Source updated ({reason}): {state.name}")
-                    asyncio.create_task(self._fetch_device_info(state))
-                else:
-                    logger.info(f"Source updated: {state.name}")
+                reason = "port changed" if state.port != old_port else "back online" if was_offline else "re-advertised"
+                logger.info(f"Source updated ({reason}): {state.name}")
+                asyncio.create_task(self._fetch_device_info(state))
             else:
                 # New source
                 state = DeviceState(device=device)
@@ -259,13 +255,11 @@ class Controller:
                 state.device = device
                 state.last_seen = datetime.now()
                 state.online = True
-                # Refetch capabilities if port changed or device came back online
-                if state.port != old_port or was_offline:
-                    reason = "port changed" if state.port != old_port else "back online"
-                    logger.info(f"Sink updated ({reason}): {state.name}")
-                    asyncio.create_task(self._fetch_device_info(state))
-                else:
-                    logger.info(f"Sink updated: {state.name}")
+                # Refetch capabilities on any re-advertisement (covers restart,
+                # port change, and coming back online)
+                reason = "port changed" if state.port != old_port else "back online" if was_offline else "re-advertised"
+                logger.info(f"Sink updated ({reason}): {state.name}")
+                asyncio.create_task(self._fetch_device_info(state))
             else:
                 # New sink
                 state = DeviceState(device=device)
