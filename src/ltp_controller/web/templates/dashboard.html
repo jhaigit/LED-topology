@@ -517,25 +517,73 @@ function renderGroupDetail(g) {
     content.innerHTML = html;
 }
 
+let dragSrcRow = null;
+function initGroupDragDrop(container) {
+    container.querySelectorAll('.group-member-row').forEach(row => {
+        row.addEventListener('dragstart', e => {
+            dragSrcRow = row;
+            row.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        row.addEventListener('dragend', () => {
+            row.classList.remove('dragging');
+            container.querySelectorAll('.group-member-row').forEach(r => r.classList.remove('drag-over'));
+            dragSrcRow = null;
+        });
+        row.addEventListener('dragover', e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (row !== dragSrcRow) row.classList.add('drag-over');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        row.addEventListener('drop', e => {
+            e.preventDefault();
+            row.classList.remove('drag-over');
+            if (dragSrcRow && row !== dragSrcRow) {
+                const rows = [...container.querySelectorAll('.group-member-row')];
+                const fromIdx = rows.indexOf(dragSrcRow);
+                const toIdx = rows.indexOf(row);
+                if (fromIdx < toIdx) row.after(dragSrcRow);
+                else row.before(dragSrcRow);
+            }
+        });
+    });
+}
+
 function showGroupModal(editGroup) {
     const physicalSinks = graphSinks.filter(s => s.type !== 'group');
     const membersList = document.getElementById('groupMembersList');
 
-    let html = '';
+    // Build ordered list: checked members first (in group order), then unchecked
+    let ordered = [];
+    if (editGroup) {
+        editGroup.members.forEach(m => {
+            const sink = physicalSinks.find(s => s.id === m.sink_id);
+            if (sink) ordered.push({ sink, checked: true, reversed: m.reversed });
+        });
+    }
     physicalSinks.forEach(sink => {
-        const member = editGroup ? editGroup.members.find(m => m.sink_id === sink.id) : null;
-        html += `<div class="group-member-row">
+        if (!ordered.find(o => o.sink.id === sink.id)) {
+            ordered.push({ sink, checked: false, reversed: false });
+        }
+    });
+
+    let html = '';
+    ordered.forEach(({ sink, checked, reversed }) => {
+        html += `<div class="group-member-row" draggable="true" data-sink-id="${sink.id}">
+            <span class="drag-handle" title="Drag to reorder">⠿</span>
             <label>
-                <input type="checkbox" class="group-member-check" value="${sink.id}" ${member ? 'checked' : ''}>
+                <input type="checkbox" class="group-member-check" value="${sink.id}" ${checked ? 'checked' : ''}>
                 ${esc(sink.name)}
             </label>
             <label class="reverse-label">
-                <input type="checkbox" class="group-member-rev" ${member && member.reversed ? 'checked' : ''}> Rev
+                <input type="checkbox" class="group-member-rev" ${reversed ? 'checked' : ''}> Rev
             </label>
         </div>`;
     });
 
     membersList.innerHTML = html;
+    initGroupDragDrop(membersList);
 
     if (editGroup) {
         document.getElementById('groupEditId').value = editGroup.id;
@@ -1508,22 +1556,35 @@ function esc(str) {
 /* Sink group modal */
 .group-member-row {
     display: flex;
-    justify-content: space-between;
     align-items: center;
     padding: 6px 8px;
     border: 1px solid var(--border, #333);
     border-radius: 4px;
     margin-bottom: 4px;
+    gap: 8px;
+    cursor: grab;
+    transition: opacity 0.15s, border-color 0.15s;
 }
+.group-member-row.dragging { opacity: 0.4; }
+.group-member-row.drag-over { border-color: var(--accent, #4dc9f6); }
 .group-member-row label {
     display: flex;
     align-items: center;
     gap: 6px;
     font-weight: normal;
 }
+.group-member-row label:first-of-type { flex: 1; }
+.drag-handle {
+    cursor: grab;
+    color: var(--text-secondary, #888);
+    font-size: 1.1rem;
+    user-select: none;
+    line-height: 1;
+}
 .reverse-label {
     font-size: 0.85rem;
     color: var(--text-secondary);
+    white-space: nowrap;
 }
 </style>
 {% endblock %}
