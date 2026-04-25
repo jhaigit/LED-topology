@@ -487,6 +487,7 @@ window.LtpRouteGraph = (function() {
                 }));
             }
             pendingCable = null;
+            canvas.style.cursor = 'default';
             draw();
         }
     }
