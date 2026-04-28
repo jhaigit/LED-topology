@@ -197,18 +197,17 @@ class TestAudioAnalyzer:
         """Test temporal smoothing."""
         analyzer = AudioAnalyzer(smoothing=0.5)
 
-        # First analysis
+        # First analysis: raw RMS = 1.0, smoothed = 0.0*0.5 + 1.0*0.5 = 0.5
         samples1 = np.ones(2048, dtype=np.float32)
         analyzer.analyze(samples1)
         rms1 = analyzer.rms
+        assert abs(rms1 - 0.5) < 0.01
 
-        # Second analysis with zeros - RMS should decay due to smoothing
+        # Second analysis with zeros: smoothed = 0.5*0.5 + 0.0*0.5 = 0.25
         samples2 = np.zeros(2048, dtype=np.float32)
         analyzer.analyze(samples2)
         rms2 = analyzer.rms
-
-        # With 0.5 smoothing, RMS should be 0.5 * 1.0 + 0.5 * 0.0 = 0.5
-        assert abs(rms2 - 0.5) < 0.1
+        assert abs(rms2 - 0.25) < 0.01
 
     def test_reset(self):
         """Test reset clears all state."""

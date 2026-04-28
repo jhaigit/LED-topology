@@ -1,98 +1,242 @@
-# Section Routing - Future Directions
+# Section Routing
 
-This document outlines potential approaches for routing data to specific sections of LED strips, rather than whole-device-to-whole-device routing.
+**Version**: 2.0
+**Date**: 2026-04-27
 
-## Current Architecture
+## 1. Overview
 
-Routes currently operate at the whole-device level:
-- A route connects an entire source to an entire sink
-- DataPackets contain pixel data starting at index 0
-- Sinks display all incoming pixels from the beginning of the strip
+Section routing allows controlling specific pixel ranges on LED strips rather
+than treating each sink as a single indivisible unit. LTP implements this at
+the **sink level** through two complementary mechanisms:
+
+- **Section fills** — direct pixel-range control via the `SinkController`
+- **Sink groups** — ganging multiple physical sinks into one logical strip
+
+Routes remain whole-device: a route connects a source to a sink (or group)
+without per-route offset or count fields.
+
+## 2. Section Fills
+
+The `SinkController.fill_sections()` method fills arbitrary pixel ranges on
+a single sink. Each section specifies a start index, end index, and RGB color.
+Unfilled pixels receive a configurable background color.
+
+### 2.1 API
 
 ```
-Source (60 pixels) → Route → Sink (160 pixels)
-                              ↓
-                     Pixels 0-159 all updated
+POST /api/sinks/<sink_id>/fill
 ```
 
-## Use Cases for Section Routing
+```json
+{
+  "type": "sections",
+  "sections": [
+    {"start": 0,  "end": 30, "color": [255, 0, 0]},
+    {"start": 30, "end": 60, "color": [0, 255, 0]},
+    {"start": 60, "end": 90, "color": [0, 0, 255]}
+  ],
+  "background": [0, 0, 0]
+}
+```
 
-1. **Multiple sources to one strip**: Different sources control different sections
-2. **Partial updates**: Update only a portion of a large installation
-3. **Logical grouping**: Treat physical strips as multiple logical displays
-4. **Redundancy**: Same source to multiple sections for mirroring
+The same endpoint also supports `"type": "solid"` and `"type": "gradient"`.
 
-## Option 1: Sink-Side Offset Configuration
+### 2.2 Implementation
 
-**Complexity**: Low
-**Protocol Changes**: None
+`fill_sections()` in `sink_control.py`:
 
-Add `pixel_offset` to sink configuration. The sink writes incoming data starting at the configured offset instead of 0.
+1. Acquires or reuses a UDP stream to the sink
+2. Allocates a pixel buffer filled with the background color
+3. Paints each section's color into the corresponding index range
+4. Sends the complete frame over UDP
 
 ```python
-class SerialSinkConfig:
-    pixel_offset: int = 0  # Starting pixel for incoming data
+pixels = np.full((pixel_count, 3), background, dtype=np.uint8)
+for section in sections:
+    start = max(0, int(section["start"]))
+    end = min(pixel_count, int(section["end"]))
+    pixels[start:end] = section["color"]
+sender.send(pixels, color_format, Encoding.RAW)
 ```
 
-**Pros**:
-- No protocol changes
-- Simple implementation
-- Works with existing sources and controller
+Sections are applied in order, so later sections overwrite earlier ones where
+ranges overlap.
 
-**Cons**:
-- Requires multiple sink instances for multiple sections on one strip
-- Or sink needs internal "slot" management
-- Offset is static, not per-route
+### 2.3 Related Fill Modes
 
-**Implementation**:
+The `SinkController` also provides:
+
+| Method | Description |
+|--------|-------------|
+| `fill_solid(sink_id, color)` | Fill entire sink with one color |
+| `fill_gradient(sink_id, colors)` | Linear gradient across all pixels |
+| `set_pixel(sink_id, index, color)` | Set a single pixel |
+| `paint_pixels(sink_id, data)` | Sparse pixel map, coordinate, range modes |
+| `clear(sink_id)` | Fill with black |
+
+## 3. Sink Groups
+
+A `SinkGroup` gangs multiple physical sinks into one continuous logical strip.
+Each member has a computed `pixel_offset` representing its position in the
+virtual strip.
+
+### 3.1 Data Model
+
 ```python
-# In sink's _handle_data_packet:
-start = self.config.pixel_offset
-end = start + len(incoming_pixels)
-self._pixel_buffer[start:end] = incoming_pixels
+@dataclass
+class SinkGroupMember:
+    sink_id: str
+    pixel_offset: int = 0     # computed by recompute()
+    pixel_count: int = 0      # from live sink data
+    reversed: bool = False     # reverse pixel order for this member
+
+@dataclass
+class SinkGroup:
+    id: str                    # "sg-<hex>"
+    name: str
+    members: list[SinkGroupMember]
+    total_pixels: int = 0      # sum of all member pixel_counts
 ```
 
-## Option 2: Route-Level Section Configuration
+### 3.2 Offset Computation
 
-**Complexity**: Medium
-**Protocol Changes**: Minor (DataPacket offset field)
+`SinkGroup.recompute(controller)` walks the member list in order, queries
+each sink's live pixel count, and assigns sequential offsets:
 
-Add section parameters to Route configuration:
+```
+Member 0: pixel_offset=0,   pixel_count=60   (sink A, 60 LEDs)
+Member 1: pixel_offset=60,  pixel_count=100  (sink B, 100 LEDs)
+Member 2: pixel_offset=160, pixel_count=60   (sink C, 60 LEDs)
+total_pixels = 220
+```
+
+Offline sinks retain their last-known `pixel_count`. When a member comes
+online or changes pixel count, `on_member_sink_changed()` triggers
+recomputation.
+
+### 3.3 Member Ordering and Reversal
+
+Members are ordered by their position in the list. The `reversed` flag
+inverts pixel order for a member, useful when a physical strip runs in the
+opposite direction from its logical position in the group.
+
+### 3.4 API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| Create | `POST /api/sink-groups` | Create group with member sink IDs |
+| List | `GET /api/sink-groups` | List all groups with computed offsets |
+| Get | `GET /api/sink-groups/<id>` | Single group detail |
+| Update | `PUT /api/sink-groups/<id>` | Rename or change members |
+| Delete | `DELETE /api/sink-groups/<id>` | Remove group |
+
+### 3.5 Persistence
+
+Groups are serialized to the controller's config file:
+
+```yaml
+sink_groups:
+  - id: "sg-a1b2c3d4"
+    name: "Living Room Strip"
+    members:
+      - sink_id: "550e8400-..."
+        pixel_count: 60
+        reversed: false
+      - sink_id: "6ba7b810-..."
+        pixel_count: 100
+        reversed: false
+    total_pixels: 160
+```
+
+## 4. How Routes Interact
+
+Routes operate at the whole-device level. The `Route` dataclass has no
+`sink_offset` or `sink_count` fields:
+
+```python
+@dataclass
+class Route:
+    source_id: str
+    sink_id: str       # can reference a sink group ID
+    mode: RouteMode
+    transform: RouteTransform
+    # ... no section fields
+```
+
+When a route targets a sink group, the router splits the source frame across
+group members using each member's `pixel_offset` and `pixel_count`.
+
+Section fills and routes serve different purposes:
+- **Routes** carry streaming pixel data from sources (animations, effects)
+- **Section fills** are one-shot direct commands (set this range to this color)
+
+## 5. Use Cases
+
+### 5.1 Multi-Zone Solid Colors
+
+Fill different sections of a single strip with different colors for ambient
+lighting zones, without running a source:
+
+```json
+{
+  "type": "sections",
+  "sections": [
+    {"start": 0,   "end": 50,  "color": [255, 180, 100]},
+    {"start": 50,  "end": 120, "color": [100, 100, 255]},
+    {"start": 120, "end": 160, "color": [255, 180, 100]}
+  ]
+}
+```
+
+### 5.2 Ganged Strips
+
+Three separate Arduino-driven strips mounted as one continuous run behind a
+shelf. Create a sink group so sources see one 300-pixel strip:
+
+```
+Sink Group "Shelf LEDs" (300 pixels)
+├── Arduino A: pixels 0-99
+├── Arduino B: pixels 100-199 (reversed)
+└── Arduino C: pixels 200-299
+```
+
+### 5.3 Sequence Automation
+
+Sequence steps can use `fill_solid` actions targeting individual sinks.
+Combined with schedule triggers on rules, this enables time-based zone
+lighting without custom source code.
+
+---
+
+## Appendix: Alternative Considered — Route-Level Section Configuration
+
+An alternative design was considered but not implemented: adding `sink_offset`
+and `sink_count` fields to the `Route` dataclass so that each route could
+target a specific pixel range on the sink.
+
+### Design
 
 ```python
 @dataclass
 class Route:
     # ... existing fields ...
-    sink_offset: int = 0           # Starting pixel on sink
-    sink_count: int | None = None  # Number of pixels (None = all)
+    sink_offset: int = 0           # starting pixel on sink
+    sink_count: int | None = None  # number of pixels (None = all)
 ```
 
-Controller handles mapping when forwarding data:
-1. Scale source data to `sink_count` pixels (not full sink)
-2. Add offset to DataPacket
-3. Sink applies offset when writing to buffer
+The controller would scale the source data to `sink_count` pixels and add an
+offset to the `DataPacket`. This would also require a protocol extension:
 
-**DataPacket Extension**:
 ```
-Header (8 bytes): unchanged
-Frame Header (6 bytes):  # Was 4 bytes
+Frame Header (6 bytes):  # was 4 bytes
   color_format: uint8
   encoding: uint8
   pixel_count: uint16
-  pixel_offset: uint16   # NEW: starting pixel index
+  pixel_offset: uint16   # new: starting pixel index
 ```
 
-**Pros**:
-- Per-route configuration
-- Scaling respects section size
-- Multiple routes can target different sections
+### Web UI (proposed)
 
-**Cons**:
-- Protocol change (backward compatible with offset=0 default)
-- Controller complexity increases
-- Sink must handle offset in packet
-
-**Web UI Addition**:
 ```
 Route Configuration:
   Source: [dropdown]
@@ -102,118 +246,21 @@ Route Configuration:
     Count:  [___] pixels
 ```
 
-## Option 3: Full Protocol Support
+### Why It Was Not Chosen
 
-**Complexity**: High
-**Protocol Changes**: Significant
+The sink-level approach (section fills + sink groups) covers the primary use
+cases without protocol changes or added complexity in the routing layer. The
+route-level approach would be warranted if per-route pixel-range streaming
+becomes necessary — for example, routing two different animation sources to
+different sections of the same strip simultaneously. This remains an option
+for future implementation if the need arises.
 
-Add section/range support throughout the protocol:
+## 6. Related Files
 
-**subscribe message extension**:
-```json
-{
-  "type": "subscribe",
-  "target": {
-    "dimensions": [160],
-    "pixel_range": {
-      "offset": 30,
-      "count": 60
-    },
-    "color": "rgb",
-    "rate": 30
-  }
-}
-```
-
-**stream_setup extension**:
-```json
-{
-  "type": "stream_setup",
-  "format": {"color": "rgb"},
-  "section": {
-    "offset": 30,
-    "count": 60
-  }
-}
-```
-
-**Sink capability advertisement**:
-```json
-{
-  "capabilities": {
-    "sections": true,
-    "max_concurrent_sections": 4
-  }
-}
-```
-
-**Pros**:
-- Full flexibility
-- Sources can be section-aware
-- Sinks advertise section support
-- Enables advanced features (section priorities, blending)
-
-**Cons**:
-- Significant protocol changes
-- All components need updates
-- Backward compatibility concerns
-- Increased complexity throughout
-
-## Option 4: Virtual Sink Abstraction
-
-**Complexity**: Medium
-**Protocol Changes**: None (controller internal)
-
-Create "virtual sinks" in the controller that map to sections of physical sinks:
-
-```python
-# Controller configuration
-virtual_sinks:
-  - id: "living-room-left"
-    physical_sink: "led-strip-001"
-    offset: 0
-    count: 80
-
-  - id: "living-room-right"
-    physical_sink: "led-strip-001"
-    offset: 80
-    count: 80
-```
-
-Sources and routes see virtual sinks as independent devices. Controller handles the mapping internally.
-
-**Pros**:
-- No protocol changes
-- Clean abstraction
-- Sources unaware of physical layout
-- Easy to reconfigure
-
-**Cons**:
-- Controller must composite frames
-- All data flows through controller (no direct mode)
-- Latency for multi-section updates
-- Controller memory usage for frame buffers
-
-## Recommendation
-
-For initial implementation, **Option 2 (Route-Level Section Configuration)** provides the best balance:
-
-1. Minimal protocol changes (one new field)
-2. Per-route flexibility
-3. Backward compatible
-4. Reasonable implementation complexity
-
-**Implementation order**:
-1. Add `sink_offset` and `sink_count` to Route dataclass
-2. Add `pixel_offset` field to DataPacket (default 0)
-3. Update controller proxy routing to apply section config
-4. Update sink to respect packet offset
-5. Add UI controls for section configuration
-
-## Related Files
-
-- `src/libltp/protocol.py` - DataPacket structure
-- `src/libltp/types.py` - Route, message types
-- `src/ltp_controller/router.py` - Routing engine
-- `src/ltp_serial_sink/sink.py` - Sink data handling
-- `src/libltp/topology.py` - Existing topology abstractions
+| File | Purpose |
+|------|---------|
+| `src/ltp_controller/sink_control.py` | `SinkController` with `fill_sections()` |
+| `src/ltp_controller/sink_group.py` | `SinkGroup`, `SinkGroupMember`, `SinkGroupManager` |
+| `src/ltp_controller/router.py` | Route class (no section fields) |
+| `src/ltp_controller/web/app.py` | `/api/sinks/<id>/fill` endpoint |
+| `src/libltp/protocol.py` | DataPacket structure |
