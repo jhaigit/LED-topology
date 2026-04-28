@@ -437,15 +437,18 @@ window.LtpRouteGraph = (function() {
         const newHover = cable ? cable.id : null;
         if (newHover !== hoveredCable) {
             hoveredCable = newHover;
-            canvas.style.cursor = hoveredCable ? 'pointer' : 'default';
             draw();
         }
 
-        // Cursor for ports
+        // Cursor for interactive elements
         if (getSourcePortAt(x, y) || getSinkPortAt(x, y)) {
             canvas.style.cursor = 'crosshair';
-        } else if (!hoveredCable && getNodeAt(x, y)) {
+        } else if (hoveredCable) {
+            canvas.style.cursor = 'pointer';
+        } else if (getNodeAt(x, y)) {
             canvas.style.cursor = 'grab';
+        } else {
+            canvas.style.cursor = 'default';
         }
     }
 
