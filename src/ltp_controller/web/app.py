@@ -1729,6 +1729,7 @@ def create_app(
         sinks_data = [{"id": s.id, "name": s.name} for s in controller.sinks]
         routes_data = [{"id": r.id, "name": r.name} for r in router.routes]
         vs_data = [{"id": vs.id, "name": vs.name} for vs in (virtual_source_manager.sources if virtual_source_manager else [])]
+        seq_data = [{"id": s.id, "name": s.name} for s in (sequence_manager.sequences if sequence_manager else [])]
 
         return render_template(
             "rules.html",
@@ -1736,6 +1737,7 @@ def create_app(
             sinks=sinks_data,
             routes=routes_data,
             virtual_sources=vs_data,
+            sequences=seq_data,
         )
 
     # ==================== API: Inputs ====================

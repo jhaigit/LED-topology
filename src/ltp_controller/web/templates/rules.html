@@ -6,7 +6,7 @@
 <div class="page-header">
     <div>
         <h1>Rules</h1>
-        <p class="subtitle">Input-triggered automation rules</p>
+        <p class="subtitle">Automation rules</p>
     </div>
     <button class="btn btn-primary" onclick="showCreateModal()">Create Rule</button>
 </div>
@@ -33,6 +33,10 @@
             <div class="rule-trigger">
                 <span class="label">When:</span>
                 <span class="trigger-desc">
+                    {% if rule.trigger.type.value == 'schedule' %}
+                    {% set cp = rule.trigger.cron.split() %}
+                    At <strong>{{ '%02d' | format(cp[1]|int) }}:{{ '%02d' | format(cp[0]|int) }}</strong>{% if rule.trigger.days %} on <strong>{{ rule.trigger.days | join(', ') }}</strong>{% else %} daily{% endif %}{% if rule.trigger.jitter_minutes %} (&plusmn;{{ rule.trigger.jitter_minutes }}m jitter){% endif %}
+                    {% else %}
                     Input <strong>{{ rule.trigger.input_id }}</strong>
                     on sink <strong class="id-value">{{ rule.trigger.sink_id }}</strong>
                     {% if rule.trigger.comparison == 'changed_to' %}changes to{% endif %}
@@ -40,6 +44,7 @@
                     {% if rule.trigger.comparison == 'eq' %}equals{% endif %}
                     {% if rule.trigger.comparison == 'ne' %}does not equal{% endif %}
                     <strong>{{ rule.trigger.value }}</strong>
+                    {% endif %}
                 </span>
             </div>
             <div class="rule-actions-list">
@@ -55,6 +60,8 @@
                         {% if action.type == 'set_pixel' %}Set pixel <strong>{{ action.value.index }}</strong> to <span class="color-swatch" style="background:{{ action.value.color }}"></span> on <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
                         {% if action.type == 'fill_solid' %}Fill <strong class="id-value">{{ action.target_id }}</strong> with <span class="color-swatch" style="background:{{ action.value.color }}"></span>{% endif %}
                         {% if action.type == 'clear' %}Clear <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'start_sequence' %}Start sequence <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
+                        {% if action.type == 'stop_sequence' %}Stop sequence <strong class="id-value">{{ action.target_id }}</strong>{% endif %}
                     </li>
                     {% endfor %}
                 </ul>
@@ -75,7 +82,7 @@
 {% else %}
 <div class="empty-state-large">
     <p>No rules configured.</p>
-    <p>Create a rule to trigger actions based on input events from sinks.</p>
+    <p>Create a rule to trigger actions based on input events or a time schedule.</p>
     <button class="btn btn-primary" onclick="showCreateModal()">Create First Rule</button>
 </div>
 {% endif %}
@@ -102,41 +109,71 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label for="triggerType">Trigger Type</label>
-                            <select id="triggerType">
+                            <select id="triggerType" onchange="updateTriggerFields()">
                                 <option value="input_change">Input Change (edge)</option>
                                 <option value="input_state">Input State (level)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="triggerComparison">Comparison</label>
-                            <select id="triggerComparison">
-                                <option value="changed_to">Changed To</option>
-                                <option value="changed_from">Changed From</option>
-                                <option value="eq">Equals</option>
-                                <option value="ne">Not Equals</option>
+                                <option value="schedule">Schedule (time)</option>
                             </select>
                         </div>
                     </div>
 
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="triggerSink">Sink</label>
-                            <select id="triggerSink" onchange="loadSinkInputs()">
-                                <option value="">Select sink...</option>
-                                {% for sink in sinks %}
-                                <option value="{{ sink.id }}">{{ sink.name }}</option>
-                                {% endfor %}
-                            </select>
+                    <div id="inputTriggerFields">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="triggerComparison">Comparison</label>
+                                <select id="triggerComparison">
+                                    <option value="changed_to">Changed To</option>
+                                    <option value="changed_from">Changed From</option>
+                                    <option value="eq">Equals</option>
+                                    <option value="ne">Not Equals</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="triggerSink">Sink</label>
+                                <select id="triggerSink" onchange="loadSinkInputs()">
+                                    <option value="">Select sink...</option>
+                                    {% for sink in sinks %}
+                                    <option value="{{ sink.id }}">{{ sink.name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="triggerInput">Input</label>
+                                <select id="triggerInput">
+                                    <option value="">Select input...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="triggerValue">Value</label>
+                                <input type="text" id="triggerValue" value="true" placeholder="true/false or number">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="scheduleTriggerFields" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="scheduleTime">Time</label>
+                                <input type="time" id="scheduleTime" value="18:00">
+                            </div>
+                            <div class="form-group">
+                                <label for="scheduleJitter">Jitter (minutes)</label>
+                                <input type="number" id="scheduleJitter" min="0" step="1" value="0" placeholder="0">
+                            </div>
                         </div>
                         <div class="form-group">
-                            <label for="triggerInput">Input</label>
-                            <select id="triggerInput">
-                                <option value="">Select input...</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="triggerValue">Value</label>
-                            <input type="text" id="triggerValue" value="true" placeholder="true/false or number">
+                            <label>Days</label>
+                            <div class="day-checkboxes">
+                                <label><input type="checkbox" class="schedule-day" value="mon" checked> Mon</label>
+                                <label><input type="checkbox" class="schedule-day" value="tue" checked> Tue</label>
+                                <label><input type="checkbox" class="schedule-day" value="wed" checked> Wed</label>
+                                <label><input type="checkbox" class="schedule-day" value="thu" checked> Thu</label>
+                                <label><input type="checkbox" class="schedule-day" value="fri" checked> Fri</label>
+                                <label><input type="checkbox" class="schedule-day" value="sat" checked> Sat</label>
+                                <label><input type="checkbox" class="schedule-day" value="sun" checked> Sun</label>
+                            </div>
                         </div>
                     </div>
                 </fieldset>
@@ -382,6 +419,21 @@
 .empty-state-large .btn {
     margin-top: 1rem;
 }
+.day-checkboxes {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.day-checkboxes label {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+.day-checkboxes input[type="checkbox"] {
+    width: auto;
+}
 </style>
 {% endblock %}
 
@@ -396,9 +448,17 @@ if (document.getElementById('rules-list')) {
 const sinks = {{ sinks | tojson | safe }};
 const routes = {{ routes | tojson | safe }};
 const virtualSources = {{ virtual_sources | tojson | safe }};
+const sequences = {{ sequences | tojson | safe }};
 
 let editingRuleId = null;
 let actionCounter = 0;
+
+function updateTriggerFields() {
+    const type = document.getElementById('triggerType').value;
+    const isSchedule = (type === 'schedule');
+    document.getElementById('inputTriggerFields').style.display = isSchedule ? 'none' : '';
+    document.getElementById('scheduleTriggerFields').style.display = isSchedule ? '' : 'none';
+}
 
 // Format timestamps
 function formatTimestamps() {
@@ -451,6 +511,10 @@ function showCreateModal() {
     document.getElementById('ruleForm').reset();
     document.getElementById('ruleId').value = '';
     document.getElementById('actionsList').innerHTML = '';
+    document.querySelectorAll('.schedule-day').forEach(cb => cb.checked = true);
+    document.getElementById('scheduleTime').value = '18:00';
+    document.getElementById('scheduleJitter').value = '0';
+    updateTriggerFields();
     addAction(); // Add one default action
     document.getElementById('ruleModal').style.display = 'flex';
 }
@@ -469,15 +533,30 @@ function editRule(ruleId) {
             document.getElementById('ruleId').value = rule.id;
             document.getElementById('ruleName').value = rule.name;
             document.getElementById('triggerType').value = rule.trigger.type;
-            document.getElementById('triggerComparison').value = rule.trigger.comparison;
-            document.getElementById('triggerSink').value = rule.trigger.sink_id;
-            document.getElementById('triggerValue').value = rule.trigger.value;
             document.getElementById('ruleEnabled').checked = rule.enabled;
+            updateTriggerFields();
 
-            // Load inputs for selected sink
-            loadSinkInputs().then(() => {
-                document.getElementById('triggerInput').value = rule.trigger.input_id;
-            });
+            if (rule.trigger.type === 'schedule') {
+                // Parse cron "min hour * * *" into time
+                const parts = (rule.trigger.cron || '').split(/\s+/);
+                if (parts.length >= 2) {
+                    const hh = String(parts[1]).padStart(2, '0');
+                    const mm = String(parts[0]).padStart(2, '0');
+                    document.getElementById('scheduleTime').value = `${hh}:${mm}`;
+                }
+                document.getElementById('scheduleJitter').value = rule.trigger.jitter_minutes || 0;
+                const days = rule.trigger.days || [];
+                document.querySelectorAll('.schedule-day').forEach(cb => {
+                    cb.checked = days.length === 0 || days.includes(cb.value);
+                });
+            } else {
+                document.getElementById('triggerComparison').value = rule.trigger.comparison;
+                document.getElementById('triggerSink').value = rule.trigger.sink_id;
+                document.getElementById('triggerValue').value = rule.trigger.value;
+                loadSinkInputs().then(() => {
+                    document.getElementById('triggerInput').value = rule.trigger.input_id;
+                });
+            }
 
             // Load actions
             document.getElementById('actionsList').innerHTML = '';
@@ -573,6 +652,8 @@ function addAction(action = null) {
             <option value="disable_route">Disable Route</option>
             <option value="enable_source">Enable Source</option>
             <option value="disable_source">Disable Source</option>
+            <option value="start_sequence">Start Sequence</option>
+            <option value="stop_sequence">Stop Sequence</option>
         </select>
         <select class="action-target" data-type="sink" onchange="loadSinkControls(${id})">${sinkOptions}</select>
         <select class="action-control"><option value="">Select control...</option></select>
@@ -646,6 +727,12 @@ function updateActionTargets(id) {
         options = '<option value="">Select source...</option>';
         for (const vs of virtualSources) {
             options += `<option value="${vs.id}">${vs.name}</option>`;
+        }
+    } else if (actionType === 'start_sequence' || actionType === 'stop_sequence') {
+        targetType = 'sequence';
+        options = '<option value="">Select sequence...</option>';
+        for (const seq of sequences) {
+            options += `<option value="${seq.id}">${seq.name}</option>`;
         }
     } else {
         // Sink-targeted actions
@@ -748,16 +835,33 @@ function submitRule(event) {
         return;
     }
 
-    const ruleData = {
-        name: document.getElementById('ruleName').value,
-        enabled: document.getElementById('ruleEnabled').checked,
-        trigger: {
-            type: document.getElementById('triggerType').value,
+    const triggerType = document.getElementById('triggerType').value;
+    let trigger;
+    if (triggerType === 'schedule') {
+        const timeVal = document.getElementById('scheduleTime').value || '18:00';
+        const [hh, mm] = timeVal.split(':');
+        const cron = `${parseInt(mm)} ${parseInt(hh)} * * *`;
+        const jitter = parseFloat(document.getElementById('scheduleJitter').value) || 0;
+        const allDays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+        const checkedDays = [];
+        document.querySelectorAll('.schedule-day:checked').forEach(cb => checkedDays.push(cb.value));
+        trigger = { type: 'schedule', cron };
+        if (jitter > 0) trigger.jitter_minutes = jitter;
+        if (checkedDays.length > 0 && checkedDays.length < 7) trigger.days = checkedDays;
+    } else {
+        trigger = {
+            type: triggerType,
             sink_id: document.getElementById('triggerSink').value,
             input_id: parseInt(document.getElementById('triggerInput').value),
             comparison: document.getElementById('triggerComparison').value,
             value: triggerValue,
-        },
+        };
+    }
+
+    const ruleData = {
+        name: document.getElementById('ruleName').value,
+        enabled: document.getElementById('ruleEnabled').checked,
+        trigger,
         actions: actions,
     };
 
