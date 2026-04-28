@@ -4,6 +4,7 @@ LTP Serial Protocol v2 - High-Level Device Interface
 Provides a convenient API for communicating with LTP devices.
 """
 
+import logging
 import struct
 import sys
 import threading
@@ -12,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional, TextIO
 
 import serial
+
+logger = logging.getLogger(__name__)
 
 from .protocol import (
     LtpProtocol,
@@ -874,7 +877,8 @@ class LtpDevice:
                     packets = self._protocol.feed(data)
                     for packet in packets:
                         self._handle_packet(packet)
-            except (OSError, serial.SerialException):
+            except (OSError, serial.SerialException) as e:
+                logger.warning(f"Serial reader error: {e}")
                 break
 
     def _handle_packet(self, packet: LtpPacket):

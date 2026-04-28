@@ -180,10 +180,22 @@ class V2Renderer:
         """Check if device is connected."""
         return self._connected and self._device is not None and self._device.is_connected
 
+    def _close_device(self) -> None:
+        """Close the current device, stopping its reader thread and releasing the serial port."""
+        if self._device:
+            try:
+                self._device.close()
+            except Exception:
+                pass
+            self._device = None
+        self._connected = False
+
     def open(self) -> None:
         """Open connection to the device."""
         if not self.config.port:
             raise ValueError("Serial port not specified")
+
+        self._close_device()
 
         logger.info(f"Connecting to {self.config.port} at {self.config.baudrate} baud (v2 protocol)")
 
@@ -242,13 +254,7 @@ class V2Renderer:
 
         except LtpError as e:
             logger.error(f"Failed to connect: {e}")
-            self._connected = False
-            if self._device:
-                try:
-                    self._device.close()
-                except Exception:
-                    pass
-                self._device = None
+            self._close_device()
             raise
 
     def _populate_controls(self) -> None:
@@ -406,13 +412,7 @@ class V2Renderer:
 
     def close(self) -> None:
         """Close connection to the device."""
-        if self._device:
-            try:
-                self._device.close()
-            except Exception as e:
-                logger.warning(f"Error closing device: {e}")
-            self._device = None
-        self._connected = False
+        self._close_device()
         logger.info("Device connection closed")
 
     def clear(self) -> None:
@@ -461,7 +461,7 @@ class V2Renderer:
             ctrl = self._controls.get(control_id)
             ctrl_name = ctrl.name if ctrl else f"id={control_id}"
             logger.warning(f"Failed to get control {ctrl_name}: {e}")
-            self._connected = False
+            self._close_device()
             return None
 
     def set_control(self, control_id: int, value: Any) -> bool:
@@ -479,7 +479,7 @@ class V2Renderer:
             ctrl = self._controls.get(control_id)
             ctrl_name = ctrl.name if ctrl else f"id={control_id}"
             logger.warning(f"Failed to set control {ctrl_name} to {value!r}: {e}")
-            self._connected = False
+            self._close_device()
             return False
 
     def _get_control_type_code(self, type_name: str) -> int:
@@ -507,7 +507,7 @@ class V2Renderer:
             return pixels
         except LtpError as e:
             logger.warning(f"Failed to read pixels: {e}")
-            self._connected = False
+            self._close_device()
             return None
 
     def set_brightness(self, value: int) -> bool:
@@ -588,7 +588,7 @@ class V2Renderer:
 
         except LtpError as e:
             logger.error(f"Error rendering frame: {e}")
-            self._connected = False
+            self._close_device()
             return 0
 
     def fill(self, r: int, g: int, b: int) -> bool:
@@ -603,7 +603,7 @@ class V2Renderer:
             return True
         except LtpError as e:
             logger.error(f"Error filling: {e}")
-            self._connected = False
+            self._close_device()
             return False
 
     def show(self) -> bool:
@@ -616,7 +616,7 @@ class V2Renderer:
             return True
         except LtpError as e:
             logger.error(f"Error showing: {e}")
-            self._connected = False
+            self._close_device()
             return False
 
     def get_stats(self) -> dict[str, Any]:
