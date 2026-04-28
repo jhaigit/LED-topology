@@ -895,8 +895,10 @@ function _updateSeqStepRow(row) {
     const colorInput = row.querySelector('.ss-color');
     const textInput = row.querySelector('.ss-value');
     const controlSel = row.querySelector('.ss-control');
+    const ctrlValueSel = row.querySelector('.ss-ctrl-value');
 
     controlSel.style.display = isControl ? '' : 'none';
+    ctrlValueSel.style.display = 'none';
     if (isColor) {
         colorInput.style.display = '';
         textInput.style.display = 'none';
@@ -904,6 +906,12 @@ function _updateSeqStepRow(row) {
         colorInput.style.display = 'none';
         textInput.style.display = actionDef && actionDef.needsValue ? '' : 'none';
         textInput.placeholder = isControl ? 'Control value' : 'Value';
+        if (!isControl) {
+            textInput.type = 'text';
+            textInput.removeAttribute('min');
+            textInput.removeAttribute('max');
+            textInput.removeAttribute('step');
+        }
     }
     if (isControl && targetSel.value) _loadControlOptions(row);
 }
@@ -913,12 +921,15 @@ async function _loadControlOptions(row) {
     const targetId = row.querySelector('.ss-target').value;
     if (!targetId) {
         controlSel.innerHTML = '<option value="">-- select control --</option>';
+        row._controlDefs = [];
+        _updateControlValueInput(row);
         return;
     }
     try {
         const resp = await fetch(`/api/sinks/${encodeURIComponent(targetId)}/available-controls`);
         const data = await resp.json();
         const controls = data.controls || [];
+        row._controlDefs = controls;
         const pendingId = row.dataset.pendingControlId || '';
         let opts = '<option value="">-- select control --</option>';
         for (const ctrl of controls) {
@@ -927,9 +938,58 @@ async function _loadControlOptions(row) {
         }
         controlSel.innerHTML = opts;
         delete row.dataset.pendingControlId;
+        _updateControlValueInput(row);
     } catch (e) {
         controlSel.innerHTML = '<option value="">-- error loading --</option>';
+        row._controlDefs = [];
+        _updateControlValueInput(row);
     }
+}
+
+function _updateControlValueInput(row) {
+    const controlId = row.querySelector('.ss-control').value;
+    const textInput = row.querySelector('.ss-value');
+    const selectInput = row.querySelector('.ss-ctrl-value');
+    const defs = row._controlDefs || [];
+    const ctrl = defs.find(c => c.id === controlId);
+    const pendingVal = row.dataset.pendingValue;
+
+    if (ctrl && ctrl.type === 'enum' && ctrl.options) {
+        textInput.style.display = 'none';
+        selectInput.style.display = '';
+        let opts = '';
+        for (const opt of ctrl.options) {
+            const optVal = typeof opt === 'object' ? opt.value : opt;
+            const optLabel = typeof opt === 'object' ? (opt.label || opt.value) : opt;
+            const sel = pendingVal !== undefined && String(optVal) === String(pendingVal) ? ' selected' : '';
+            opts += `<option value="${esc(String(optVal))}"${sel}>${esc(String(optLabel))}</option>`;
+        }
+        selectInput.innerHTML = opts;
+    } else if (ctrl && ctrl.type === 'boolean') {
+        textInput.style.display = 'none';
+        selectInput.style.display = '';
+        const isTrue = pendingVal !== undefined && (pendingVal === 'true' || pendingVal === '1');
+        selectInput.innerHTML = `<option value="true"${isTrue ? ' selected' : ''}>True</option><option value="false"${!isTrue ? ' selected' : ''}>False</option>`;
+    } else if (ctrl && ctrl.type === 'number') {
+        selectInput.style.display = 'none';
+        textInput.style.display = '';
+        textInput.type = 'number';
+        if (ctrl.min !== undefined && ctrl.min !== null) textInput.min = ctrl.min; else textInput.removeAttribute('min');
+        if (ctrl.max !== undefined && ctrl.max !== null) textInput.max = ctrl.max; else textInput.removeAttribute('max');
+        if (ctrl.step !== undefined) textInput.step = ctrl.step; else textInput.removeAttribute('step');
+        textInput.placeholder = ctrl.name || 'Control value';
+        if (pendingVal !== undefined) textInput.value = pendingVal;
+    } else {
+        selectInput.style.display = 'none';
+        textInput.style.display = controlId ? '' : 'none';
+        textInput.type = 'text';
+        textInput.removeAttribute('min');
+        textInput.removeAttribute('max');
+        textInput.removeAttribute('step');
+        textInput.placeholder = 'Control value';
+        if (pendingVal !== undefined) textInput.value = pendingVal;
+    }
+    if (pendingVal !== undefined) delete row.dataset.pendingValue;
 }
 
 function addSeqStep(stepData) {
@@ -938,7 +998,7 @@ function addSeqStep(stepData) {
     row.className = 'seq-step-row';
     const actionType = stepData ? stepData.action.type : 'fill_solid';
     const targetId = stepData ? stepData.action.target_id : '';
-    const value = stepData ? (stepData.action.value || '') : '';
+    const value = stepData ? (stepData.action.value ?? '') : '';
     const controlId = stepData ? (stepData.action.control_id || '') : '';
     const delay = stepData ? stepData.delay_before : 0;
     const jitter = stepData ? (stepData.jitter || 0) : 0;
@@ -947,7 +1007,7 @@ function addSeqStep(stepData) {
     const isColor = (actionType === 'fill_solid');
     const isControl = (actionType === 'set_control');
     const colorHex = isColor ? _rgbToHex(value) : '#ffffff';
-    const textVal = (!isColor && value) ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : '';
+    const textVal = (!isColor && value !== '') ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : '';
 
     row.innerHTML = `
         <select class="ss-type">${SEQ_ACTION_TYPES.map(t =>
@@ -955,17 +1015,20 @@ function addSeqStep(stepData) {
         ).join('')}</select>
         <select class="ss-target">${_seqTargetOptions(kind, targetId)}</select>
         <select class="ss-control" style="display:${isControl ? '' : 'none'}"><option value="">-- select control --</option></select>
+        <select class="ss-ctrl-value" style="display:none"></select>
         <input type="color" class="ss-color" value="${colorHex}" style="display:${isColor ? '' : 'none'}">
-        <input type="text" class="ss-value" placeholder="${isControl ? 'Control value' : 'Value'}" value="${esc(textVal)}" style="display:${isColor ? 'none' : (actionDef && actionDef.needsValue ? '' : 'none')}">
+        <input type="text" class="ss-value" placeholder="${isControl ? 'Control value' : 'Value'}" value="${esc(textVal)}" style="display:${isColor ? 'none' : (actionDef && actionDef.needsValue && !isControl ? '' : 'none')}">
         <input type="number" class="ss-delay" placeholder="Delay (s)" min="0" step="0.1" value="${delay || ''}">
         <input type="number" class="ss-jitter" placeholder="Jitter (s)" min="0" step="0.1" value="${jitter || ''}">
         <button class="btn-remove" onclick="this.closest('.seq-step-row').remove()">&times;</button>
     `;
     if (controlId) row.dataset.pendingControlId = controlId;
+    if (isControl && value !== '') row.dataset.pendingValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
     row.querySelector('.ss-type').addEventListener('change', () => _updateSeqStepRow(row));
     row.querySelector('.ss-target').addEventListener('change', () => {
         if (row.querySelector('.ss-type').value === 'set_control') _loadControlOptions(row);
     });
+    row.querySelector('.ss-control').addEventListener('change', () => _updateControlValueInput(row));
     list.appendChild(row);
     if (isControl && targetId) _loadControlOptions(row);
 }
@@ -992,7 +1055,10 @@ async function saveSeq() {
         if (type === 'fill_solid') {
             value = _hexToRgb(row.querySelector('.ss-color').value);
         } else {
-            const rawVal = row.querySelector('.ss-value').value;
+            const ctrlValSel = row.querySelector('.ss-ctrl-value');
+            const rawVal = (type === 'set_control' && ctrlValSel && ctrlValSel.style.display !== 'none')
+                ? ctrlValSel.value
+                : row.querySelector('.ss-value').value;
             value = rawVal;
             try { value = JSON.parse(rawVal); } catch (e) { /* keep as string */ }
             if (value === '') value = null;
@@ -2005,6 +2071,7 @@ function esc(str) {
 .seq-step-row .ss-target { flex: 1; min-width: 120px; }
 .seq-step-row .ss-value { width: 100px; }
 .seq-step-row .ss-control { width: 130px; }
+.seq-step-row .ss-ctrl-value { width: 120px; }
 .seq-step-row .ss-color { width: 40px; height: 28px; padding: 1px; border: 1px solid var(--border, #444); cursor: pointer; }
 .seq-step-row .ss-delay,
 .seq-step-row .ss-jitter { width: 70px; }
