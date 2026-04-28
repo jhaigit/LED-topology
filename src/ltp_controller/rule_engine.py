@@ -1,9 +1,12 @@
 """Rule engine for evaluating triggers and executing actions."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
+import random
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ltp_controller.controller import Controller
 from ltp_controller.input_manager import InputEventManager
@@ -19,7 +22,34 @@ from ltp_controller.rules import (
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager
 
+if TYPE_CHECKING:
+    from ltp_controller.sequence import SequenceManager
+
 logger = logging.getLogger(__name__)
+
+
+def _cron_field_matches(field_str: str, current: int) -> bool:
+    """Check if a single cron field matches a value.
+
+    Supports: * (any), N (exact), N,N (list), N-N (range), */N (step), N-N/N (range+step).
+    """
+    for part in field_str.split(","):
+        step = 1
+        if "/" in part:
+            part, step_str = part.split("/", 1)
+            step = int(step_str)
+
+        if part == "*":
+            if current % step == 0:
+                return True
+        elif "-" in part:
+            lo, hi = part.split("-", 1)
+            if int(lo) <= current <= int(hi) and (current - int(lo)) % step == 0:
+                return True
+        else:
+            if current == int(part):
+                return True
+    return False
 
 
 class RuleEngine:
@@ -37,14 +67,18 @@ class RuleEngine:
         virtual_source_manager: VirtualSourceManager | None,
         input_manager: InputEventManager,
         sink_controller: SinkController | None = None,
+        sequence_manager: SequenceManager | None = None,
     ):
         self.controller = controller
         self.router = router
         self.virtual_source_manager = virtual_source_manager
         self.input_manager = input_manager
         self.sink_controller = sink_controller
+        self.sequence_manager = sequence_manager
         self._rules: dict[str, Rule] = {}
         self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._scheduler_task: asyncio.Task | None = None
+        self._last_schedule_check: dict[str, float] = {}
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the event loop for async action execution."""
@@ -53,11 +87,22 @@ class RuleEngine:
     def start(self) -> None:
         """Start the rule engine by registering for input events."""
         self.input_manager.add_listener(self._on_input_event)
+        if self._event_loop and self._event_loop.is_running():
+            self._scheduler_task = asyncio.run_coroutine_threadsafe(
+                self._start_scheduler(), self._event_loop
+            )
         logger.info(f"Rule engine started with {len(self._rules)} rules")
+
+    async def _start_scheduler(self) -> None:
+        """Create the scheduler task inside the event loop."""
+        self._scheduler_task = asyncio.create_task(self._schedule_loop())
 
     def stop(self) -> None:
         """Stop the rule engine."""
         self.input_manager.remove_listener(self._on_input_event)
+        if self._scheduler_task and not self._scheduler_task.done():
+            self._scheduler_task.cancel()
+        self._scheduler_task = None
         logger.info("Rule engine stopped")
 
     # ==================== CRUD Operations ====================
@@ -256,6 +301,78 @@ class RuleEngine:
             return current_value != expected
         return False
 
+    # ==================== Schedule Evaluation ====================
+
+    async def _schedule_loop(self) -> None:
+        """Check schedule triggers once per minute."""
+        try:
+            while True:
+                await asyncio.sleep(30)
+                now = time.localtime()
+                for rule in self._rules.values():
+                    if not rule.enabled or rule.trigger.type != TriggerType.SCHEDULE:
+                        continue
+                    try:
+                        await self._evaluate_schedule(rule, now)
+                    except Exception as e:
+                        logger.error(f"Schedule eval error for {rule.name}: {e}")
+        except asyncio.CancelledError:
+            pass
+
+    async def _evaluate_schedule(self, rule: Rule, now: time.struct_time) -> None:
+        """Check if a schedule trigger should fire right now."""
+        trigger = rule.trigger
+
+        # Day filter
+        if trigger.days:
+            day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+            today = day_names[now.tm_wday]
+            if today not in [d.lower()[:3] for d in trigger.days]:
+                return
+
+        # Parse and match cron expression
+        if not self._cron_matches(trigger.cron, now):
+            return
+
+        # Deduplicate: don't fire the same rule more than once per cron minute.
+        # Use the minute timestamp (floored) as the key.
+        minute_key = time.mktime(now) // 60
+        last = self._last_schedule_check.get(rule.id, 0)
+        if last >= minute_key:
+            return
+        self._last_schedule_check[rule.id] = minute_key
+
+        # Apply jitter: delay execution by a random amount
+        jitter_secs = random.uniform(0, trigger.jitter_minutes * 60) if trigger.jitter_minutes > 0 else 0
+        if jitter_secs > 0:
+            logger.info(f"Schedule rule {rule.name} matched, firing in {jitter_secs:.0f}s (jitter)")
+            await asyncio.sleep(jitter_secs)
+        else:
+            logger.info(f"Schedule rule {rule.name} matched, firing now")
+
+        rule.last_triggered = time.time()
+        rule.trigger_count += 1
+        await self._execute_actions(rule)
+
+    @staticmethod
+    def _cron_matches(expr: str, now: time.struct_time) -> bool:
+        """Match a 5-field cron expression against a time.
+
+        Fields: minute hour day-of-month month day-of-week
+        Supports: *, specific values, comma-separated, ranges (1-5), steps (*/10).
+        Day-of-week: 0=Mon..6=Sun (also accepts 7=Sun).
+        """
+        parts = expr.strip().split()
+        if len(parts) != 5:
+            return False
+
+        values = [now.tm_min, now.tm_hour, now.tm_mday, now.tm_mon, now.tm_wday]
+
+        for field_str, current in zip(parts, values):
+            if not _cron_field_matches(field_str, current):
+                return False
+        return True
+
     # ==================== Action Execution ====================
 
     async def _execute_actions(self, rule: Rule) -> None:
@@ -286,6 +403,10 @@ class RuleEngine:
             await self._action_fill_solid(action)
         elif action.type == ActionType.CLEAR:
             await self._action_clear(action)
+        elif action.type == ActionType.START_SEQUENCE:
+            await self._action_start_sequence(action)
+        elif action.type == ActionType.STOP_SEQUENCE:
+            await self._action_stop_sequence(action)
         else:
             logger.warning(f"Unknown action type: {action.type}")
 
@@ -410,3 +531,25 @@ class RuleEngine:
             logger.info(f"Cleared {action.target_id}")
         else:
             logger.warning(f"Failed to clear: {result.get('message')}")
+
+    async def _action_start_sequence(self, action: Action) -> None:
+        """Start a sequence."""
+        if not self.sequence_manager:
+            logger.warning("Sequence manager not available")
+            return
+        seq = self.sequence_manager.get(action.target_id) or self.sequence_manager.get_by_name(action.target_id)
+        if not seq:
+            logger.warning(f"Sequence not found: {action.target_id}")
+            return
+        await self.sequence_manager.start_sequence(seq.id)
+
+    async def _action_stop_sequence(self, action: Action) -> None:
+        """Stop a sequence."""
+        if not self.sequence_manager:
+            logger.warning("Sequence manager not available")
+            return
+        seq = self.sequence_manager.get(action.target_id) or self.sequence_manager.get_by_name(action.target_id)
+        if not seq:
+            logger.warning(f"Sequence not found: {action.target_id}")
+            return
+        await self.sequence_manager.stop_sequence(seq.id)

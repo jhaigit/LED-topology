@@ -13,6 +13,7 @@ from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngin
 from ltp_controller.rule_engine import RuleEngine
 from ltp_controller.rules import Action, ActionType, ComparisonOp, Trigger, TriggerType
 from ltp_controller.scalar_sources import ScalarSourceManager, SCALAR_SOURCE_TYPES
+from ltp_controller.sequence import SequenceManager, SequenceStep, SequenceState
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager, VIRTUAL_SOURCE_TYPES
 
@@ -27,6 +28,7 @@ def create_app(
     scalar_source_manager: ScalarSourceManager | None = None,
     input_manager: InputEventManager | None = None,
     rule_engine: RuleEngine | None = None,
+    sequence_manager: SequenceManager | None = None,
     event_loop: asyncio.AbstractEventLoop | None = None,
     config_path: str | None = None,
 ) -> Flask:
@@ -48,6 +50,7 @@ def create_app(
     app.config["scalar_source_manager"] = scalar_source_manager
     app.config["input_manager"] = input_manager
     app.config["rule_engine"] = rule_engine
+    app.config["sequence_manager"] = sequence_manager
     app.config["event_loop"] = event_loop
     app.config["config_path"] = config_path
     app.config["scenes"] = {}  # Scene storage: {id: scene_dict}
@@ -712,6 +715,7 @@ def create_app(
             "virtual_sources": virtual_source_manager.to_config() if virtual_source_manager else [],
             "routes": [],
             "rules": rule_engine.to_config() if rule_engine else [],
+            "sequences": sequence_manager.to_config() if sequence_manager else [],
             "sink_groups": controller.sink_group_manager.to_config(),
         }
 
@@ -996,6 +1000,7 @@ def create_app(
         # Update only the routes, rules, virtual_sources, and sink_groups sections
         existing_config["virtual_sources"] = virtual_source_manager.to_config() if virtual_source_manager else []
         existing_config["rules"] = rule_engine.to_config() if rule_engine else []
+        existing_config["sequences"] = sequence_manager.to_config() if sequence_manager else []
         existing_config["sink_groups"] = controller.sink_group_manager.to_config()
 
         # Export routes
@@ -2001,5 +2006,148 @@ def create_app(
             {"value": c.value, "name": c.name.replace("_", " ").title()}
             for c in ComparisonOp
         ])
+
+    # ==================== Sequence API ====================
+
+    @app.route("/api/sequences")
+    def api_sequences_list() -> Any:
+        """List all sequences."""
+        if not sequence_manager:
+            return jsonify([])
+        return jsonify([s.to_dict() for s in sequence_manager.sequences])
+
+    @app.route("/api/sequences", methods=["POST"])
+    def api_sequences_create() -> Any:
+        """Create a new sequence."""
+        if not sequence_manager:
+            return jsonify({"error": "Sequences not available"}), 503
+        data = request.get_json()
+        if not data or not data.get("name"):
+            return jsonify({"error": "Name required"}), 400
+
+        steps = []
+        for s in data.get("steps", []):
+            try:
+                steps.append(SequenceStep.from_dict(s))
+            except Exception as e:
+                return jsonify({"error": f"Invalid step: {e}"}), 400
+
+        seq = sequence_manager.create(
+            name=data["name"],
+            steps=steps,
+            enabled=data.get("enabled", True),
+            loop=data.get("loop", False),
+        )
+        return jsonify(seq.to_dict()), 201
+
+    @app.route("/api/sequences/<seq_id>")
+    def api_sequence_get(seq_id: str) -> Any:
+        """Get a sequence."""
+        if not sequence_manager:
+            return jsonify({"error": "Sequences not available"}), 503
+        seq = sequence_manager.get(seq_id)
+        if not seq:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify(seq.to_dict())
+
+    @app.route("/api/sequences/<seq_id>", methods=["PUT"])
+    def api_sequence_update(seq_id: str) -> Any:
+        """Update a sequence."""
+        if not sequence_manager:
+            return jsonify({"error": "Sequences not available"}), 503
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data"}), 400
+
+        steps = None
+        if "steps" in data:
+            steps = []
+            for s in data["steps"]:
+                try:
+                    steps.append(SequenceStep.from_dict(s))
+                except Exception as e:
+                    return jsonify({"error": f"Invalid step: {e}"}), 400
+
+        seq = sequence_manager.update(
+            seq_id,
+            name=data.get("name"),
+            steps=steps,
+            enabled=data.get("enabled"),
+            loop=data.get("loop"),
+        )
+        if not seq:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify(seq.to_dict())
+
+    @app.route("/api/sequences/<seq_id>", methods=["DELETE"])
+    def api_sequence_delete(seq_id: str) -> Any:
+        """Delete a sequence."""
+        if not sequence_manager:
+            return jsonify({"error": "Sequences not available"}), 503
+        if sequence_manager.delete(seq_id):
+            return jsonify({"status": "ok"})
+        return jsonify({"error": "Not found"}), 404
+
+    @app.route("/api/sequences/<seq_id>/start", methods=["POST"])
+    def api_sequence_start(seq_id: str) -> Any:
+        """Start a sequence."""
+        if not sequence_manager or not event_loop:
+            return jsonify({"error": "Sequences not available"}), 503
+        future = asyncio.run_coroutine_threadsafe(
+            sequence_manager.start_sequence(seq_id), event_loop
+        )
+        try:
+            result = future.result(timeout=5.0)
+            if result:
+                return jsonify({"status": "ok"})
+            return jsonify({"error": "Failed to start"}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/sequences/<seq_id>/stop", methods=["POST"])
+    def api_sequence_stop(seq_id: str) -> Any:
+        """Stop a sequence."""
+        if not sequence_manager or not event_loop:
+            return jsonify({"error": "Sequences not available"}), 503
+        future = asyncio.run_coroutine_threadsafe(
+            sequence_manager.stop_sequence(seq_id), event_loop
+        )
+        try:
+            future.result(timeout=5.0)
+            return jsonify({"status": "ok"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/sequences/<seq_id>/pause", methods=["POST"])
+    def api_sequence_pause(seq_id: str) -> Any:
+        """Pause a sequence."""
+        if not sequence_manager or not event_loop:
+            return jsonify({"error": "Sequences not available"}), 503
+        future = asyncio.run_coroutine_threadsafe(
+            sequence_manager.pause_sequence(seq_id), event_loop
+        )
+        try:
+            result = future.result(timeout=5.0)
+            if result:
+                return jsonify({"status": "ok"})
+            return jsonify({"error": "Not running"}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    @app.route("/api/sequences/<seq_id>/resume", methods=["POST"])
+    def api_sequence_resume(seq_id: str) -> Any:
+        """Resume a paused sequence."""
+        if not sequence_manager or not event_loop:
+            return jsonify({"error": "Sequences not available"}), 503
+        future = asyncio.run_coroutine_threadsafe(
+            sequence_manager.resume_sequence(seq_id), event_loop
+        )
+        try:
+            result = future.result(timeout=5.0)
+            if result:
+                return jsonify({"status": "ok"})
+            return jsonify({"error": "Not paused"}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
     return app

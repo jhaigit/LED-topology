@@ -88,6 +88,59 @@
     <p class="empty-state" id="route-perf-empty" {% if routes %}style="display:none;"{% endif %}>No routes configured. Drag from a source port to a sink port in the graph above to create one.</p>
 </section>
 
+<section class="panel" id="sequences-section">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+        <h2>Sequences</h2>
+        <button class="btn btn-sm" onclick="showSeqModal()">New Sequence</button>
+    </div>
+    <table class="table table-compact" id="seq-table" style="display:none;">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Steps</th>
+                <th>State</th>
+                <th>Runs</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="seq-body"></tbody>
+    </table>
+    <p class="empty-state" id="seq-empty">No sequences configured.</p>
+</section>
+
+<!-- Sequence Modal -->
+<div id="seqModal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:600px;">
+        <div class="modal-header">
+            <h2 id="seqModalTitle">New Sequence</h2>
+            <button class="close-btn" onclick="hideSeqModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="seqEditId">
+            <div class="form-group">
+                <label for="seqName">Name</label>
+                <input type="text" id="seqName" placeholder="Evening Routine" required>
+            </div>
+            <div class="form-group" style="display:flex;gap:16px;">
+                <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                    <input type="checkbox" id="seqLoop"> Loop
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;font-weight:normal;">
+                    <input type="checkbox" id="seqEnabled" checked> Enabled
+                </label>
+            </div>
+            <div class="form-group">
+                <label>Steps</label>
+                <div id="seqStepsList"></div>
+                <button class="btn btn-sm" style="margin-top:6px;" onclick="addSeqStep()">+ Add Step</button>
+            </div>
+            <div class="form-group" style="display:flex;justify-content:flex-end;">
+                <button class="btn btn-primary" onclick="saveSeq()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Sink Group Modal -->
 <div id="groupModal" class="modal" style="display: none;">
     <div class="modal-content">
@@ -708,6 +761,166 @@ async function deleteGroup(groupId) {
     setTimeout(() => location.reload(), 500);
 }
 
+// ==================== Sequences ====================
+
+const SEQ_ACTION_TYPES = [
+    { value: 'fill_solid', label: 'Fill Solid', needsTarget: true, needsValue: true },
+    { value: 'clear', label: 'Clear', needsTarget: true },
+    { value: 'enable_route', label: 'Enable Route', needsTarget: true },
+    { value: 'disable_route', label: 'Disable Route', needsTarget: true },
+    { value: 'enable_source', label: 'Enable Source', needsTarget: true },
+    { value: 'disable_source', label: 'Disable Source', needsTarget: true },
+    { value: 'set_control', label: 'Set Control', needsTarget: true, needsValue: true },
+    { value: 'start_sequence', label: 'Start Sequence', needsTarget: true },
+    { value: 'stop_sequence', label: 'Stop Sequence', needsTarget: true },
+];
+
+async function loadSequences() {
+    try {
+        const resp = await fetch('/api/sequences');
+        const seqs = await resp.json();
+        const table = document.getElementById('seq-table');
+        const body = document.getElementById('seq-body');
+        const empty = document.getElementById('seq-empty');
+        if (!seqs.length) { table.style.display = 'none'; empty.style.display = ''; return; }
+        table.style.display = ''; empty.style.display = 'none';
+        body.innerHTML = seqs.map(s => `<tr>
+            <td>${esc(s.name)}${s.loop ? ' <span title="Loops">&#x21bb;</span>' : ''}</td>
+            <td>${s.steps.length}</td>
+            <td><span class="status-badge ${s.state}">${s.state}</span></td>
+            <td>${s.run_count}</td>
+            <td class="seq-actions">
+                ${s.state === 'running' ? `
+                    <button class="btn btn-xs" onclick="seqAction('${s.id}','pause')">Pause</button>
+                    <button class="btn btn-xs btn-warning" onclick="seqAction('${s.id}','stop')">Stop</button>
+                ` : s.state === 'paused' ? `
+                    <button class="btn btn-xs" onclick="seqAction('${s.id}','resume')">Resume</button>
+                    <button class="btn btn-xs btn-warning" onclick="seqAction('${s.id}','stop')">Stop</button>
+                ` : `
+                    <button class="btn btn-xs" onclick="seqAction('${s.id}','start')">Start</button>
+                `}
+                <button class="btn btn-xs" onclick="editSeq('${s.id}')">Edit</button>
+                <button class="btn btn-xs btn-danger" onclick="deleteSeq('${s.id}')">Del</button>
+            </td>
+        </tr>`).join('');
+    } catch (e) { /* ignore */ }
+}
+
+async function seqAction(id, action) {
+    await fetch(`/api/sequences/${id}/${action}`, { method: 'POST' });
+    loadSequences();
+}
+
+async function deleteSeq(id) {
+    if (!await confirmAction('Delete this sequence?')) return;
+    await fetch(`/api/sequences/${id}`, { method: 'DELETE' });
+    loadSequences();
+}
+
+function showSeqModal(editData) {
+    document.getElementById('seqStepsList').innerHTML = '';
+    if (editData) {
+        document.getElementById('seqEditId').value = editData.id;
+        document.getElementById('seqName').value = editData.name;
+        document.getElementById('seqLoop').checked = editData.loop;
+        document.getElementById('seqEnabled').checked = editData.enabled;
+        editData.steps.forEach(s => addSeqStep(s));
+    } else {
+        document.getElementById('seqEditId').value = '';
+        document.getElementById('seqName').value = '';
+        document.getElementById('seqLoop').checked = false;
+        document.getElementById('seqEnabled').checked = true;
+    }
+    document.getElementById('seqModalTitle').textContent = editData ? 'Edit Sequence' : 'New Sequence';
+    document.getElementById('seqModal').style.display = 'flex';
+}
+
+function hideSeqModal() {
+    document.getElementById('seqModal').style.display = 'none';
+}
+
+function addSeqStep(stepData) {
+    const list = document.getElementById('seqStepsList');
+    const row = document.createElement('div');
+    row.className = 'seq-step-row';
+    const actionType = stepData ? stepData.action.type : 'fill_solid';
+    const targetId = stepData ? stepData.action.target_id : '';
+    const value = stepData ? (stepData.action.value || '') : '';
+    const delay = stepData ? stepData.delay_before : 0;
+    const jitter = stepData ? (stepData.jitter || 0) : 0;
+
+    row.innerHTML = `
+        <select class="ss-type">${SEQ_ACTION_TYPES.map(t =>
+            `<option value="${t.value}" ${t.value === actionType ? 'selected' : ''}>${t.label}</option>`
+        ).join('')}</select>
+        <input type="text" class="ss-target" placeholder="Target ID or name" value="${esc(targetId)}">
+        <input type="text" class="ss-value" placeholder="Value (color, etc.)" value="${esc(typeof value === 'object' ? JSON.stringify(value) : String(value))}">
+        <input type="number" class="ss-delay" placeholder="Delay (s)" min="0" step="0.1" value="${delay}">
+        <input type="number" class="ss-jitter" placeholder="Jitter (s)" min="0" step="0.1" value="${jitter}">
+        <button class="btn-remove" onclick="this.closest('.seq-step-row').remove()">&times;</button>
+    `;
+    list.appendChild(row);
+}
+
+async function editSeq(id) {
+    const resp = await fetch(`/api/sequences/${id}`);
+    const data = await resp.json();
+    if (data.error) { showToast(data.error, 'error'); return; }
+    showSeqModal(data);
+}
+
+async function saveSeq() {
+    const name = document.getElementById('seqName').value;
+    if (!name) { showToast('Name required', 'error'); return; }
+
+    const steps = [];
+    document.querySelectorAll('.seq-step-row').forEach(row => {
+        const type = row.querySelector('.ss-type').value;
+        const target = row.querySelector('.ss-target').value;
+        const rawVal = row.querySelector('.ss-value').value;
+        const delay = parseFloat(row.querySelector('.ss-delay').value) || 0;
+        const jitter = parseFloat(row.querySelector('.ss-jitter').value) || 0;
+
+        let value = rawVal;
+        try { value = JSON.parse(rawVal); } catch (e) { /* keep as string */ }
+        if (value === '') value = null;
+
+        const action = { type, target_id: target };
+        if (value !== null) action.value = value;
+        steps.push({ action, delay_before: delay, jitter });
+    });
+
+    const editId = document.getElementById('seqEditId').value;
+    const url = editId ? `/api/sequences/${editId}` : '/api/sequences';
+    const method = editId ? 'PUT' : 'POST';
+
+    try {
+        const resp = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name,
+                steps,
+                loop: document.getElementById('seqLoop').checked,
+                enabled: document.getElementById('seqEnabled').checked,
+            })
+        });
+        const data = await resp.json();
+        if (data.id || data.status === 'ok' || !data.error) {
+            hideSeqModal();
+            showToast(editId ? 'Sequence updated' : 'Sequence created', 'success');
+            loadSequences();
+        } else {
+            showToast(data.error, 'error');
+        }
+    } catch (e) {
+        showToast('Failed to save', 'error');
+    }
+}
+
+// Load sequences on page load
+loadSequences();
+
 function renderVSDetail(v) {
     const content = document.getElementById('detail-content');
     const running = v.running || v.is_running;
@@ -1197,6 +1410,7 @@ function updateStatus() {
     }).catch(() => {});
 
     refreshGraphData();
+    loadSequences();
 }
 
 setInterval(updateStatus, 5000);
@@ -1661,5 +1875,27 @@ function esc(str) {
     padding: 0 4px; line-height: 1;
 }
 .btn-remove:hover { color: var(--error, #e94560); }
+
+/* Sequences */
+.seq-step-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+}
+.seq-step-row select { width: 130px; }
+.seq-step-row .ss-target { flex: 1; min-width: 100px; }
+.seq-step-row .ss-value { width: 100px; }
+.seq-step-row .ss-delay,
+.seq-step-row .ss-jitter { width: 70px; }
+.seq-actions { white-space: nowrap; }
+.seq-actions .btn-xs { padding: 1px 6px; font-size: 0.78rem; }
+.status-badge.running { background: var(--success, #4caf50); color: #fff; }
+.status-badge.paused { background: var(--warning, #ff9800); color: #000; }
+.status-badge.stopped { background: var(--text-secondary, #888); color: #fff; }
+.btn-xs { padding: 2px 8px; font-size: 0.8rem; }
+.btn-danger { background: var(--error, #e94560); color: #fff; border-color: var(--error, #e94560); }
+.btn-warning { background: var(--warning, #ff9800); color: #000; border-color: var(--warning, #ff9800); }
 </style>
 {% endblock %}

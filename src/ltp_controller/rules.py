@@ -11,6 +11,7 @@ class TriggerType(str, Enum):
 
     INPUT_CHANGE = "input_change"  # Edge: value changed
     INPUT_STATE = "input_state"    # Level: matches state
+    SCHEDULE = "schedule"          # Time-based: cron expression + jitter
 
 
 class ActionType(str, Enum):
@@ -24,6 +25,8 @@ class ActionType(str, Enum):
     SET_PIXEL = "set_pixel"
     FILL_SOLID = "fill_solid"
     CLEAR = "clear"
+    START_SEQUENCE = "start_sequence"
+    STOP_SEQUENCE = "stop_sequence"
 
 
 class ComparisonOp(str, Enum):
@@ -37,16 +40,35 @@ class ComparisonOp(str, Enum):
 
 @dataclass
 class Trigger:
-    """Defines when a rule should fire."""
+    """Defines when a rule should fire.
+
+    For INPUT_CHANGE/INPUT_STATE: uses sink_id, input_id, comparison, value.
+    For SCHEDULE: uses cron, jitter_minutes, days.
+    """
 
     type: TriggerType
-    sink_id: str
-    input_id: int
+    # Input trigger fields
+    sink_id: str = ""
+    input_id: int = 0
     comparison: ComparisonOp = ComparisonOp.CHANGED_TO
     value: Any = True
+    # Schedule trigger fields
+    cron: str = ""              # cron expression: "min hour dom mon dow"
+    jitter_minutes: float = 0   # random 0..N minutes added to fire time
+    days: list[str] | None = None  # optional day filter: ["mon","tue",...]
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
+        if self.type == TriggerType.SCHEDULE:
+            result: dict[str, Any] = {
+                "type": self.type.value,
+                "cron": self.cron,
+            }
+            if self.jitter_minutes > 0:
+                result["jitter_minutes"] = self.jitter_minutes
+            if self.days:
+                result["days"] = self.days
+            return result
         return {
             "type": self.type.value,
             "sink_id": self.sink_id,
@@ -58,8 +80,16 @@ class Trigger:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Trigger":
         """Create from dictionary."""
+        trigger_type = TriggerType(data["type"])
+        if trigger_type == TriggerType.SCHEDULE:
+            return cls(
+                type=trigger_type,
+                cron=data.get("cron", ""),
+                jitter_minutes=float(data.get("jitter_minutes", 0)),
+                days=data.get("days"),
+            )
         return cls(
-            type=TriggerType(data["type"]),
+            type=trigger_type,
             sink_id=data["sink_id"],
             input_id=data["input_id"],
             comparison=ComparisonOp(data.get("comparison", "changed_to")),

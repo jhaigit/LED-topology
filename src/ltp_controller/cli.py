@@ -18,6 +18,7 @@ from ltp_controller.router import RouteMode, RouteTransform, RoutingEngine
 from ltp_controller.rule_engine import RuleEngine
 from ltp_controller.rules import Action, ActionType, ComparisonOp, Trigger, TriggerType
 from ltp_controller.scalar_sources import ScalarSourceManager, SCALAR_SOURCE_TYPES
+from ltp_controller.sequence import SequenceManager
 from ltp_controller.sink_connection_pool import SinkConnectionPool
 from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager
@@ -117,6 +118,7 @@ async def run_controller(
     scalar_source_manager: ScalarSourceManager | None = None,
     input_manager: InputEventManager | None = None,
     rule_engine: RuleEngine | None = None,
+    sequence_manager: SequenceManager | None = None,
     web_enabled: bool = True,
     web_host: str = "0.0.0.0",
     web_port: int = 8080,
@@ -171,6 +173,7 @@ async def run_controller(
                 scalar_source_manager=scalar_source_manager,
                 input_manager=input_manager,
                 rule_engine=rule_engine,
+                sequence_manager=sequence_manager,
                 event_loop=loop,
                 config_path=config_path,
             )
@@ -189,6 +192,8 @@ async def run_controller(
 
     finally:
         # Cleanup
+        if sequence_manager:
+            await sequence_manager.stop_all()
         if rule_engine:
             rule_engine.stop()
         if input_manager:
@@ -282,6 +287,15 @@ def main() -> int:
     # Create input event manager (with pool)
     input_manager = InputEventManager(controller, connection_pool)
 
+    # Create sequence manager
+    sequence_manager = SequenceManager()
+
+    # Load pre-configured sequences
+    seq_config = config.get("sequences", [])
+    if seq_config:
+        sequence_manager.load_from_config(seq_config)
+        logger.info(f"Loaded {len(seq_config)} sequences from config")
+
     # Create rule engine (needs to be wired after all managers exist)
     rule_engine = RuleEngine(
         controller=controller,
@@ -289,7 +303,11 @@ def main() -> int:
         virtual_source_manager=virtual_source_manager,
         input_manager=input_manager,
         sink_controller=sink_controller,
+        sequence_manager=sequence_manager,
     )
+
+    # Wire sequence manager to use rule engine's action executor
+    sequence_manager.set_action_executor(rule_engine._execute_action)
 
     # Load pre-configured rules
     rules_config = config.get("rules", [])
@@ -355,6 +373,7 @@ def main() -> int:
                 scalar_source_manager=scalar_source_manager,
                 input_manager=input_manager,
                 rule_engine=rule_engine,
+                sequence_manager=sequence_manager,
                 web_enabled=web_enabled,
                 web_host=web_host,
                 web_port=web_port,
