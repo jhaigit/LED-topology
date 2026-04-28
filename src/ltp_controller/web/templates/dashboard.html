@@ -764,16 +764,57 @@ async function deleteGroup(groupId) {
 // ==================== Sequences ====================
 
 const SEQ_ACTION_TYPES = [
-    { value: 'fill_solid', label: 'Fill Solid', needsTarget: true, needsValue: true },
-    { value: 'clear', label: 'Clear', needsTarget: true },
-    { value: 'enable_route', label: 'Enable Route', needsTarget: true },
-    { value: 'disable_route', label: 'Disable Route', needsTarget: true },
-    { value: 'enable_source', label: 'Enable Source', needsTarget: true },
-    { value: 'disable_source', label: 'Disable Source', needsTarget: true },
-    { value: 'set_control', label: 'Set Control', needsTarget: true, needsValue: true },
-    { value: 'start_sequence', label: 'Start Sequence', needsTarget: true },
-    { value: 'stop_sequence', label: 'Stop Sequence', needsTarget: true },
+    { value: 'fill_solid', label: 'Fill Solid', needsTarget: true, needsValue: true, targetKind: 'sink' },
+    { value: 'clear', label: 'Clear', needsTarget: true, targetKind: 'sink' },
+    { value: 'enable_route', label: 'Enable Route', needsTarget: true, targetKind: 'route' },
+    { value: 'disable_route', label: 'Disable Route', needsTarget: true, targetKind: 'route' },
+    { value: 'enable_source', label: 'Enable Source', needsTarget: true, targetKind: 'source' },
+    { value: 'disable_source', label: 'Disable Source', needsTarget: true, targetKind: 'source' },
+    { value: 'set_control', label: 'Set Control', needsTarget: true, needsValue: true, targetKind: 'sink' },
+    { value: 'start_sequence', label: 'Start Sequence', needsTarget: true, targetKind: 'sequence' },
+    { value: 'stop_sequence', label: 'Stop Sequence', needsTarget: true, targetKind: 'sequence' },
 ];
+
+let _seqTargetCache = { sinks: [], sources: [], routes: [], sequences: [] };
+
+async function _loadSeqTargets() {
+    const [sinks, sources, routes, sequences] = await Promise.all([
+        fetch('/api/sinks').then(r => r.json()).catch(() => []),
+        fetch('/api/sources').then(r => r.json()).catch(() => []),
+        fetch('/api/routes').then(r => r.json()).catch(() => []),
+        fetch('/api/sequences').then(r => r.json()).catch(() => []),
+    ]);
+    _seqTargetCache = { sinks, sources, routes, sequences };
+}
+
+function _seqTargetOptions(kind, selectedId) {
+    const items = {
+        sink: _seqTargetCache.sinks,
+        source: _seqTargetCache.sources,
+        route: _seqTargetCache.routes,
+        sequence: _seqTargetCache.sequences,
+    }[kind] || [];
+    let opts = '<option value="">-- select --</option>';
+    for (const item of items) {
+        const id = item.id || '';
+        const name = item.name || id;
+        const sel = (id === selectedId || name === selectedId) ? ' selected' : '';
+        opts += `<option value="${esc(id)}"${sel}>${esc(name)}</option>`;
+    }
+    return opts;
+}
+
+function _rgbToHex(rgb) {
+    if (Array.isArray(rgb) && rgb.length >= 3) {
+        return '#' + rgb.slice(0, 3).map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, '0')).join('');
+    }
+    return '#ffffff';
+}
+
+function _hexToRgb(hex) {
+    const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+    return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [255, 255, 255];
+}
 
 async function loadSequences() {
     try {
@@ -817,7 +858,8 @@ async function deleteSeq(id) {
     loadSequences();
 }
 
-function showSeqModal(editData) {
+async function showSeqModal(editData) {
+    await _loadSeqTargets();
     document.getElementById('seqStepsList').innerHTML = '';
     if (editData) {
         document.getElementById('seqEditId').value = editData.id;
@@ -839,6 +881,27 @@ function hideSeqModal() {
     document.getElementById('seqModal').style.display = 'none';
 }
 
+function _updateSeqStepRow(row) {
+    const typeVal = row.querySelector('.ss-type').value;
+    const actionDef = SEQ_ACTION_TYPES.find(t => t.value === typeVal);
+    const kind = actionDef ? actionDef.targetKind : 'sink';
+    const isColor = (typeVal === 'fill_solid');
+
+    const targetSel = row.querySelector('.ss-target');
+    const prevTarget = targetSel.value;
+    targetSel.innerHTML = _seqTargetOptions(kind, prevTarget);
+
+    const colorInput = row.querySelector('.ss-color');
+    const textInput = row.querySelector('.ss-value');
+    if (isColor) {
+        colorInput.style.display = '';
+        textInput.style.display = 'none';
+    } else {
+        colorInput.style.display = 'none';
+        textInput.style.display = actionDef && actionDef.needsValue ? '' : 'none';
+    }
+}
+
 function addSeqStep(stepData) {
     const list = document.getElementById('seqStepsList');
     const row = document.createElement('div');
@@ -848,17 +911,24 @@ function addSeqStep(stepData) {
     const value = stepData ? (stepData.action.value || '') : '';
     const delay = stepData ? stepData.delay_before : 0;
     const jitter = stepData ? (stepData.jitter || 0) : 0;
+    const actionDef = SEQ_ACTION_TYPES.find(t => t.value === actionType);
+    const kind = actionDef ? actionDef.targetKind : 'sink';
+    const isColor = (actionType === 'fill_solid');
+    const colorHex = isColor ? _rgbToHex(value) : '#ffffff';
+    const textVal = (!isColor && value) ? (typeof value === 'object' ? JSON.stringify(value) : String(value)) : '';
 
     row.innerHTML = `
         <select class="ss-type">${SEQ_ACTION_TYPES.map(t =>
             `<option value="${t.value}" ${t.value === actionType ? 'selected' : ''}>${t.label}</option>`
         ).join('')}</select>
-        <input type="text" class="ss-target" placeholder="Target ID or name" value="${esc(targetId)}">
-        <input type="text" class="ss-value" placeholder="Value (color, etc.)" value="${esc(typeof value === 'object' ? JSON.stringify(value) : String(value))}">
+        <select class="ss-target">${_seqTargetOptions(kind, targetId)}</select>
+        <input type="color" class="ss-color" value="${colorHex}" style="display:${isColor ? '' : 'none'}">
+        <input type="text" class="ss-value" placeholder="Value" value="${esc(textVal)}" style="display:${isColor ? 'none' : (actionDef && actionDef.needsValue ? '' : 'none')}">
         <input type="number" class="ss-delay" placeholder="Delay (s)" min="0" step="0.1" value="${delay}">
         <input type="number" class="ss-jitter" placeholder="Jitter (s)" min="0" step="0.1" value="${jitter}">
         <button class="btn-remove" onclick="this.closest('.seq-step-row').remove()">&times;</button>
     `;
+    row.querySelector('.ss-type').addEventListener('change', () => _updateSeqStepRow(row));
     list.appendChild(row);
 }
 
@@ -877,13 +947,18 @@ async function saveSeq() {
     document.querySelectorAll('.seq-step-row').forEach(row => {
         const type = row.querySelector('.ss-type').value;
         const target = row.querySelector('.ss-target').value;
-        const rawVal = row.querySelector('.ss-value').value;
         const delay = parseFloat(row.querySelector('.ss-delay').value) || 0;
         const jitter = parseFloat(row.querySelector('.ss-jitter').value) || 0;
 
-        let value = rawVal;
-        try { value = JSON.parse(rawVal); } catch (e) { /* keep as string */ }
-        if (value === '') value = null;
+        let value = null;
+        if (type === 'fill_solid') {
+            value = _hexToRgb(row.querySelector('.ss-color').value);
+        } else {
+            const rawVal = row.querySelector('.ss-value').value;
+            value = rawVal;
+            try { value = JSON.parse(rawVal); } catch (e) { /* keep as string */ }
+            if (value === '') value = null;
+        }
 
         const action = { type, target_id: target };
         if (value !== null) action.value = value;
@@ -1885,8 +1960,9 @@ function esc(str) {
     flex-wrap: wrap;
 }
 .seq-step-row select { width: 130px; }
-.seq-step-row .ss-target { flex: 1; min-width: 100px; }
+.seq-step-row .ss-target { flex: 1; min-width: 120px; }
 .seq-step-row .ss-value { width: 100px; }
+.seq-step-row .ss-color { width: 40px; height: 28px; padding: 1px; border: 1px solid var(--border, #444); cursor: pointer; }
 .seq-step-row .ss-delay,
 .seq-step-row .ss-jitter { width: 70px; }
 .seq-actions { white-space: nowrap; }
