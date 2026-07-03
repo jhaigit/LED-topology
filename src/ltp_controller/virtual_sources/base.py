@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -16,6 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 MAX_OUTPUT_PIXELS = 65536
+
+# Speed control maps 0->0, 50->1.0, 100->10.0. With pct = speed/50 the exponent
+# that satisfies 2**e == 10 gives pct=2 (speed 100) -> 10.0 exactly.
+_SPEED_EXPONENT = math.log2(10)
 
 
 @dataclass
@@ -73,6 +78,11 @@ class VirtualSource(ABC):
         self._start_time = 0.0
         self._frame_count = 0
         self._last_frame_time = 0.0
+        # Animation-clock state (speed changes rebase here so they only affect
+        # future time rather than rescaling the whole elapsed history).
+        self._anim_offset = 0.0
+        self._speed_ref_time = 0.0
+        self._speed_ref_value = 0.0
 
         # Render callbacks per sink
         self._render_callbacks: dict[str, Callable[[np.ndarray], None]] = {}
@@ -226,13 +236,20 @@ class VirtualSource(ABC):
             # Reshape to 2D for spatial transforms
             grid = pixels.reshape(height, width, 3)
 
-            # Apply rotate first (rot90 rotates CCW, invert k for CW)
-            if rotate == "90":
-                grid = np.rot90(grid, k=3)
-            elif rotate == "180":
+            # Apply rotate first (rot90 rotates CCW, invert k for CW).
+            # 90/270 transpose the grid, so on a non-square matrix the result
+            # no longer fits the declared width×height and reshaping would
+            # scramble it; skip those (180 is always dimension-preserving).
+            if rotate == "180":
                 grid = np.rot90(grid, k=2)
-            elif rotate == "270":
-                grid = np.rot90(grid, k=1)
+            elif rotate in ("90", "270"):
+                if width == height:
+                    grid = np.rot90(grid, k=3 if rotate == "90" else 1)
+                else:
+                    logger.debug(
+                        "Skipping %s rotation: non-square matrix %dx%d cannot "
+                        "rotate in place", rotate, width, height,
+                    )
 
             # Apply mirror_h (flip columns)
             if mirror_h:
@@ -246,17 +263,32 @@ class VirtualSource(ABC):
 
         return pixels
 
-    def get_time_elapsed(self) -> float:
-        """Get time elapsed since start, adjusted for speed."""
-        if not self._running:
-            return 0.0
-        real_elapsed = time.time() - self._start_time
-        # Map 0-100 slider exponentially: 0→0, 50→1.0, 100→10.0
-        speed_pct = self.get_control("speed") / 50.0
-        speed = speed_pct * speed_pct  # quadratic: gives fine control at low end
+    def _mapped_speed(self) -> float:
+        """Signed speed multiplier from the 0-100 speed control (0→0, 50→1, 100→10)."""
+        pct = self.get_control("speed") / 50.0
+        speed = pct ** _SPEED_EXPONENT
         if self.get_control("reverse"):
             speed = -speed
-        return real_elapsed * speed
+        return speed
+
+    def get_time_elapsed(self) -> float:
+        """Get animation time elapsed since start, adjusted for speed.
+
+        A speed change rebases at the moment it happens, so it affects only
+        future time. The old formula multiplied *total* elapsed by the current
+        speed, so moving the slider retroactively rescaled the whole history
+        and the animation jumped.
+        """
+        if not self._running:
+            return 0.0
+        now = time.time()
+        speed = self._mapped_speed()
+        if speed != self._speed_ref_value:
+            # Bank the time accrued at the old rate, then continue at the new one.
+            self._anim_offset += (now - self._speed_ref_time) * self._speed_ref_value
+            self._speed_ref_time = now
+            self._speed_ref_value = speed
+        return self._anim_offset + (now - self._speed_ref_time) * speed
 
     def start(self) -> None:
         """Start the virtual source."""
@@ -264,6 +296,9 @@ class VirtualSource(ABC):
             return
         self._running = True
         self._start_time = time.time()
+        self._anim_offset = 0.0
+        self._speed_ref_time = self._start_time
+        self._speed_ref_value = self._mapped_speed()
         self._frame_count = 0
         logger.info(f"Started virtual source: {self.name}")
 

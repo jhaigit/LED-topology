@@ -2,6 +2,14 @@
 window.LtpScenes = (function() {
     let scenes = [];
 
+    // Escape user-controlled text before inserting into innerHTML (scene names
+    // are settable via the API and rendered on every page).
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
     async function load() {
         try {
             const resp = await fetch('/api/scenes');
@@ -25,11 +33,11 @@ window.LtpScenes = (function() {
         }
 
         list.innerHTML = scenes.map(s => `
-            <div class="scene-item" data-scene-id="${s.id}">
-                <span class="scene-name">${s.name}</span>
+            <div class="scene-item" data-scene-id="${esc(s.id)}">
+                <span class="scene-name">${esc(s.name)}</span>
                 <div class="scene-actions">
-                    <button class="btn btn-sm btn-success" onclick="LtpScenes.activate('${s.id}')">Load</button>
-                    <button class="btn btn-sm btn-danger" onclick="LtpScenes.remove('${s.id}')">X</button>
+                    <button class="btn btn-sm btn-success" onclick="LtpScenes.activate('${esc(s.id)}')">Load</button>
+                    <button class="btn btn-sm btn-danger" onclick="LtpScenes.remove('${esc(s.id)}')">X</button>
                 </div>
             </div>
         `).join('');

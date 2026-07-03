@@ -105,7 +105,7 @@ class Route:
     _sink_stream_id: str | None = field(default=None, repr=False)
     _frames_routed: int = field(default=0, repr=False)
     _last_frame_time: datetime | None = field(default=None, repr=False)
-    _last_frame: list | None = field(default=None, repr=False)
+    _last_frame: "np.ndarray | None" = field(default=None, repr=False)
 
     # Format negotiation
     _sink_color_format: ColorFormat = field(default=ColorFormat.RGB, repr=False)
@@ -735,8 +735,9 @@ class RoutingEngine:
             f"{virtual_source.name} -> {sink.name}:{sink_udp_port}"
         )
 
-        # Get frame interval from virtual source config
-        frame_interval = 1.0 / virtual_source.config.frame_rate
+        # Get frame interval from virtual source config (clamp rate so a
+        # sub-1 fps or zero rate can't divide-by-zero or produce int(fps)==0)
+        frame_interval = 1.0 / max(0.1, virtual_source.config.frame_rate)
 
         # Calculate render size - use source dimensions, scale to sink later
         source_pixel_count = np.prod(source_dims)
@@ -764,7 +765,7 @@ class RoutingEngine:
                     pixels = (corrected * 255).astype(np.uint8)
 
                 # Store for preview
-                route._last_frame = pixels.tolist()
+                route._last_frame = pixels
 
                 # Send to sink using negotiated format
                 if route._sender:
@@ -776,7 +777,7 @@ class RoutingEngine:
                 logger.warning(f"Error rendering virtual source for route {route.name}: {e}")
 
             # Check if sink is still online (every second or so)
-            if route._frames_routed % int(1.0 / frame_interval) == 0:
+            if route._frames_routed % max(1, int(1.0 / frame_interval)) == 0:
                 current_sink = self.controller.get_sink(route.sink_id)
                 if not current_sink or not current_sink.online:
                     logger.warning(f"Route {route.name}: Sink went offline")
@@ -848,7 +849,7 @@ class RoutingEngine:
             f"({len(route._group_senders)}/{len(group.members)} members)"
         )
 
-        frame_interval = 1.0 / virtual_source.config.frame_rate
+        frame_interval = 1.0 / max(0.1, virtual_source.config.frame_rate)
 
         while route.enabled and self._running:
             try:
@@ -862,7 +863,7 @@ class RoutingEngine:
                     corrected = np.power(normalized, route.transform.gamma)
                     pixels = (corrected * 255).astype(np.uint8)
 
-                route._last_frame = pixels.tolist()
+                route._last_frame = pixels
 
                 for member in group.members:
                     sender = route._group_senders.get(member.sink_id)
@@ -1037,7 +1038,7 @@ class RoutingEngine:
                 corrected = np.power(normalized, route.transform.gamma)
                 pixels = (corrected * 255).astype(np.uint8)
 
-            route._last_frame = pixels.tolist()
+            route._last_frame = pixels
 
             for member in group.members:
                 sender = route._group_senders.get(member.sink_id)
@@ -1088,8 +1089,10 @@ class RoutingEngine:
                 corrected = np.power(normalized, route.transform.gamma)
                 pixels = (corrected * 255).astype(np.uint8)
 
-            # Store for preview (convert to list for JSON serialization)
-            route._last_frame = pixels.tolist()
+            # Store the ndarray for preview; the web handler converts to a list
+            # on demand. Doing .tolist() here ran on every routed frame on the
+            # event-loop thread whether or not anyone was previewing.
+            route._last_frame = pixels
 
             # Send to sink using negotiated format
             if route._sender:

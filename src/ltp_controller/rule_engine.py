@@ -28,11 +28,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _cron_field_matches(field_str: str, current: int) -> bool:
+def _cron_field_matches(
+    field_str: str, current: int, field_min: int = 0, is_dow: bool = False
+) -> bool:
     """Check if a single cron field matches a value.
 
     Supports: * (any), N (exact), N,N (list), N-N (range), */N (step), N-N/N (range+step).
+
+    field_min is the field's smallest legal value (0 for minute/hour/dow,
+    1 for day-of-month/month); */N counts from it, so day-of-month */10 fires
+    on the 1st/11th/21st/31st rather than the 10th/20th/30th. is_dow accepts 7
+    as an alias for Sunday (tm_wday 6).
     """
+    def norm(v: int) -> int:
+        return 6 if (is_dow and v == 7) else v
+
     for part in field_str.split(","):
         step = 1
         if "/" in part:
@@ -40,14 +50,15 @@ def _cron_field_matches(field_str: str, current: int) -> bool:
             step = int(step_str)
 
         if part == "*":
-            if current % step == 0:
+            if (current - field_min) % step == 0:
                 return True
         elif "-" in part:
-            lo, hi = part.split("-", 1)
-            if int(lo) <= current <= int(hi) and (current - int(lo)) % step == 0:
+            lo_s, hi_s = part.split("-", 1)
+            lo, hi = norm(int(lo_s)), norm(int(hi_s))
+            if lo <= current <= hi and (current - lo) % step == 0:
                 return True
         else:
-            if current == int(part):
+            if current == norm(int(part)):
                 return True
     return False
 
@@ -79,6 +90,8 @@ class RuleEngine:
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._scheduler_task: asyncio.Task | None = None
         self._last_schedule_check: dict[str, float] = {}
+        # In-flight jittered schedule fires (held so they aren't GC'd mid-sleep)
+        self._jitter_tasks: set[asyncio.Task] = set()
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the event loop for async action execution."""
@@ -354,17 +367,32 @@ class RuleEngine:
             return
         self._last_schedule_check[rule.id] = minute_key
 
-        # Apply jitter: delay execution by a random amount
+        # Apply jitter: delay execution by a random amount. Fire in a detached
+        # task rather than sleeping inline — sleeping here would block the whole
+        # scheduler loop for up to jitter_minutes, so later rules in the same
+        # pass would be evaluated minutes late against a stale `now`.
         jitter_secs = random.uniform(0, trigger.jitter_minutes * 60) if trigger.jitter_minutes > 0 else 0
         if jitter_secs > 0:
             logger.info(f"Schedule rule {rule.name} matched, firing in {jitter_secs:.0f}s (jitter)")
-            await asyncio.sleep(jitter_secs)
+            task = asyncio.create_task(self._fire_schedule(rule, jitter_secs))
+            self._jitter_tasks.add(task)
+            task.add_done_callback(self._jitter_tasks.discard)
         else:
             logger.info(f"Schedule rule {rule.name} matched, firing now")
+            await self._fire_schedule(rule, 0)
 
-        rule.last_triggered = time.time()
-        rule.trigger_count += 1
-        await self._execute_actions(rule)
+    async def _fire_schedule(self, rule: Rule, delay: float) -> None:
+        """Fire a matched schedule rule, optionally after a jitter delay."""
+        try:
+            if delay > 0:
+                await asyncio.sleep(delay)
+            rule.last_triggered = time.time()
+            rule.trigger_count += 1
+            await self._execute_actions(rule)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Schedule fire failed for {rule.name}: {e}")
 
     @staticmethod
     def _cron_matches(expr: str, now: time.struct_time) -> bool:
@@ -379,9 +407,12 @@ class RuleEngine:
             return False
 
         values = [now.tm_min, now.tm_hour, now.tm_mday, now.tm_mon, now.tm_wday]
+        # Smallest legal value per field (minute, hour, day-of-month, month, dow)
+        field_mins = [0, 0, 1, 1, 0]
+        dow_flags = [False, False, False, False, True]
 
-        for field_str, current in zip(parts, values):
-            if not _cron_field_matches(field_str, current):
+        for field_str, current, fmin, is_dow in zip(parts, values, field_mins, dow_flags):
+            if not _cron_field_matches(field_str, current, fmin, is_dow):
                 return False
         return True
 

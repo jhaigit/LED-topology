@@ -75,7 +75,12 @@ class SinkController:
         self._pool = connection_pool
         self._streams: dict[str, SinkStream] = {}
         self._paint_buffers: dict[str, np.ndarray] = {}
-        self._lock = asyncio.Lock()
+        # Per-sink locks: a single global lock serialized painting across all
+        # sinks, so one half-dead sink (whose stream setup blocks on pool
+        # requests) stalled paint requests to every healthy sink too. These
+        # methods all run on the event-loop thread, so the dict itself needs
+        # no extra guarding.
+        self._locks: dict[str, asyncio.Lock] = {}
         # Track pool connection state to detect reconnects
         self._pool_connection_ids: dict[str, int] = {}
 
@@ -83,9 +88,17 @@ class SinkController:
         """Set the connection pool (for late binding)."""
         self._pool = pool
 
+    def _lock_for(self, sink_id: str) -> asyncio.Lock:
+        """Get (creating if needed) the per-sink operation lock."""
+        lock = self._locks.get(sink_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[sink_id] = lock
+        return lock
+
     async def invalidate_stream(self, sink_id: str) -> None:
         """Invalidate cached stream for a sink (e.g., after reconnection)."""
-        async with self._lock:
+        async with self._lock_for(sink_id):
             if sink_id in self._streams:
                 logger.info(f"Invalidating cached stream for {sink_id}")
                 await self._cleanup_stream(sink_id)
@@ -271,7 +284,7 @@ class SinkController:
             return {"status": "error", "message": "Sink is offline"}
 
         try:
-            async with self._lock:
+            async with self._lock_for(sink_id):
                 stream = await self._get_or_create_stream(sink)
 
                 # Create solid color buffer
@@ -318,7 +331,7 @@ class SinkController:
             return {"status": "error", "message": "Sink is offline"}
 
         try:
-            async with self._lock:
+            async with self._lock_for(sink_id):
                 stream = await self._get_or_create_stream(sink)
 
                 # Create gradient buffer
@@ -375,7 +388,7 @@ class SinkController:
             return {"status": "error", "message": "Sink is offline"}
 
         try:
-            async with self._lock:
+            async with self._lock_for(sink_id):
                 stream = await self._get_or_create_stream(sink)
 
                 # Create buffer with background
@@ -462,7 +475,7 @@ class SinkController:
             return {"status": "error", "message": "Sink is offline"}
 
         try:
-            async with self._lock:
+            async with self._lock_for(sink_id):
                 stream = await self._get_or_create_stream(sink)
                 pixel_count = stream.pixel_count
                 dimensions = self._get_dimensions(sink)
@@ -557,7 +570,7 @@ class SinkController:
             return {"status": "error", "message": "No text specified"}
 
         try:
-            async with self._lock:
+            async with self._lock_for(sink_id):
                 stream = await self._get_or_create_stream(sink)
                 pixel_count = stream.pixel_count
                 dimensions = self._get_dimensions(sink)
@@ -709,7 +722,7 @@ class SinkController:
         fit = options.get("fit", "contain")
 
         try:
-            async with self._lock:
+            async with self._lock_for(sink_id):
                 stream = await self._get_or_create_stream(sink)
                 pixel_count = stream.pixel_count
                 dimensions = self._get_dimensions(sink)
