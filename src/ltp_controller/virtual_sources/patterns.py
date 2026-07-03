@@ -55,27 +55,20 @@ class RainbowPattern(VirtualSource):
         )
 
     def render(self, num_pixels: int, time_elapsed: float) -> np.ndarray:
-        pixels = np.zeros((num_pixels, 3), dtype=np.uint8)
         wavelength = self.get_control("wavelength")
         saturation = self.get_control("saturation")
 
         palette = palette_registry.get("rainbow")
 
-        for i in range(num_pixels):
-            # Position in pattern plus time-based offset
-            t = (i / num_pixels * wavelength + time_elapsed * 0.5) % 1.0
-            color = palette.get_color(t)
+        t = (np.arange(num_pixels) / num_pixels * wavelength + time_elapsed * 0.5) % 1.0
+        colors = palette.get_color_array(t).astype(np.int64)  # (n, 3)
 
-            # Apply saturation (blend towards white)
-            if saturation < 1.0:
-                gray = sum(color) // 3
-                color = tuple(
-                    int(c * saturation + gray * (1 - saturation)) for c in color
-                )
+        # Apply saturation (blend towards gray)
+        if saturation < 1.0:
+            gray = colors.sum(axis=1) // 3  # matches sum(color)//3 (integer floor)
+            colors = colors * saturation + gray[:, None] * (1 - saturation)
 
-            pixels[i] = color
-
-        return pixels
+        return colors.astype(np.uint8)
 
 
 class ChasePattern(VirtualSource):
@@ -153,29 +146,23 @@ class ChasePattern(VirtualSource):
         period = length + spacing if spacing > 0 else num_pixels + length
         position = (time_elapsed * 20) % period
 
-        for i in range(num_pixels):
-            # Distance from chase head
-            if spacing > 0:
-                # Multiple segments
-                dist = (i - position) % period
-            else:
-                # Single segment
-                dist = (i - position) % (num_pixels + length)
+        # dist = (i - position) mod (period or n+length); Python/np mod is
+        # non-negative for positive modulus, so the old `dist < 0` fixup was dead.
+        modulus = period if spacing > 0 else (num_pixels + length)
+        dist = np.mod(np.arange(num_pixels) - position, modulus)
+        in_seg = dist < length
 
-            if dist < 0:
-                dist += period
+        bg = np.array(background, dtype=np.float64)
+        col = np.array(color, dtype=np.float64)
 
-            if dist < length:
-                # In the chase segment
-                if fade > 0 and dist > 0:
-                    # Apply fade to tail
-                    fade_amount = 1.0 - (dist / length) * fade
-                    pixels[i] = [
-                        int(background[j] + (color[j] - background[j]) * fade_amount)
-                        for j in range(3)
-                    ]
-                else:
-                    pixels[i] = color
+        if fade > 0:
+            faded = in_seg & (dist > 0)
+            solid = in_seg & (dist == 0)
+            fa = 1.0 - (dist[faded] / length) * fade
+            pixels[faded] = (bg + (col - bg) * fa[:, None]).astype(np.uint8)
+            pixels[solid] = color
+        else:
+            pixels[in_seg] = color
 
         return pixels
 
@@ -246,16 +233,14 @@ class CylonPattern(VirtualSource):
 
         center = t * (num_pixels - 1)
 
-        for i in range(num_pixels):
-            dist = abs(i - center)
-            if dist < width:
-                # Apply fade based on distance from center
-                intensity = 1.0 - (dist / width) * fade
-                intensity = max(0, intensity)
-                pixels[i] = [
-                    int(background[j] + (color[j] - background[j]) * intensity)
-                    for j in range(3)
-                ]
+        dist = np.abs(np.arange(num_pixels) - center)
+        mask = dist < width
+        intensity = np.maximum(0.0, 1.0 - (dist / width) * fade)
+
+        bg = np.array(background, dtype=np.float64)
+        col = np.array(color, dtype=np.float64)
+        vals = (bg + (col - bg) * intensity[:, None]).astype(np.uint8)
+        pixels[mask] = vals[mask]
 
         return pixels
 
@@ -320,15 +305,19 @@ class FlamePattern(VirtualSource):
         palette_name = self.get_control("palette")
         palette = palette_registry.get(palette_name) or palette_registry.get("fire")
 
-        # Cool down every cell
-        for i in range(num_pixels):
-            cool_amount = random.random() * cooling / 255.0
-            self._heat[i] = max(0, self._heat[i] - cool_amount)
+        # Cool down every cell. Draw the per-cell randoms in the same order as
+        # the original loop so the effect stays reproducible under a seed.
+        cool = np.array(
+            [random.random() for _ in range(num_pixels)], dtype=np.float64
+        ) * cooling / 255.0
+        self._heat = np.maximum(0.0, self._heat - cool).astype(np.float32)
 
-        # Heat diffuses upward
-        for i in range(num_pixels - 1, 1, -1):
-            self._heat[i] = (
-                self._heat[i - 1] + self._heat[i - 2] + self._heat[i - 2]
+        # Heat diffuses upward. The old downward loop read only not-yet-updated
+        # (lower-index) cells, so this is a pure convolution over the pre-diffusion
+        # values; keep the a+b+b term order for bit-identical rounding.
+        if num_pixels > 2:
+            self._heat[2:] = (
+                self._heat[1:-1] + self._heat[:-2] + self._heat[:-2]
             ) / 3
 
         # Randomly ignite sparks at bottom
@@ -337,11 +326,7 @@ class FlamePattern(VirtualSource):
             self._heat[spark_pos] = min(1.0, self._heat[spark_pos] + random.uniform(0.6, 1.0))
 
         # Convert heat to colors
-        pixels = np.zeros((num_pixels, 3), dtype=np.uint8)
-        for i in range(num_pixels):
-            pixels[i] = palette.get_color(min(1.0, self._heat[i]))
-
-        return pixels
+        return palette.get_color_array(np.minimum(1.0, self._heat))
 
 
 class SparklePattern(VirtualSource):
@@ -425,29 +410,31 @@ class SparklePattern(VirtualSource):
         # Fade existing sparkles
         self._sparkle_values[:, 3] *= fade_speed
 
-        # Add new sparkles
-        for i in range(num_pixels):
-            if random.random() < density:
-                if random_color:
+        # Add new sparkles. random_color needs three extra draws per sparkling
+        # pixel interleaved with the threshold draw, so it keeps a loop; the
+        # common fixed-color path batches the threshold draws (same sequence).
+        if random_color:
+            for i in range(num_pixels):
+                if random.random() < density:
                     self._sparkle_values[i, 0] = random.randint(0, 255)
                     self._sparkle_values[i, 1] = random.randint(0, 255)
                     self._sparkle_values[i, 2] = random.randint(0, 255)
-                else:
-                    self._sparkle_values[i, 0:3] = color
-                self._sparkle_values[i, 3] = 1.0
+                    self._sparkle_values[i, 3] = 1.0
+        else:
+            draws = np.array([random.random() for _ in range(num_pixels)])
+            sparking = draws < density
+            self._sparkle_values[sparking, 0:3] = color
+            self._sparkle_values[sparking, 3] = 1.0
 
         # Generate output
         pixels = np.zeros((num_pixels, 3), dtype=np.uint8)
-        for i in range(num_pixels):
-            brightness = self._sparkle_values[i, 3]
-            if brightness > 0.01:
-                sparkle_color = self._sparkle_values[i, 0:3]
-                pixels[i] = [
-                    int(background[j] + (sparkle_color[j] - background[j]) * brightness)
-                    for j in range(3)
-                ]
-            else:
-                pixels[i] = background
+        pixels[:] = background
+        brightness = self._sparkle_values[:, 3]
+        active = brightness > 0.01
+        bg = np.array(background, dtype=np.float64)
+        sc = self._sparkle_values[:, 0:3]
+        vals = bg + (sc - bg) * brightness[:, None]
+        pixels[active] = vals[active].astype(np.uint8)
 
         return pixels
 
@@ -532,20 +519,15 @@ class GradientPattern(VirtualSource):
 
         offset = (time_elapsed * 0.2) % 1.0 if animate else 0.0
 
-        for i in range(num_pixels):
-            t = i / max(1, num_pixels - 1)
+        t = np.arange(num_pixels) / max(1, num_pixels - 1)
+        if mode == "reflected":
+            t = 1.0 - np.abs(2 * t - 1.0)
+        if animate:
+            t = (t + offset) % 1.0
 
-            if mode == "reflected":
-                t = 1.0 - abs(2 * t - 1.0)
-
-            if animate:
-                t = (t + offset) % 1.0
-
-            pixels[i] = [
-                int(color1[j] + (color2[j] - color1[j]) * t) for j in range(3)
-            ]
-
-        return pixels
+        c1 = np.array(color1, dtype=np.float64)
+        c2 = np.array(color2, dtype=np.float64)
+        return (c1 + (c2 - c1) * t[:, None]).astype(np.uint8)
 
 
 class BreathePattern(VirtualSource):

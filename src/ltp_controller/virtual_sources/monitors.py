@@ -302,16 +302,15 @@ class SystemMonitor(VirtualSource):
 
         fill_pixels = int(value * bar_length)
 
-        for i in range(bar_length):
-            idx = bar_start + i
-            if idx >= len(pixels):
-                break
-            if i < fill_pixels:
-                pixels[idx] = display_color
-            else:
-                # Dim background shows the bar outline
-                dim_bg = tuple(max(c, display_color[j] // 10) for j, c in enumerate(background))
-                pixels[idx] = dim_bg
+        i = np.arange(bar_length)
+        idx = bar_start + i
+        valid = idx < len(pixels)
+        i, idx = i[valid], idx[valid]
+        fill = i < fill_pixels
+        pixels[idx[fill]] = display_color
+        # Dim background shows the bar outline
+        dim_bg = tuple(max(background[j], display_color[j] // 10) for j in range(3))
+        pixels[idx[~fill]] = dim_bg
 
     def render(self, num_pixels: int, time_elapsed: float) -> np.ndarray:
         # Update metrics
@@ -353,18 +352,18 @@ class SystemMonitor(VirtualSource):
                 self._render_bar(pixels, start, bar_length, value, color, background, show_labels)
 
         elif layout == "stacked":
-            # Overlay all metrics (highest value wins per pixel)
+            # Overlay all metrics (later metrics blend over earlier ones).
+            bg = np.array(background, dtype=np.uint8)
             for name, value, color in metrics:
                 fill_pixels = int(value * num_pixels)
-                display_color = self._get_threshold_color(value, color)
-                for i in range(fill_pixels):
-                    # Blend if pixel already has color
-                    existing = tuple(pixels[i])
-                    if existing == background:
-                        pixels[i] = display_color
-                    else:
-                        # Additive blend (clamped)
-                        pixels[i] = tuple(min(255, existing[j] + display_color[j] // 2) for j in range(3))
+                if fill_pixels <= 0:
+                    continue
+                idx = np.arange(min(fill_pixels, num_pixels))
+                dc = np.array(self._get_threshold_color(value, color), dtype=np.int64)
+                existing = pixels[idx].astype(np.int64)
+                is_bg = np.all(pixels[idx] == bg, axis=1)
+                blended = np.minimum(255, existing + dc // 2)
+                pixels[idx] = np.where(is_bg[:, None], dc, blended).astype(np.uint8)
 
         return pixels
 
@@ -505,14 +504,12 @@ class CPUCoreMonitor(VirtualSource):
                 color = (0, 255, 0)
 
             # Fill bar
-            for i in range(bar_length):
-                idx = start + i
-                if idx >= num_pixels:
-                    break
-                if i < fill_pixels:
-                    pixels[idx] = color
-                else:
-                    # Dim indicator
-                    pixels[idx] = tuple(c // 10 for c in color)
+            i = np.arange(bar_length)
+            idx = start + i
+            valid = idx < num_pixels
+            i, idx = i[valid], idx[valid]
+            fill = i < fill_pixels
+            pixels[idx[fill]] = color
+            pixels[idx[~fill]] = tuple(c // 10 for c in color)
 
         return pixels

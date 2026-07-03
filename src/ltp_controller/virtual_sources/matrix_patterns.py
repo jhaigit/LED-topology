@@ -98,14 +98,11 @@ class GridPattern(VirtualSource):
         # Fill background
         pixels[:] = bg_color
 
-        for i in range(num_pixels):
-            # Convert linear index to 2D coordinates
-            x = i % width
-            y = i // width
-
-            # Draw grid lines
-            if (x + offset) % spacing == 0 or (y + offset) % spacing == 0:
-                pixels[i] = line_color
+        idx = np.arange(num_pixels)
+        x = idx % width
+        y = idx // width
+        line = ((x + offset) % spacing == 0) | ((y + offset) % spacing == 0)
+        pixels[line] = line_color
 
         return pixels
 
@@ -185,33 +182,32 @@ class CornerMarkers(VirtualSource):
         blue = tuple(int(c * brightness) for c in (0, 0, 255))
         yellow = tuple(int(c * brightness) for c in (255, 255, 0))
 
-        for i in range(num_pixels):
-            x = i % width
-            y = i // width
+        idx = np.arange(num_pixels)
+        x = idx % width
+        y = idx // width
 
-            # Top-left corner (Red)
-            if x < marker_size and y < marker_size:
-                pixels[i] = red
-            # Top-right corner (Green)
-            elif x >= width - marker_size and y < marker_size:
-                pixels[i] = green
-            # Bottom-left corner (Blue)
-            elif x < marker_size and y >= height - marker_size:
-                pixels[i] = blue
-            # Bottom-right corner (Yellow)
-            elif x >= width - marker_size and y >= height - marker_size:
-                pixels[i] = yellow
-            # Edges
-            elif show_edges:
-                edge_brightness = 0.3
-                if y == 0:  # Top edge
-                    pixels[i] = (int(128 * edge_brightness), 0, 0)
-                elif y == height - 1:  # Bottom edge
-                    pixels[i] = (0, 0, int(128 * edge_brightness))
-                elif x == 0:  # Left edge
-                    pixels[i] = (int(64 * edge_brightness), 0, int(64 * edge_brightness))
-                elif x == width - 1:  # Right edge
-                    pixels[i] = (0, int(64 * edge_brightness), int(64 * edge_brightness))
+        # Corner precedence tl > tr > bl > br (elif chain); make the masks
+        # mutually exclusive so they can overlap on thin strips (height==1).
+        tl = (x < marker_size) & (y < marker_size)
+        tr = ~tl & (x >= width - marker_size) & (y < marker_size)
+        bl = ~tl & ~tr & (x < marker_size) & (y >= height - marker_size)
+        br = ~tl & ~tr & ~bl & (x >= width - marker_size) & (y >= height - marker_size)
+        pixels[tl] = red
+        pixels[tr] = green
+        pixels[bl] = blue
+        pixels[br] = yellow
+
+        if show_edges:
+            eb = 0.3
+            avail = ~(tl | tr | bl | br)
+            top = avail & (y == 0)
+            bot = avail & ~top & (y == height - 1)
+            left = avail & ~top & ~bot & (x == 0)
+            right = avail & ~top & ~bot & ~left & (x == width - 1)
+            pixels[top] = (int(128 * eb), 0, 0)
+            pixels[bot] = (0, 0, int(128 * eb))
+            pixels[left] = (int(64 * eb), 0, int(64 * eb))
+            pixels[right] = (0, int(64 * eb), int(64 * eb))
 
         return pixels
 
@@ -292,54 +288,39 @@ class RowColumnSweep(VirtualSource):
         # Calculate sweep position
         cycle_time = 2.0  # seconds per full sweep
 
+        idx = np.arange(num_pixels)
+        x = idx % width
+        y = idx // width
+        col = np.array(color, dtype=np.float64)
+
+        def _sweep(axis, span):
+            # Shared rows/columns logic: line where |axis - pos| < line_width,
+            # else a fading trail behind the sweep (axis < pos).
+            pos = int((time_elapsed / cycle_time * span) % span)
+            line = np.abs(axis - pos) < line_width
+            pixels[line] = color
+            if fade_trail:
+                trail = ~line & (axis < pos)
+                fade = np.maximum(0.0, 1.0 - (pos - axis) / span)
+                vals = (col * fade[:, None] * 0.3).astype(np.uint8)
+                pixels[trail] = vals[trail]
+
         if mode == "rows":
-            pos = int((time_elapsed / cycle_time * height) % height)
-            for i in range(num_pixels):
-                x = i % width
-                y = i // width
-                dist = abs(y - pos)
-                if dist < line_width:
-                    pixels[i] = color
-                elif fade_trail and y < pos:
-                    fade = max(0, 1.0 - (pos - y) / height)
-                    pixels[i] = tuple(int(c * fade * 0.3) for c in color)
-
+            _sweep(y, height)
         elif mode == "columns":
-            pos = int((time_elapsed / cycle_time * width) % width)
-            for i in range(num_pixels):
-                x = i % width
-                y = i // width
-                dist = abs(x - pos)
-                if dist < line_width:
-                    pixels[i] = color
-                elif fade_trail and x < pos:
-                    fade = max(0, 1.0 - (pos - x) / width)
-                    pixels[i] = tuple(int(c * fade * 0.3) for c in color)
-
+            _sweep(x, width)
         elif mode == "both":
-            # Alternate between rows and columns
             phase = int(time_elapsed / cycle_time) % 2
             if phase == 0:
                 pos = int((time_elapsed / cycle_time * height) % height)
-                for i in range(num_pixels):
-                    y = i // width
-                    if abs(y - pos) < line_width:
-                        pixels[i] = color
+                pixels[np.abs(y - pos) < line_width] = color
             else:
                 pos = int((time_elapsed / cycle_time * width) % width)
-                for i in range(num_pixels):
-                    x = i % width
-                    if abs(x - pos) < line_width:
-                        pixels[i] = color
-
+                pixels[np.abs(x - pos) < line_width] = color
         elif mode == "diagonal":
             diag_size = width + height
             pos = int((time_elapsed / cycle_time * diag_size) % diag_size)
-            for i in range(num_pixels):
-                x = i % width
-                y = i // width
-                if abs((x + y) - pos) < line_width:
-                    pixels[i] = color
+            pixels[np.abs((x + y) - pos) < line_width] = color
 
         return pixels
 
@@ -414,18 +395,14 @@ class Checkerboard(VirtualSource):
         # Animation offset
         offset = int(time_elapsed * 2) if animate else 0
 
-        for i in range(num_pixels):
-            x = i % width
-            y = i // width
-
-            # Determine checker cell
-            cell_x = (x + offset) // cell_size
-            cell_y = (y + offset) // cell_size
-
-            if (cell_x + cell_y) % 2 == 0:
-                pixels[i] = color1
-            else:
-                pixels[i] = color2
+        idx = np.arange(num_pixels)
+        x = idx % width
+        y = idx // width
+        cell_x = (x + offset) // cell_size
+        cell_y = (y + offset) // cell_size
+        even = (cell_x + cell_y) % 2 == 0
+        pixels[even] = color1
+        pixels[~even] = color2
 
         return pixels
 
@@ -488,39 +465,41 @@ class PixelIndex(VirtualSource):
 
         offset = time_elapsed * 0.2 if animate else 0
 
+        idx = np.arange(num_pixels)
+
         if mode == "gradient":
-            # Rainbow gradient by pixel index
-            for i in range(num_pixels):
-                hue = ((i / num_pixels) + offset) % 1.0
-                pixels[i] = self._hsv_to_rgb(hue, 1.0, 1.0)
+            # Rainbow gradient by pixel index (HSV with s=v=1, so only the hue
+            # sextant math matters — replicated vectorized below).
+            hue = ((idx / num_pixels) + offset) % 1.0
+            h6 = hue * 6
+            ii = h6.astype(np.int64)
+            f = h6 - ii
+            r = np.select([ii == 0, ii == 1, ii == 2, ii == 3, ii == 4],
+                          [1.0, 1.0 - f, 0.0, 0.0, f], default=1.0)
+            g = np.select([ii == 0, ii == 1, ii == 2, ii == 3, ii == 4],
+                          [f, 1.0, 1.0, 1.0 - f, 0.0], default=0.0)
+            b = np.select([ii == 0, ii == 1, ii == 2, ii == 3, ii == 4],
+                          [0.0, 0.0, f, 1.0, 1.0], default=1.0 - f)
+            pixels[:] = (np.stack([r, g, b], axis=1) * 255).astype(np.uint8)
 
         elif mode == "segments":
-            # Different color per segment
-            colors = [
+            colors = np.array([
                 (255, 0, 0), (0, 255, 0), (0, 0, 255),
                 (255, 255, 0), (255, 0, 255), (0, 255, 255),
                 (255, 128, 0), (128, 0, 255),
-            ]
-            for i in range(num_pixels):
-                segment = i // segment_size
-                pixels[i] = colors[segment % len(colors)]
+            ], dtype=np.uint8)
+            pixels[:] = colors[(idx // segment_size) % len(colors)]
 
         elif mode == "binary":
-            # Odd/even alternation
-            for i in range(num_pixels):
-                if i % 2 == 0:
-                    pixels[i] = (255, 255, 255)
-                else:
-                    pixels[i] = (0, 0, 0)
+            even = idx % 2 == 0
+            pixels[even] = (255, 255, 255)
+            pixels[~even] = (0, 0, 0)
 
         elif mode == "first_last":
-            # Highlight first and last pixels
-            pixels[0] = (255, 0, 0)  # First pixel: red
+            pixels[1:-1] = (32, 32, 32)  # middle pixels dim white
+            pixels[0] = (255, 0, 0)      # first pixel: red
             if num_pixels > 1:
-                pixels[-1] = (0, 255, 0)  # Last pixel: green
-            # Middle pixels dim white
-            for i in range(1, num_pixels - 1):
-                pixels[i] = (32, 32, 32)
+                pixels[-1] = (0, 255, 0)  # last pixel: green
 
         return pixels
 
@@ -605,40 +584,37 @@ class CoordinateDisplay(VirtualSource):
         center_x = width // 2
         center_y = height // 2
 
-        for i in range(num_pixels):
-            x = i % width
-            y = i // width
+        idx = np.arange(num_pixels)
+        x = idx % width
+        y = idx // width
 
-            if mode == "xy_gradient":
-                # Red increases with X, Green increases with Y
-                r = int((x / max(1, width - 1)) * 255) if width > 1 else 128
-                g = int((y / max(1, height - 1)) * 255) if height > 1 else 128
-                pixels[i] = (r, g, 0)
+        if width > 1:
+            rx = (x / (width - 1) * 255).astype(np.int64)
+        else:
+            rx = np.full(num_pixels, 128, dtype=np.int64)
+        if height > 1:
+            gy = (y / (height - 1) * 255).astype(np.int64)
+        else:
+            gy = np.full(num_pixels, 128, dtype=np.int64)
 
-            elif mode == "x_only":
-                # Red gradient along X
-                r = int((x / max(1, width - 1)) * 255) if width > 1 else 128
-                pixels[i] = (r, 0, 0)
+        if mode == "xy_gradient":
+            pixels[:, 0] = rx
+            pixels[:, 1] = gy
+        elif mode == "x_only":
+            pixels[:, 0] = rx
+        elif mode == "y_only":
+            pixels[:, 1] = gy
+        elif mode == "quadrants":
+            left = x < center_x
+            top = y < center_y
+            pixels[left & top] = (255, 0, 0)
+            pixels[~left & top] = (0, 255, 0)
+            pixels[left & ~top] = (0, 0, 255)
+            pixels[~left & ~top] = (255, 255, 0)
 
-            elif mode == "y_only":
-                # Green gradient along Y
-                g = int((y / max(1, height - 1)) * 255) if height > 1 else 128
-                pixels[i] = (0, g, 0)
-
-            elif mode == "quadrants":
-                # Different color per quadrant
-                if x < center_x and y < center_y:
-                    pixels[i] = (255, 0, 0)  # Top-left: Red
-                elif x >= center_x and y < center_y:
-                    pixels[i] = (0, 255, 0)  # Top-right: Green
-                elif x < center_x and y >= center_y:
-                    pixels[i] = (0, 0, 255)  # Bottom-left: Blue
-                else:
-                    pixels[i] = (255, 255, 0)  # Bottom-right: Yellow
-
-            # Highlight center
-            if show_center and x == center_x and y == center_y:
-                pixels[i] = (255, 255, 255)
+        # Highlight center (overrides mode output)
+        if show_center:
+            pixels[(x == center_x) & (y == center_y)] = (255, 255, 255)
 
         return pixels
 
@@ -683,9 +659,13 @@ class TestCard(VirtualSource):
 
         style = self.get_control("style")
 
+        idx = np.arange(num_pixels)
+        x = idx % width
+        y = idx // width
+
         if style == "bars":
             # SMPTE-style color bars
-            colors = [
+            colors = np.array([
                 (255, 255, 255),  # White
                 (255, 255, 0),    # Yellow
                 (0, 255, 255),    # Cyan
@@ -694,33 +674,23 @@ class TestCard(VirtualSource):
                 (255, 0, 0),      # Red
                 (0, 0, 255),      # Blue
                 (0, 0, 0),        # Black
-            ]
+            ], dtype=np.uint8)
             bar_width = width // len(colors) if width >= len(colors) else 1
-
-            for i in range(num_pixels):
-                x = i % width
-                bar_idx = min(x // bar_width, len(colors) - 1)
-                pixels[i] = colors[bar_idx]
+            bar_idx = np.minimum(x // bar_width, len(colors) - 1)
+            pixels[:] = colors[bar_idx]
 
         elif style == "grayscale":
-            # Grayscale gradient
-            for i in range(num_pixels):
-                x = i % width
-                gray = int((x / max(1, width - 1)) * 255) if width > 1 else 128
-                pixels[i] = (gray, gray, gray)
+            if width > 1:
+                gray = (x / (width - 1) * 255).astype(np.int64)
+            else:
+                gray = np.full(num_pixels, 128, dtype=np.int64)
+            pixels[:] = gray[:, None]
 
         elif style == "rgb":
-            # RGB bars (horizontal thirds)
             third = height // 3 if height >= 3 else 1
-
-            for i in range(num_pixels):
-                y = i // width
-                if y < third:
-                    pixels[i] = (255, 0, 0)
-                elif y < 2 * third:
-                    pixels[i] = (0, 255, 0)
-                else:
-                    pixels[i] = (0, 0, 255)
+            pixels[y < third] = (255, 0, 0)
+            pixels[(y >= third) & (y < 2 * third)] = (0, 255, 0)
+            pixels[y >= 2 * third] = (0, 0, 255)
 
         elif style == "white":
             pixels[:] = (255, 255, 255)

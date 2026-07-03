@@ -148,36 +148,37 @@ class BarGraph(VirtualSource):
             if self._peak_time > peak_hold_time:
                 self._peak_value = max(self._value, self._peak_value * 0.95)
 
-        # Get color function based on mode
-        def get_color(position: float) -> tuple[int, int, int]:
+        # Vectorized color lookup for an array of bar positions (matches the
+        # per-position get_color the original used).
+        def colors_for(positions: np.ndarray) -> np.ndarray:
+            k = len(positions)
             if color_mode == "solid":
-                return hex_to_rgb(self.get_control("color"))
+                c = hex_to_rgb(self.get_control("color"))
+                return np.tile(np.array(c, dtype=np.uint8), (k, 1))
             elif color_mode == "gradient":
-                low = hex_to_rgb(self.get_control("gradient_low"))
-                high = hex_to_rgb(self.get_control("gradient_high"))
-                return tuple(int(low[i] + (high[i] - low[i]) * position) for i in range(3))
+                low = np.array(hex_to_rgb(self.get_control("gradient_low")), dtype=np.float64)
+                high = np.array(hex_to_rgb(self.get_control("gradient_high")), dtype=np.float64)
+                return (low + (high - low) * positions[:, None]).astype(np.uint8)
             elif color_mode == "threshold":
-                if position < 0.7:
-                    return (0, 255, 0)  # Green
-                elif position < 0.9:
-                    return (255, 255, 0)  # Yellow
-                else:
-                    return (255, 0, 0)  # Red
-            return (255, 255, 255)
+                out = np.empty((k, 3), dtype=np.uint8)
+                out[positions < 0.7] = (0, 255, 0)
+                out[(positions >= 0.7) & (positions < 0.9)] = (255, 255, 0)
+                out[positions >= 0.9] = (255, 0, 0)
+                return out
+            return np.tile(np.array((255, 255, 255), dtype=np.uint8), (k, 1))
 
         # Fill based on direction
         if direction == "left_to_right":
-            for i in range(fill_pixels):
-                pixels[i] = get_color(i / max(1, num_pixels - 1))
+            i = np.arange(fill_pixels)
+            pixels[:fill_pixels] = colors_for(i / max(1, num_pixels - 1))
             if show_peak:
                 peak_pos = int(self._peak_value * (num_pixels - 1))
                 if peak_pos < num_pixels:
                     pixels[peak_pos] = (255, 255, 255)
 
         elif direction == "right_to_left":
-            for i in range(fill_pixels):
-                pos = num_pixels - 1 - i
-                pixels[pos] = get_color(i / max(1, num_pixels - 1))
+            i = np.arange(fill_pixels)
+            pixels[num_pixels - 1 - i] = colors_for(i / max(1, num_pixels - 1))
             if show_peak:
                 peak_pos = num_pixels - 1 - int(self._peak_value * (num_pixels - 1))
                 if peak_pos >= 0:
@@ -186,21 +187,21 @@ class BarGraph(VirtualSource):
         elif direction == "center_out":
             center = num_pixels // 2
             half_fill = fill_pixels // 2
-            for i in range(half_fill):
-                t = i / max(1, center)
-                color = get_color(t)
-                if center + i < num_pixels:
-                    pixels[center + i] = color
-                if center - i >= 0:
-                    pixels[center - i] = color
+            i = np.arange(half_fill)
+            cols = colors_for(i / max(1, center))
+            up = center + i
+            up_ok = up < num_pixels
+            pixels[up[up_ok]] = cols[up_ok]
+            down = center - i
+            down_ok = down >= 0
+            pixels[down[down_ok]] = cols[down_ok]
 
         elif direction == "edges_in":
             half_fill = fill_pixels // 2
-            for i in range(half_fill):
-                t = i / max(1, num_pixels // 2)
-                color = get_color(t)
-                pixels[i] = color
-                pixels[num_pixels - 1 - i] = color
+            i = np.arange(half_fill)
+            cols = colors_for(i / max(1, num_pixels // 2))
+            pixels[i] = cols
+            pixels[num_pixels - 1 - i] = cols
 
         return pixels
 
@@ -339,6 +340,9 @@ class MultiBar(VirtualSource):
         pixels[:] = background
 
         rainbow = palette_registry.get("rainbow")
+        # Parse gradient endpoints once per frame, not once per pixel.
+        grad_low = np.array(hex_to_rgb(self.get_control("gradient_low")), dtype=np.float64)
+        grad_high = np.array(hex_to_rgb(self.get_control("gradient_high")), dtype=np.float64)
 
         for bar_idx, value in enumerate(self._values):
             # Calculate bar position
@@ -357,25 +361,22 @@ class MultiBar(VirtualSource):
             else:
                 bar_color = None  # Will be gradient
 
-            # Fill bar
-            for i in range(bar_start, bar_end):
-                pixel_idx = i - bar_start
-                if direction == "bottom_to_top":
-                    in_fill = pixel_idx < fill_height
-                    t = pixel_idx / max(1, bar_width - 1)
-                else:
-                    in_fill = (bar_width - 1 - pixel_idx) < fill_height
-                    t = (bar_width - 1 - pixel_idx) / max(1, bar_width - 1)
-
-                if in_fill:
-                    if color_mode == "gradient":
-                        low = hex_to_rgb(self.get_control("gradient_low"))
-                        high = hex_to_rgb(self.get_control("gradient_high"))
-                        pixels[i] = tuple(
-                            int(low[j] + (high[j] - low[j]) * t) for j in range(3)
-                        )
-                    else:
-                        pixels[i] = bar_color
+            # Fill bar (vectorized over the bar's pixels)
+            seg = np.arange(bar_start, bar_end)
+            pidx = seg - bar_start
+            if direction == "bottom_to_top":
+                rank = pidx
+            else:
+                rank = bar_width - 1 - pidx
+            in_fill = rank < fill_height
+            if not in_fill.any():
+                continue
+            if color_mode == "gradient":
+                t = rank / max(1, bar_width - 1)
+                vals = (grad_low + (grad_high - grad_low) * t[:, None]).astype(np.uint8)
+                pixels[seg[in_fill]] = vals[in_fill]
+            else:
+                pixels[seg[in_fill]] = bar_color
 
         return pixels
 
@@ -502,6 +503,7 @@ class VUMeter(VirtualSource):
         for seg in range(segments):
             seg_start = seg * pixels_per_segment
             seg_end = seg_start + pixels_per_segment - 1  # Leave gap
+            hi = min(seg_end, num_pixels)
 
             # Determine segment color based on position
             seg_position = seg / (segments - 1)
@@ -515,18 +517,11 @@ class VUMeter(VirtualSource):
             # Dim background for off segments
             dim_color = tuple(c // 8 for c in color)
 
-            if seg < lit_segments:
-                # Lit segment
-                for i in range(seg_start, min(seg_end, num_pixels)):
-                    pixels[i] = color
-            else:
-                # Dim segment
-                for i in range(seg_start, min(seg_end, num_pixels)):
-                    pixels[i] = dim_color
-
-            # Peak indicator
             if show_peak and seg == peak_segment:
-                for i in range(seg_start, min(seg_end, num_pixels)):
-                    pixels[i] = (255, 255, 255)
+                pixels[seg_start:hi] = (255, 255, 255)
+            elif seg < lit_segments:
+                pixels[seg_start:hi] = color
+            else:
+                pixels[seg_start:hi] = dim_color
 
         return pixels
