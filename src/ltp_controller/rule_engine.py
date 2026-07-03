@@ -210,7 +210,10 @@ class RuleEngine:
         new_value: Any,
     ) -> None:
         """Handle an input event and evaluate all rules."""
-        for rule in self._rules.values():
+        # Snapshot the rules: this runs on the input-manager thread while Flask
+        # worker threads may create/delete rules, so iterating the live dict
+        # would raise "dictionary changed size during iteration".
+        for rule in list(self._rules.values()):
             if not rule.enabled:
                 continue
 
@@ -304,20 +307,29 @@ class RuleEngine:
     # ==================== Schedule Evaluation ====================
 
     async def _schedule_loop(self) -> None:
-        """Check schedule triggers once per minute."""
-        try:
-            while True:
+        """Check schedule triggers once per minute.
+
+        This loop must never die except on cancellation: a single transient
+        error (including a concurrent rule mutation from a Flask thread) would
+        otherwise permanently stop all schedule-triggered rules with no
+        recovery. Each tick is fully guarded, and rules are snapshotted before
+        iteration to avoid "dictionary changed size during iteration".
+        """
+        while True:
+            try:
                 await asyncio.sleep(30)
                 now = time.localtime()
-                for rule in self._rules.values():
+                for rule in list(self._rules.values()):
                     if not rule.enabled or rule.trigger.type != TriggerType.SCHEDULE:
                         continue
                     try:
                         await self._evaluate_schedule(rule, now)
                     except Exception as e:
                         logger.error(f"Schedule eval error for {rule.name}: {e}")
-        except asyncio.CancelledError:
-            pass
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Schedule loop error (continuing): {e}")
 
     async def _evaluate_schedule(self, rule: Rule, now: time.struct_time) -> None:
         """Check if a schedule trigger should fire right now."""

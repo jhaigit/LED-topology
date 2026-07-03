@@ -111,6 +111,13 @@ class Sequence:
 class SequenceManager:
     """Manages sequences and their execution."""
 
+    # Minimum wall-clock time between iterations of a looping sequence whose
+    # steps carry no positive delay. Without this floor, a `loop: true`
+    # sequence with zero delays whose actions fail synchronously would spin the
+    # event loop at 100% CPU (and, before the per-step yield below, could starve
+    # it entirely).
+    _MIN_LOOP_INTERVAL = 0.05
+
     def __init__(self) -> None:
         self._sequences: dict[str, Sequence] = {}
         self._action_executor: Any = None  # set by wiring to rule engine
@@ -260,6 +267,7 @@ class SequenceManager:
         """Execute all steps in a sequence, optionally looping."""
         try:
             while True:
+                pass_had_delay = False
                 for i, step in enumerate(seq.steps):
                     seq.current_step = i
 
@@ -269,6 +277,7 @@ class SequenceManager:
                     # Delay before this step
                     delay = step.effective_delay()
                     if delay > 0:
+                        pass_had_delay = True
                         await asyncio.sleep(delay)
 
                     # Check still running after sleep
@@ -287,10 +296,20 @@ class SequenceManager:
                                 f"Sequence {seq.name} step {i} ({step.action.type.value}) failed: {e}"
                             )
 
+                    # Always yield to the event loop, even when this step had no
+                    # delay and its action returned synchronously. Guarantees a
+                    # zero-delay sequence can never monopolise the loop.
+                    await asyncio.sleep(0)
+
                 seq.run_count += 1
 
                 if not seq.loop:
                     break
+
+                # If a full loop pass carried no positive delay, throttle to
+                # avoid a tight CPU-bound spin.
+                if not pass_had_delay:
+                    await asyncio.sleep(self._MIN_LOOP_INTERVAL)
 
         except asyncio.CancelledError:
             pass

@@ -93,6 +93,18 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Fail loudly instead of silently degrading when the test environment is
+# incomplete. --strict-config turns the "Unknown config option: asyncio_mode"
+# warning (emitted when pytest-asyncio is not installed) into a startup error;
+# --strict-markers makes an unregistered @pytest.mark.asyncio fail rather than
+# collect an async test whose coroutine is never awaited. The filterwarnings
+# entries escalate the two warnings that otherwise let an async test "pass"
+# without running any of its assertions.
+addopts = "--strict-config --strict-markers"
+filterwarnings = [
+    "error::pytest.PytestUnknownMarkWarning",
+    "error::pytest.PytestReturnNotNoneWarning",
+]
 
 [tool.black]
 line-length = 100

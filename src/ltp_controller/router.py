@@ -1196,12 +1196,17 @@ class RoutingEngine:
                 await task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                # A route task that died with a stored exception would otherwise
+                # re-raise here and kill the caller (the monitor loop).
+                logger.warning(f"Route task for {route.name} ended with error: {e}")
 
         await self._cleanup_route(route)
 
     def _sink_has_other_active_routes(self, route: Route) -> bool:
         """Check if another active route uses the same sink."""
-        for other in self._routes.values():
+        # Snapshot: _routes may be mutated by create/delete on a Flask thread.
+        for other in list(self._routes.values()):
             if other.id != route.id and other.sink_id == route.sink_id and other.status == RouteStatus.CONNECTED:
                 return True
         return False
@@ -1288,34 +1293,63 @@ class RoutingEngine:
 
         logger.info(f"Route {route.name} cleaned up")
 
+    def _spawn_route_task(self, route: Route) -> asyncio.Task:
+        """Create and register a route task with self-cleaning done handling.
+
+        The done callback removes the finished task from _route_tasks (so a
+        route that dies on its own can be restarted via _pending_starts, which
+        checks `route_id not in self._route_tasks`) and surfaces any exception
+        instead of letting it sit silently on a dead task.
+        """
+        task = asyncio.create_task(self._run_route(route))
+        self._route_tasks[route.id] = task
+        task.add_done_callback(lambda t: self._on_route_task_done(route.id, t))
+        return task
+
+    def _on_route_task_done(self, route_id: str, task: asyncio.Task) -> None:
+        # Only unregister if this exact task is still the current one (a restart
+        # may have already replaced it).
+        if self._route_tasks.get(route_id) is task:
+            self._route_tasks.pop(route_id, None)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.error(f"Route task {route_id} died: {exc}")
+
     async def _monitor_loop(self) -> None:
-        """Monitor for pending route starts/stops from sync context."""
+        """Monitor for pending route starts/stops from sync context.
+
+        Guarded so a single transient error cannot permanently kill the loop —
+        that would leave every future enable/disable/create queued in the
+        _pending_* sets and never processed.
+        """
         while self._running:
-            # Process pending restarts first (stop then start atomically)
-            while self._pending_restarts:
-                route_id = self._pending_restarts.pop()
-                route = self._routes.get(route_id)
-                if route and route.enabled:
-                    await self._stop_route(route)
-                    self._route_tasks[route_id] = asyncio.create_task(
-                        self._run_route(route)
-                    )
+            try:
+                # Process pending restarts first (stop then start atomically)
+                while self._pending_restarts:
+                    route_id = self._pending_restarts.pop()
+                    route = self._routes.get(route_id)
+                    if route and route.enabled:
+                        await self._stop_route(route)
+                        self._spawn_route_task(route)
 
-            # Process pending starts
-            while self._pending_starts:
-                route_id = self._pending_starts.pop()
-                route = self._routes.get(route_id)
-                if route and route.enabled and route_id not in self._route_tasks:
-                    self._route_tasks[route_id] = asyncio.create_task(
-                        self._run_route(route)
-                    )
+                # Process pending starts
+                while self._pending_starts:
+                    route_id = self._pending_starts.pop()
+                    route = self._routes.get(route_id)
+                    if route and route.enabled and route_id not in self._route_tasks:
+                        self._spawn_route_task(route)
 
-            # Process pending stops
-            while self._pending_stops:
-                route_id = self._pending_stops.pop()
-                route = self._routes.get(route_id)
-                if route:
-                    await self._stop_route(route)
+                # Process pending stops
+                while self._pending_stops:
+                    route_id = self._pending_stops.pop()
+                    route = self._routes.get(route_id)
+                    if route:
+                        await self._stop_route(route)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Route monitor loop error (continuing): {e}")
 
             await asyncio.sleep(0.1)
 
@@ -1327,11 +1361,9 @@ class RoutingEngine:
         self._running = True
 
         # Start enabled routes
-        for route in self._routes.values():
+        for route in list(self._routes.values()):
             if route.enabled:
-                self._route_tasks[route.id] = asyncio.create_task(
-                    self._run_route(route)
-                )
+                self._spawn_route_task(route)
 
         # Start monitor loop for handling routes from sync context
         self._monitor_task = asyncio.create_task(self._monitor_loop())
