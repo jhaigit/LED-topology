@@ -67,6 +67,17 @@ def create_app(
             # Fallback to creating a new loop
             return asyncio.run(coro)
 
+    # Run a *synchronous* engine method on the event-loop thread, from a Flask
+    # worker thread. Use this for engine mutators that touch asyncio primitives
+    # or state the loop also reads (sequence create/update/delete cancel tasks
+    # and set events; render_frame mutates per-source animation buffers that the
+    # router renders on the loop thread). Running them anywhere else is a race.
+    def run_on_loop(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        async def _call() -> Any:
+            return fn(*args, **kwargs)
+
+        return run_async(_call())
+
     # ==================== Pages ====================
 
     @app.route("/")
@@ -856,7 +867,8 @@ def create_app(
                     "brightness": route.transform.brightness,
                     "gamma": route.transform.gamma,
                     "scale_mode": route.transform.scale_mode.value if hasattr(route.transform.scale_mode, 'value') else str(route.transform.scale_mode),
-                    "mirror": route.transform.mirror,
+                    "mirror_x": route.transform.mirror_x,
+                    "mirror_y": route.transform.mirror_y,
                 }
             route_states.append(route_state)
 
@@ -929,7 +941,8 @@ def create_app(
                 if "transform" in rs and route.transform:
                     route.transform.brightness = rs["transform"].get("brightness", route.transform.brightness)
                     route.transform.gamma = rs["transform"].get("gamma", route.transform.gamma)
-                    route.transform.mirror = rs["transform"].get("mirror", route.transform.mirror)
+                    route.transform.mirror_x = rs["transform"].get("mirror_x", route.transform.mirror_x)
+                    route.transform.mirror_y = rs["transform"].get("mirror_y", route.transform.mirror_y)
                 applied["routes"] += 1
             except Exception as e:
                 logger.warning("Failed to apply route state for %s: %s", rs["route_id"], e)
@@ -981,11 +994,14 @@ def create_app(
         """
         import yaml
 
-        data = request.get_json() or {}
-        save_path = data.get("path") or app.config.get("config_path")
+        # Always write the server's configured config file. Never honour a
+        # caller-supplied path: this endpoint is unauthenticated, and a
+        # request-controlled path let any LAN client overwrite arbitrary
+        # files writable by the server user.
+        save_path = app.config.get("config_path")
 
         if not save_path:
-            return jsonify({"error": "Config path not specified and no default config file"}), 400
+            return jsonify({"error": "No config file configured on this controller"}), 400
 
         # Load existing config to preserve other settings
         existing_config: dict[str, Any] = {}
@@ -1462,10 +1478,14 @@ def create_app(
             width = dims[0]
             height = 1
 
-        # Render a frame with all transforms (speed, reverse, brightness, mirror)
+        # Render a frame with all transforms (speed, reverse, brightness, mirror).
+        # Marshal onto the event-loop thread: stateful sources mutate shared
+        # animation buffers in render_frame(), and the router renders the same
+        # instance on the loop thread. Running both concurrently corrupts that
+        # state; on the loop thread they serialize.
         num_pixels = width * height
         try:
-            frame = source.render_frame(num_pixels)
+            frame = run_on_loop(source.render_frame, num_pixels)
             pixels = frame.tolist() if hasattr(frame, 'tolist') else list(frame)
         except Exception:
             # Return empty preview on error
@@ -1827,25 +1847,14 @@ def create_app(
             return jsonify({"error": "Missing or empty 'actions' field"}), 400
 
         try:
-            # Parse trigger
-            trigger_data = data["trigger"]
-            trigger = Trigger(
-                type=TriggerType(trigger_data.get("type", "input_change")),
-                sink_id=trigger_data["sink_id"],
-                input_id=trigger_data["input_id"],
-                comparison=ComparisonOp(trigger_data.get("comparison", "changed_to")),
-                value=trigger_data.get("value", True),
-            )
+            # Parse trigger. Trigger.from_dict handles both input triggers
+            # (sink_id/input_id/comparison/value) and schedule triggers
+            # (cron/jitter_minutes/days); building Trigger(...) by hand here
+            # assumed input fields and KeyError'd on every schedule rule.
+            trigger = Trigger.from_dict(data["trigger"])
 
             # Parse actions
-            actions = []
-            for action_data in data["actions"]:
-                actions.append(Action(
-                    type=ActionType(action_data["type"]),
-                    target_id=action_data["target_id"],
-                    control_id=action_data.get("control_id"),
-                    value=action_data.get("value"),
-                ))
+            actions = [Action.from_dict(action_data) for action_data in data["actions"]]
 
             # Create rule
             rule = rule_engine.create_rule(
@@ -1887,29 +1896,15 @@ def create_app(
             return jsonify({"error": "No data provided"}), 400
 
         try:
-            # Parse optional trigger
+            # Parse optional trigger (see api_rules_create for why from_dict).
             trigger = None
             if "trigger" in data:
-                trigger_data = data["trigger"]
-                trigger = Trigger(
-                    type=TriggerType(trigger_data.get("type", "input_change")),
-                    sink_id=trigger_data["sink_id"],
-                    input_id=trigger_data["input_id"],
-                    comparison=ComparisonOp(trigger_data.get("comparison", "changed_to")),
-                    value=trigger_data.get("value", True),
-                )
+                trigger = Trigger.from_dict(data["trigger"])
 
             # Parse optional actions
             actions = None
             if "actions" in data:
-                actions = []
-                for action_data in data["actions"]:
-                    actions.append(Action(
-                        type=ActionType(action_data["type"]),
-                        target_id=action_data["target_id"],
-                        control_id=action_data.get("control_id"),
-                        value=action_data.get("value"),
-                    ))
+                actions = [Action.from_dict(action_data) for action_data in data["actions"]]
 
             # Update rule
             updated_rule = rule_engine.update_rule(
@@ -2034,7 +2029,8 @@ def create_app(
             except Exception as e:
                 return jsonify({"error": f"Invalid step: {e}"}), 400
 
-        seq = sequence_manager.create(
+        seq = run_on_loop(
+            sequence_manager.create,
             name=data["name"],
             steps=steps,
             enabled=data.get("enabled", True),
@@ -2070,7 +2066,8 @@ def create_app(
                 except Exception as e:
                     return jsonify({"error": f"Invalid step: {e}"}), 400
 
-        seq = sequence_manager.update(
+        seq = run_on_loop(
+            sequence_manager.update,
             seq_id,
             name=data.get("name"),
             steps=steps,
@@ -2086,7 +2083,7 @@ def create_app(
         """Delete a sequence."""
         if not sequence_manager:
             return jsonify({"error": "Sequences not available"}), 503
-        if sequence_manager.delete(seq_id):
+        if run_on_loop(sequence_manager.delete, seq_id):
             return jsonify({"status": "ok"})
         return jsonify({"error": "Not found"}), 404
 

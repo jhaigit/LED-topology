@@ -69,6 +69,9 @@ class Sequence:
     last_started: float | None = field(default=None, repr=False)
     _task: asyncio.Task | None = field(default=None, repr=False)
     _pause_event: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    # Incremented on every (re)start so a cancelled prior run can tell it is no
+    # longer the current run and must not clobber shared state in its finally.
+    _run_generation: int = field(default=0, repr=False)
 
     def __post_init__(self) -> None:
         self._pause_event.set()  # not paused by default
@@ -224,7 +227,9 @@ class SequenceManager:
         seq.current_step = 0
         seq.last_started = time.time()
         seq._pause_event.set()
-        seq._task = asyncio.create_task(self._run(seq))
+        seq._run_generation += 1
+        generation = seq._run_generation
+        seq._task = asyncio.create_task(self._run(seq, generation))
         logger.info(f"Started sequence: {seq.name}")
         return True
 
@@ -263,7 +268,7 @@ class SequenceManager:
         seq.state = SequenceState.STOPPED
         seq._pause_event.set()  # unblock any paused wait
 
-    async def _run(self, seq: Sequence) -> None:
+    async def _run(self, seq: Sequence, generation: int) -> None:
         """Execute all steps in a sequence, optionally looping."""
         try:
             while True:
@@ -314,9 +319,15 @@ class SequenceManager:
         except asyncio.CancelledError:
             pass
         finally:
-            seq.state = SequenceState.STOPPED
-            seq._task = None
-            logger.info(f"Sequence finished: {seq.name} (ran {seq.run_count} times)")
+            # Only tear down shared state if we are still the current run. A
+            # restart (start_sequence on an already-running sequence) cancels
+            # this task and spins up a new one with a higher generation; without
+            # this guard our late-delivered CancelledError would stop the new
+            # run by resetting its state to STOPPED.
+            if seq._run_generation == generation:
+                seq.state = SequenceState.STOPPED
+                seq._task = None
+                logger.info(f"Sequence finished: {seq.name} (ran {seq.run_count} times)")
 
     async def stop_all(self) -> None:
         """Stop all running sequences."""

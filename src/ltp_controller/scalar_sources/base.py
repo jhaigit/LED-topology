@@ -317,7 +317,7 @@ class ScalarSource(ABC):
 
         # Close data senders
         for sender in self._data_senders.values():
-            await sender.close()
+            await sender.stop()
         self._data_senders.clear()
 
         logger.info(f"Scalar source stopped: {self._config.name}")
@@ -392,7 +392,7 @@ class ScalarSource(ABC):
 
         for stream_id, sender in list(self._data_senders.items()):
             try:
-                await sender.send(packet_bytes)
+                sender.send_bytes(packet_bytes)
             except Exception as e:
                 logger.error(f"Send error for stream {stream_id}: {e}")
 
@@ -431,7 +431,7 @@ class ScalarSource(ABC):
         }
         return capability_response(message.seq, device_info)
 
-    def _handle_subscribe(self, message: Any) -> Any:
+    async def _handle_subscribe(self, message: Any) -> Any:
         """Handle subscribe request."""
         from libltp import Message, MessageType
         from libltp.transport import DataSender
@@ -450,8 +450,19 @@ class ScalarSource(ABC):
 
         stream_id = str(uuid4())
 
-        # Create data sender
+        # Create and start the data sender. Without start() the sender has no
+        # transport and every send_bytes() would raise.
         sender = DataSender(host, port)
+        try:
+            await sender.start()
+        except Exception as e:
+            logger.error(f"Failed to start data sender for {host}:{port}: {e}")
+            return Message(
+                MessageType.SUBSCRIBE_RESPONSE,
+                message.seq,
+                status="error",
+                error=f"Failed to start sender: {e}",
+            )
         self._data_senders[stream_id] = sender
 
         logger.info(f"Subscriber added: {host}:{port} (stream={stream_id})")

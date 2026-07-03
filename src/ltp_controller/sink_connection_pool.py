@@ -113,7 +113,15 @@ class SinkConnectionPool:
             asyncio.create_task(self._disconnect_from_sink(sink.id))
 
     async def _connect_to_sink(self, sink: DeviceState) -> None:
-        """Establish a connection to a sink."""
+        """Establish a connection to a sink.
+
+        The TCP connect itself is performed *outside* the pool lock: it is a
+        network operation that can block for seconds (even with the connect
+        timeout), and holding the global lock across it would serialize every
+        other sink's requests and stall pool.stop(). The lock is only taken to
+        read/mutate the connections dict, with a re-check after connecting so a
+        concurrent connect doesn't leave a duplicate.
+        """
         sink_id = sink.id
 
         async with self._lock:
@@ -128,26 +136,34 @@ class SinkConnectionPool:
             if not sink.online:
                 return
 
-            try:
-                client = ControlClient(
-                    sink.host,
-                    sink.port,
-                    handler=lambda msg: self._handle_message(sink_id, msg),
-                )
-                await client.connect()
+        # Connect without holding the pool lock.
+        client = ControlClient(
+            sink.host,
+            sink.port,
+            handler=lambda msg: self._handle_message(sink_id, msg),
+        )
+        try:
+            await client.connect()
+        except Exception as e:
+            logger.warning(f"Pool: Failed to connect to sink {sink.name}: {e}")
+            return
 
-                conn = PooledConnection(
-                    sink_id=sink_id,
-                    client=client,
-                    host=sink.host,
-                    port=sink.port,
-                    connected=True,
-                )
-                self._connections[sink_id] = conn
-                logger.info(f"Pool: Connected to sink {sink.name} ({format_address_port(sink.host, sink.port)})")
+        async with self._lock:
+            # Another connect may have won the race while we were handshaking.
+            existing = self._connections.get(sink_id)
+            if existing and existing.connected and existing.client.is_connected:
+                await client.close()
+                return
 
-            except Exception as e:
-                logger.warning(f"Pool: Failed to connect to sink {sink.name}: {e}")
+            conn = PooledConnection(
+                sink_id=sink_id,
+                client=client,
+                host=sink.host,
+                port=sink.port,
+                connected=True,
+            )
+            self._connections[sink_id] = conn
+            logger.info(f"Pool: Connected to sink {sink.name} ({format_address_port(sink.host, sink.port)})")
 
     async def _disconnect_from_sink(self, sink_id: str) -> None:
         """Disconnect from a sink."""
