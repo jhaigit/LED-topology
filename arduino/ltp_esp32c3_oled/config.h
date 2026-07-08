@@ -30,8 +30,15 @@
 #define MDNS_SERVICE_NAME       "_ltp"  // mDNS service type
 #define MDNS_PROTOCOL           "_tcp"
 
-// Protocol version string
-#define PROTOCOL_VERSION        "0.1"
+// Protocol version string (0.2 adds Layer 2 device-auth claim protocol)
+#define PROTOCOL_VERSION        "0.2"
+
+// Telnet console (port 23). Off by default: it is an unauthenticated shell
+// on the LAN (proposal §Problem). Define LTP_ENABLE_TELNET=1 at build time
+// to restore it for debugging.
+#ifndef LTP_ENABLE_TELNET
+#define LTP_ENABLE_TELNET       0
+#endif
 
 // ============================================================================
 // Device Information
@@ -67,7 +74,7 @@
 
 #define NVS_NAMESPACE           "ltp_oled"
 #define CONFIG_MAGIC            0x4C544F    // "LTO"
-#define CONFIG_VERSION          1
+#define CONFIG_VERSION          2           // v2: adds Layer 2 auth PSK
 
 // ============================================================================
 // Serial Terminal
@@ -122,6 +129,11 @@ struct DeviceConfig {
     uint8_t localMode;
     char timezone[48];
     uint16_t cycleTime;         // Seconds per mode when cycling
+    // Layer 2 device-auth (proposal §2). authEnabled + 16-byte PSK. When
+    // disabled the device is Level 0 (open), exactly as before pairing.
+    uint8_t authEnabled;        // 0 = open, 1 = require claim
+    uint8_t authPsk[16];        // pre-shared key (set over USB console)
+    uint8_t authReadOpen;       // 1 = allow reads without a claim (default)
 };
 
 #endif // ESP32C3_OLED_CONFIG_H

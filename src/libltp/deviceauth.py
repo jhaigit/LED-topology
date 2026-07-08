@@ -68,9 +68,52 @@ class DeviceAuthError(Exception):
         super().__init__(message)
 
 
+# Field separator for the canonical MAC input. Chosen as an ASCII control
+# char (Unit Separator) so it cannot appear in JSON string values / numbers.
+_SEP = "\x1f"
+
+
+def _canon_value(value: Any) -> str:
+    """Deterministic string encoding of a JSON value for MAC input.
+
+    Kept trivially reproducible on a constrained MCU (ArduinoJson): sorted
+    object keys, arrays in order, booleans as true/false, integral numbers
+    as plain integers, other floats via %g. This is NOT canonical JSON — it
+    is a keyed-MAC preimage, so encoding ambiguity is not a forgery risk for
+    a party without the session key, and the controller only ever emits one
+    form per message.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else repr(value)
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return "null"
+    if isinstance(value, dict):
+        parts = [f"{k}={_canon_value(value[k])}" for k in sorted(value.keys())]
+        return "{" + ",".join(parts) + "}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_canon_value(v) for v in value) + "]"
+    return str(value)
+
+
 def _canonical(payload: dict[str, Any]) -> bytes:
-    """Canonical JSON for MAC computation: sorted keys, no whitespace."""
-    return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    """Flat, delimiter-joined MAC preimage: type | token | n | canon(body).
+
+    A device rebuilds this from the parsed message without needing to
+    reproduce Python's JSON number/whitespace formatting (see
+    arduino/.../device_auth.h for the C twin)."""
+    parts = [
+        str(payload["type"]),
+        str(payload["token"]),
+        str(payload["n"]),
+        _canon_value(payload["body"]),
+    ]
+    return _SEP.join(parts).encode()
 
 
 def compute_proof(psk: bytes, nonce: bytes, device_id: str, controller_id: str) -> str:
