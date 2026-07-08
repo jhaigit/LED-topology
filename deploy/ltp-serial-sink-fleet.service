@@ -1,0 +1,22 @@
+[Unit]
+Description=LTP Serial Sink fleet (one network sink per attached LTP device)
+Documentation=https://github.com/jhaigit/LED-topology
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ltp
+Group=ltp
+# dialout grants /dev/ttyUSB* access on Debian/Ubuntu (uucp on Arch)
+SupplementaryGroups=dialout
+ExecStart=/home/ltp/LED-topology/venv/bin/ltp-serial-sink --fleet -c /home/ltp/serial-fleet.yaml
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target

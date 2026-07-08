@@ -1,0 +1,23 @@
+[Unit]
+Description=LTP Controller (web UI, discovery, routing)
+Documentation=https://github.com/jhaigit/LED-topology
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ltp
+Group=ltp
+ExecStart=/home/ltp/LED-topology/venv/bin/ltp-controller -c /home/ltp/controller.yaml
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the controller needs no privileges. It writes only its config
+# dir (session secret key + auto-generated TLS cert live there).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ltp/.config/ltp
+
+[Install]
+WantedBy=multi-user.target
