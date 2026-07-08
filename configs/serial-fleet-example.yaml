@@ -1,0 +1,48 @@
+# LTP Serial Sink — fleet mode example
+#
+# Run with:  ltp-serial-sink --fleet -c serial-fleet.yaml
+# (or just `ltp-serial-sink --fleet` for the defaults shown under scan:)
+#
+# Fleet mode probes matching serial ports with the v2 handshake and runs one
+# network sink per LTP device found. Names, descriptions, pixel counts, and
+# matrix dimensions come from the devices themselves unless overridden below.
+# Each device is only opened once per adoption (opening a port resets AVR
+# boards), and device UUIDs are stable across restarts and re-plugs.
+
+fleet:
+  scan:
+    # Port paths to consider (globs). Prefer /dev/serial/by-id/* when you
+    # want stable per-adapter paths; plain /dev/ttyUSB* also works.
+    include:
+      - "/dev/ttyUSB*"
+      - "/dev/ttyACM*"
+    exclude: []
+
+    # Only probe adapters with these USB VID:PID pairs, so probe bytes are
+    # never written at unrelated serial devices (GPS, modems, ...).
+    # Empty list = probe everything matched by include.
+    usb_ids:
+      - "1a86:7523"   # CH340 (Nano clones)
+      - "2341:0043"   # Arduino Uno R3
+      # - "10c4:ea60" # CP2102
+
+    baudrate: 115200
+    probe_timeout: 4.0    # old-bootloader Nanos need >= 4s
+    rescan_interval: 10.0 # seconds; 0 disables hotplug rescanning
+
+  # Optional per-device overrides. First match wins. Match keys AND together:
+  #   usb_serial  — USB adapter serial number (most stable; CH340 clones
+  #                 often have none — use device_name for those)
+  #   device_name — exact name the device reports in its INFO response
+  #   port        — glob on the port path
+  devices:
+    - match: { usb_serial: "A5069RR4" }
+      name: "Hall Strip"
+      description: "Under-cabinet run, 160px"
+
+    - match: { device_name: "ltp-328p-dual" }
+      name: "Workbench Matrix"
+
+    # Ignore a device without unplugging it:
+    # - match: { port: "/dev/ttyUSB3" }
+    #   enabled: false

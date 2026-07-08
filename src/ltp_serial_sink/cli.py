@@ -87,6 +87,13 @@ def parse_args() -> argparse.Namespace:
         help="Logging level (default: info)",
     )
     parser.add_argument(
+        "--fleet",
+        action="store_true",
+        help="Fleet mode: probe serial ports for LTP devices and run one sink "
+        "per device found (names/descriptions come from the devices; see "
+        "configs/serial-fleet-example.yaml for scan filters and overrides)",
+    )
+    parser.add_argument(
         "--list-ports",
         action="store_true",
         help="List available serial ports and exit",
@@ -127,6 +134,7 @@ def load_config(path: Path) -> SerialSinkConfig:
         device = data["device"]
         if "id" in device and device["id"] != "auto":
             from uuid import UUID
+
             config_dict["device_id"] = UUID(device["id"])
         if "name" in device:
             config_dict["name"] = device["name"]
@@ -194,7 +202,7 @@ def config_from_args(args: argparse.Namespace) -> SerialSinkConfig:
         dimensions=dimensions,
         color_format=color_map.get(args.color_format, ColorFormat.RGB),
         debug=args.debug,
-        no_serial=getattr(args, 'no_serial', False),
+        no_serial=getattr(args, "no_serial", False),
     )
 
 
@@ -285,6 +293,46 @@ def test_connection(config: SerialSinkConfig) -> bool:
     return True
 
 
+async def run_fleet(fleet_config) -> None:
+    """Run fleet mode until SIGINT/SIGTERM.
+
+    Uses loop.add_signal_handler (not signal.signal): a plain signal handler
+    only queues the Event wakeup, and PEP 475 resumes the interrupted
+    epoll_wait without draining the ready queue — the loop would sleep until
+    its next timer. run_sink tolerates that because it polls every 100ms;
+    the fleet has no such heartbeat."""
+    from ltp_serial_sink.fleet import SerialFleet
+
+    fleet = SerialFleet(fleet_config)
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+
+    def request_shutdown(sig_name: str) -> None:
+        logging.getLogger(__name__).info(f"Received {sig_name}, initiating shutdown...")
+        shutdown_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, request_shutdown, sig.name)
+
+    try:
+        fleet_task = asyncio.create_task(fleet.run())
+        shutdown_task = asyncio.create_task(shutdown_event.wait())
+        done, pending = await asyncio.wait(
+            [fleet_task, shutdown_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+    finally:
+        await fleet.stop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.remove_signal_handler(sig)
+
+
 async def run_sink(config: SerialSinkConfig) -> None:
     """Run the sink with robust signal handling."""
     sink = SerialSink(config)
@@ -349,11 +397,38 @@ def main() -> int:
         list_ports()
         return 0
 
-    # Load configuration
+    # Fleet mode: --fleet flag, or a config file with fleet/devices keys.
+    raw_config: dict = {}
     if args.config:
         if not args.config.exists():
             print(f"Error: Config file not found: {args.config}", file=sys.stderr)
             return 1
+        with open(args.config) as f:
+            raw_config = yaml.safe_load(f) or {}
+
+    if args.fleet or "fleet" in raw_config or "devices" in raw_config:
+        from ltp_serial_sink.fleet import load_fleet_config
+
+        fleet_config = load_fleet_config(raw_config)
+        scan = fleet_config.scan
+        print("Starting LTP Serial Sink fleet")
+        print(f"  Scanning: {', '.join(scan.include)}")
+        if scan.usb_ids:
+            print(f"  USB filter: {', '.join(scan.usb_ids)}")
+        print(f"  Probe timeout: {scan.probe_timeout}s")
+        if scan.rescan_interval > 0:
+            print(f"  Rescan interval: {scan.rescan_interval}s (hotplug enabled)")
+        else:
+            print("  Rescan: disabled (single scan at startup)")
+        if fleet_config.devices:
+            print(f"  Device overrides: {len(fleet_config.devices)}")
+        print()
+        asyncio.run(run_fleet(fleet_config))
+        print("Shutdown complete")
+        return 0
+
+    # Load configuration
+    if args.config:
         config = load_config(args.config)
         # Override debug from command line
         if args.debug:
