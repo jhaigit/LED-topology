@@ -154,6 +154,13 @@ def load_config(path: Path) -> SerialSinkConfig:
         if "max_refresh_hz" in display:
             config_dict["max_refresh_hz"] = display["max_refresh_hz"]
 
+    if "auth" in data:
+        auth = data["auth"]
+        if "psk" in auth:
+            config_dict["auth_psk"] = auth["psk"]
+        if "read_open" in auth:
+            config_dict["auth_read_open"] = auth["read_open"]
+
     if "serial" in data:
         serial = data["serial"]
         if "port" in serial:
@@ -430,9 +437,14 @@ def main() -> int:
     # Load configuration
     if args.config:
         config = load_config(args.config)
-        # Override debug from command line
+        # Apply command-line overrides on top of the file.
+        overrides = {}
         if args.debug:
-            config = SerialSinkConfig(**{**config.model_dump(), "debug": True})
+            overrides["debug"] = True
+        if args.no_serial:
+            overrides["no_serial"] = True
+        if overrides:
+            config = SerialSinkConfig(**{**config.model_dump(), **overrides})
     else:
         config = config_from_args(args)
 

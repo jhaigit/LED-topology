@@ -41,6 +41,12 @@ fleet:
     - match: { usb_serial: "A5069RR4" }
       name: "Hall Strip"
       description: "Under-cabinet run, 160px"
+      # Layer 2 anti-hijack: the bridge enforces a claim + per-message MAC on
+      # the network side, so only a controller holding this 16-byte (32-hex)
+      # key can command the strip. The AVR itself needs no changes. Put the
+      # same key in the controller keystore (~/.config/ltp/keys.yaml) under
+      # this device's UUID. Generate one with: openssl rand -hex 16
+      # auth_psk: "00112233445566778899aabbccddeeff"
 
     # Two boards with identical firmware name and indistinguishable USB
     # adapters (no serial, same VID:PID): tell them apart by what they

@@ -72,6 +72,12 @@ class SerialSinkConfig(BaseModel):
     # Test mode
     no_serial: bool = False  # Run without serial device (network test only)
 
+    # Layer 2 device auth (proposal §2). psk is a 32-hex-char (16-byte) key;
+    # empty = Level 0 (open). read_open lets discovery/dashboards read
+    # without a claim.
+    auth_psk: str = ""
+    auth_read_open: bool = True
+
     model_config = {"arbitrary_types_allowed": True}
 
 
@@ -100,6 +106,16 @@ class SerialSink:
         self._control_server: ControlServer | None = None
         self._data_receiver: DataReceiver | None = None
         self._stream_manager = StreamManager()
+
+        # Layer 2 device-auth guard (inert unless a PSK is configured).
+        from libltp.deviceauth import DeviceAuthGuard
+
+        psk = bytes.fromhex(self.config.auth_psk) if self.config.auth_psk else None
+        self._auth_guard = DeviceAuthGuard(
+            psk=psk,
+            device_id=str(self.config.device_id),
+            read_open=self.config.auth_read_open,
+        )
 
         # Serial renderer (v2 protocol) - only if not in no_serial mode
         if self.config.no_serial:
@@ -332,9 +348,28 @@ class SerialSink:
                 self._loop,
             )
 
-    def _handle_message(self, message: Message) -> Message | None:
-        """Handle incoming control channel messages."""
+    def _handle_message(self, message: Message, conn: Any = None) -> Message | None:
+        """Handle incoming control channel messages.
+
+        conn is the ControlConnection (present because the guard needs the
+        peer IP for data-plane binding). The auth guard runs first: it
+        consumes handshake messages, rejects unauthorized privileged
+        commands, and strips the auth envelope from authorized ones."""
         logger.debug(f"Handling message: {message.type}")
+
+        peer_ip = getattr(conn, "peer_ip", None)
+        guard_response = self._auth_guard.handle_message(message, peer_ip)
+        if guard_response is not None:
+            return guard_response
+
+        # Data-plane binding: an authorized stream_setup fixes which source IP
+        # the UDP receiver will accept frames from (the claim owner's peer).
+        if (
+            message.type == MessageType.STREAM_SETUP
+            and self._auth_guard.enabled
+            and self._data_receiver is not None
+        ):
+            self._data_receiver.bind_source(self._auth_guard.owner_ip)
 
         if message.type == MessageType.CAPABILITY_REQUEST:
             return self._handle_capability_request(message)
@@ -373,6 +408,7 @@ class SerialSink:
             "max_refresh_hz": self.config.max_refresh_hz,
             "protocol_version": "0.1",
             "controls": self._controls.to_list(),
+            "auth": self._auth_guard.auth_info(),
             "backend": {
                 "type": "serial_v2" if not self.config.no_serial else "no_serial",
                 "port": self.config.port,
@@ -883,6 +919,7 @@ class SerialSink:
             color_format=self.config.color_format,
             max_rate=self.config.max_refresh_hz,
             has_controls=True,
+            auth="siphash" if self._auth_guard.enabled else "none",
         )
         await self._advertiser.start()
 

@@ -171,6 +171,16 @@ class MessageType(str, Enum):
     PIXEL_READ = "pixel_read"
     PIXEL_READ_RESPONSE = "pixel_read_response"
 
+    # Device auth: claim / anti-hijack (protocol 0.2, proposal Layer 2)
+    AUTH_CHALLENGE_REQUEST = "auth_challenge_request"
+    AUTH_CHALLENGE = "auth_challenge"
+    CLAIM = "claim"
+    CLAIM_RESPONSE = "claim_response"
+    CLAIM_RENEW = "claim_renew"
+    CLAIM_RENEW_RESPONSE = "claim_renew_response"
+    RELEASE = "release"
+    RELEASE_RESPONSE = "release_response"
+
     # Error
     ERROR = "error"
 
@@ -194,6 +204,8 @@ class ErrorCode(IntEnum):
     INTERNAL = 5
     INVALID_VALUE = 6
     READONLY = 7
+    UNAUTHORIZED = 8
+    LEASE_HELD = 9
 
 
 class MatrixOrigin(str, Enum):
@@ -413,7 +425,7 @@ SERVICE_TYPE_SOURCE = "_ltp-source._tcp.local."
 SERVICE_TYPE_CONTROLLER = "_ltp-controller._tcp.local."
 
 # Protocol constants
-PROTOCOL_VERSION = "0.1"
+PROTOCOL_VERSION = "0.2"  # 0.2: device-auth claim protocol (Layer 2)
 PACKET_MAGIC = 0x4C54
 # Max UDP packet size - 8KB works on most local networks
 MAX_PACKET_SIZE = 8192

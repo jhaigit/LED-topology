@@ -403,8 +403,15 @@ def main() -> int:
         health_check_interval=config.get("discovery", {}).get("health_check_interval", 10.0),
     )
 
+    # Load the device keystore (Layer 2 PSKs) and wire it into the pool so
+    # sinks that advertise auth get claimed on connect.
+    from ltp_controller.keystore import KeyStore
+
+    keystore = KeyStore()
+    keystore.load()
+
     # Create shared connection pool for sinks
-    connection_pool = SinkConnectionPool(controller)
+    connection_pool = SinkConnectionPool(controller, keystore=keystore)
 
     # Wire pool to controller
     controller.set_connection_pool(connection_pool)

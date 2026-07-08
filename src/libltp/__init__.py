@@ -30,6 +30,13 @@ from libltp.controls import (
     control_from_dict,
     controls_from_list,
 )
+from libltp.deviceauth import (
+    ClaimSession,
+    DeviceAuthError,
+    DeviceAuthGuard,
+    PRIVILEGED_TYPES,
+)
+from libltp.siphash import siphash24, siphash24_bytes, siphash24_hex
 from libltp.discovery import (
     ControllerAdvertiser,
     DiscoveredDevice,
@@ -209,6 +216,13 @@ __all__ = [
     "ServiceAdvertiser",
     "ServiceBrowser",
     "SinkAdvertiser",
+    "ClaimSession",
+    "DeviceAuthError",
+    "DeviceAuthGuard",
+    "PRIVILEGED_TYPES",
+    "siphash24",
+    "siphash24_bytes",
+    "siphash24_hex",
     "SourceAdvertiser",
     # Transport
     "ControlClient",

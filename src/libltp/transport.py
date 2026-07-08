@@ -1,6 +1,7 @@
 """TCP and UDP transport for LTP protocol."""
 
 import asyncio
+import inspect
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Union
@@ -42,11 +43,26 @@ class ControlConnection:
         self._closed = False
         self._peer: tuple | None = None
 
+        # Handlers may take (message) or (message, connection) — the latter
+        # lets device-auth guards learn the peer for data-plane binding.
+        self._handler_wants_conn = False
+        if handler is not None:
+            try:
+                params = inspect.signature(handler).parameters
+                self._handler_wants_conn = len(params) >= 2
+            except (TypeError, ValueError):
+                pass
+
         # Get peer info
         try:
             self._peer = writer.get_extra_info("peername")
         except Exception:
             pass
+
+    @property
+    def peer_ip(self) -> str | None:
+        """Peer IP address without port (None if unknown)."""
+        return self._peer[0] if self._peer else None
 
     @property
     def peer(self) -> str:
@@ -98,7 +114,10 @@ class ControlConnection:
                 if self.handler:
                     try:
                         # Support both sync and async handlers
-                        result = self.handler(message)
+                        if self._handler_wants_conn:
+                            result = self.handler(message, self)
+                        else:
+                            result = self.handler(message)
                         if asyncio.iscoroutine(result):
                             response = await result
                         else:
@@ -197,7 +216,9 @@ class ControlServer:
         """Start the server."""
         sock = create_dual_stack_tcp_socket(self.host, self.port)
         self._server = await asyncio.start_server(self._handle_client, sock=sock)
-        logger.info(f"Control server listening on {format_address_port(self.host, self.actual_port)}")
+        logger.info(
+            f"Control server listening on {format_address_port(self.host, self.actual_port)}"
+        )
 
     async def stop(self) -> None:
         """Stop the server."""
@@ -269,8 +290,10 @@ class ControlClient:
             future = self._pending.pop(message.seq)
             future.set_result(message)
         else:
-            logger.debug(f"Unsolicited/unmatched message: type={message.type.value} seq={message.seq} "
-                         f"pending_seqs={list(self._pending.keys())}")
+            logger.debug(
+                f"Unsolicited/unmatched message: type={message.type.value} seq={message.seq} "
+                f"pending_seqs={list(self._pending.keys())}"
+            )
             if self.handler:
                 self.handler(message)
 
@@ -389,15 +412,15 @@ class DataSender:
                 + pixels[:, 1].astype(np.uint16) * 150
                 + pixels[:, 2].astype(np.uint16) * 29
             ) >> 8
-            pixels = np.packbits((luma >= 128).astype(np.uint8), bitorder='big')
+            pixels = np.packbits((luma >= 128).astype(np.uint8), bitorder="big")
 
         if color_format == ColorFormat.MONO_PACKED:
             # MONO_PACKED data is tiny (e.g. 360 bytes for 2880 pixels).
             # Chunking packed bit arrays by pixel offset is not supported;
             # the entire frame always fits in one UDP packet.
-            assert len(pixels) <= MAX_PACKET_SIZE, (
-                f"MONO_PACKED frame too large: {len(pixels)} bytes"
-            )
+            assert (
+                len(pixels) <= MAX_PACKET_SIZE
+            ), f"MONO_PACKED frame too large: {len(pixels)} bytes"
             packet = DataPacket(
                 sequence=self._sequence,
                 color_format=color_format,
@@ -441,9 +464,22 @@ class DataReceiver:
         self.host = host if host is not None else dual_stack_bind_address()
         self.port = port
         self.handler: DataHandler | None = None
+        # When set (device-auth data-plane binding, proposal §2.6), only
+        # datagrams from these source IPs are processed; all others are
+        # dropped. None = accept from anyone (Level 0 behavior).
+        self.allowed_sources: set[str] | None = None
+        self._drop_logged: set[str] = set()
 
         self._transport: asyncio.DatagramTransport | None = None
         self._protocol: "DataReceiverProtocol | None" = None
+
+    def bind_source(self, ip: str | None) -> None:
+        """Restrict accepted datagrams to one source IP (None clears)."""
+        if ip is None:
+            self.allowed_sources = None
+        else:
+            self.allowed_sources = {ip, normalize_ipv6(ip)}
+        self._drop_logged.clear()
 
     @property
     def actual_port(self) -> int:
@@ -460,20 +496,41 @@ class DataReceiver:
 
         class DataReceiverProtocol(asyncio.DatagramProtocol):
             def datagram_received(self, data: bytes, addr: tuple) -> None:
+                allowed = receiver.allowed_sources
+                if allowed is not None:
+                    src = addr[0]
+                    # Dual-stack sockets report IPv4 peers as ::ffff:a.b.c.d
+                    if src.startswith("::ffff:"):
+                        src = src[7:]
+                    if src not in allowed and addr[0] not in allowed:
+                        if src not in receiver._drop_logged:
+                            receiver._drop_logged.add(src)
+                            logger.warning(
+                                f"Dropping pixel data from unbound source {src} "
+                                "(stream is bound to its owner)"
+                            )
+                        return
                 try:
                     packet = DataPacket.from_bytes(data)
                     if receiver.handler:
                         receiver.handler(packet)
                 except ProtocolError as e:
-                    logger.warning(f"Invalid packet from {format_address_port(addr[0], addr[1])}: {e}")
+                    logger.warning(
+                        f"Invalid packet from {format_address_port(addr[0], addr[1])}: {e}"
+                    )
                 except Exception as e:
-                    logger.error(f"Error processing packet from {format_address_port(addr[0], addr[1])}: {e}")
+                    logger.error(
+                        f"Error processing packet from {format_address_port(addr[0], addr[1])}: {e}"
+                    )
 
         sock = create_dual_stack_udp_socket(self.host, self.port)
         self._transport, self._protocol = await loop.create_datagram_endpoint(
-            DataReceiverProtocol, sock=sock,
+            DataReceiverProtocol,
+            sock=sock,
         )
-        logger.info(f"Data receiver listening on {format_address_port(self.host, self.actual_port)}")
+        logger.info(
+            f"Data receiver listening on {format_address_port(self.host, self.actual_port)}"
+        )
 
     async def stop(self) -> None:
         """Stop the receiver."""
