@@ -84,7 +84,15 @@ class SerialSink:
     - Exposes device controls (brightness, gamma) via the network protocol
     """
 
-    def __init__(self, config: SerialSinkConfig | None = None):
+    def __init__(
+        self,
+        config: SerialSinkConfig | None = None,
+        renderer: V2Renderer | None = None,
+    ):
+        """renderer: an optional pre-opened V2Renderer to adopt. Used by fleet
+        mode, which probes the device during discovery — reusing that
+        connection avoids a second port open (each open resets AVR boards via
+        DTR and costs the bootloader delay)."""
         self.config = config or SerialSinkConfig()
 
         # Network components
@@ -96,6 +104,8 @@ class SerialSink:
         # Serial renderer (v2 protocol) - only if not in no_serial mode
         if self.config.no_serial:
             self._renderer = None
+        elif renderer is not None:
+            self._renderer = renderer
         else:
             renderer_config = V2RendererConfig(
                 port=self.config.port,
@@ -185,8 +195,12 @@ class SerialSink:
                     step = 0.1
                 else:
                     value = float(current_value) if current_value is not None else 0.0
-                    min_val = float(device_ctrl.min_value) if device_ctrl.min_value is not None else 0.0
-                    max_val = float(device_ctrl.max_value) if device_ctrl.max_value is not None else 255.0
+                    min_val = (
+                        float(device_ctrl.min_value) if device_ctrl.min_value is not None else 0.0
+                    )
+                    max_val = (
+                        float(device_ctrl.max_value) if device_ctrl.max_value is not None else 255.0
+                    )
                     step = 1.0
 
                 self._controls.register(
@@ -234,7 +248,9 @@ class SerialSink:
                     )
                 )
 
-        logger.info(f"Device controls registered: {[c.id for c in self._controls._controls.values()]}")
+        logger.info(
+            f"Device controls registered: {[c.id for c in self._controls._controls.values()]}"
+        )
 
     def _update_from_device(self) -> None:
         """Update configuration from connected device."""
@@ -273,9 +289,8 @@ class SerialSink:
             self._topology = create_linear_topology(self._dimensions[0])
         else:
             from libltp import create_matrix_topology
-            self._topology = create_matrix_topology(
-                self._dimensions[0], self._dimensions[1]
-            )
+
+            self._topology = create_matrix_topology(self._dimensions[0], self._dimensions[1])
             self._device_type = DeviceType.MATRIX
 
         # Initialize pixel buffer
@@ -309,6 +324,7 @@ class SerialSink:
         # Broadcast to connected clients
         if self._control_server:
             from libltp import input_event
+
             msg = input_event(input_id, input_name, input_type, value, timestamp)
             # Run broadcast in the event loop
             asyncio.run_coroutine_threadsafe(
@@ -575,7 +591,11 @@ class SerialSink:
 
         # Update packet statistics
         pixel_count = packet.pixel_count
-        packet_bytes = len(packet.pixel_data) * packet.pixel_data.itemsize if hasattr(packet.pixel_data, 'itemsize') else len(packet.pixel_data)
+        packet_bytes = (
+            len(packet.pixel_data) * packet.pixel_data.itemsize
+            if hasattr(packet.pixel_data, "itemsize")
+            else len(packet.pixel_data)
+        )
         self._packet_count += 1
         self._packet_bytes += packet_bytes
 
@@ -627,7 +647,9 @@ class SerialSink:
         with self._render_lock:
             if self._pending_frame is not None:
                 self._frames_dropped += 1
-                logger.debug(f"Dropping frame (serial backlog), total dropped: {self._frames_dropped}")
+                logger.debug(
+                    f"Dropping frame (serial backlog), total dropped: {self._frames_dropped}"
+                )
 
             self._pending_frame = pixels.copy()
             self._render_event.set()
@@ -654,7 +676,9 @@ class SerialSink:
             if self.config.no_serial:
                 # No serial mode - just count frames
                 self._frames_rendered += 1
-                logger.info(f"[NO SERIAL] Frame {self._frames_rendered}: {len(frame)} pixels received")
+                logger.info(
+                    f"[NO SERIAL] Frame {self._frames_rendered}: {len(frame)} pixels received"
+                )
             elif self._renderer and self._renderer.is_connected():
                 try:
                     bytes_sent = self._renderer.render(frame)
@@ -687,6 +711,7 @@ class SerialSink:
         """Broadcast serial connection state change to connected controllers."""
         if self._control_server:
             from libltp import control_changed
+
             msg = control_changed({"__serial_connected__": connected})
             await self._control_server.broadcast(msg)
 
@@ -795,11 +820,16 @@ class SerialSink:
         else:
             logger.info(f"Starting serial sink: {self.config.name} (v2 protocol)")
 
-        # Try to open serial port (unless no_serial mode)
+        # Try to open serial port (unless no_serial mode). An adopted
+        # renderer (fleet mode) is already open — don't reopen, which would
+        # reset the device a second time.
         if self.config.port and self._renderer is not None:
             try:
-                self._renderer.open()
-                logger.info(f"Serial device connected")
+                if self._renderer.is_connected():
+                    logger.info("Serial device adopted (already connected)")
+                else:
+                    self._renderer.open()
+                    logger.info(f"Serial device connected")
                 self._update_from_device()
             except Exception as e:
                 logger.warning(f"Could not open serial port: {e}")
@@ -825,7 +855,9 @@ class SerialSink:
                 (default_pixels, self.config.color_format.bytes_per_pixel),
                 dtype=np.uint8,
             )
-            logger.warning(f"No pixel count configured and device not connected, using default: {default_pixels}")
+            logger.warning(
+                f"No pixel count configured and device not connected, using default: {default_pixels}"
+            )
 
         # Start data receiver FIRST (must be ready before control server accepts connections)
         self._data_receiver = DataReceiver(port=self.config.data_port)
