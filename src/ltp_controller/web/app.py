@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 
+from ltp_controller import __version__
 from ltp_controller.controller import Controller
 from ltp_controller.input_manager import InputEventManager
 from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngine
@@ -18,6 +20,33 @@ from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager, VIRTUAL_SOURCE_TYPES
 
 logger = logging.getLogger(__name__)
+
+
+def _git_revision() -> str | None:
+    """Short git commit ID of the running checkout, or None when not running
+    from a git checkout (e.g. an installed wheel) or git is unavailable."""
+    try:
+        result = subprocess.run(
+            # --exclude '*' skips all tags so this always yields the bare
+            # short commit hash, with a -dirty suffix for local modifications.
+            [
+                "git",
+                "-C",
+                str(Path(__file__).parent),
+                "describe",
+                "--always",
+                "--dirty",
+                "--exclude",
+                "*",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None
 
 
 def create_app(
@@ -54,6 +83,12 @@ def create_app(
     app.config["event_loop"] = event_loop
     app.config["config_path"] = config_path
     app.config["scenes"] = {}  # Scene storage: {id: scene_dict}
+
+    git_revision = _git_revision()
+
+    @app.context_processor
+    def inject_version() -> dict[str, Any]:
+        return {"app_version": __version__, "git_revision": git_revision}
 
     # Helper to run async code from sync Flask handlers
     def run_async(coro: Any) -> Any:
