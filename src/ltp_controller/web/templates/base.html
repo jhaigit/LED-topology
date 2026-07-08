@@ -40,7 +40,7 @@
     </main>
 
     <footer class="footer">
-        <p>LED Topology Protocol Controller v0.1.0</p>
+        <p>LED Topology Protocol Controller v{{ app_version }}{% if git_revision %} ({{ git_revision }}){% endif %}</p>
     </footer>
 
     <!-- Confirm dialog (shared across all pages) -->
