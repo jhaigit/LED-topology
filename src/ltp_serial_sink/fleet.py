@@ -67,13 +67,28 @@ class DeviceMatch(BaseModel):
     usb_serial: str | None = None
     device_name: str | None = None  # exact match on device-reported name
     port: str | None = None  # fnmatch glob on the port path
+    # Device-reported geometry, for telling apart two boards with identical
+    # firmware name and indistinguishable USB adapters (no serial, same
+    # VID:PID): total pixel count and/or "WxH" / "N" dimensions string.
+    pixels: int | None = None
+    dimensions: str | None = None  # e.g. "16x10" (matrix) or "160" (strip)
 
-    def matches(self, candidate: "PortCandidate", reported_name: str) -> bool:
-        if self.usb_serial is None and self.device_name is None and self.port is None:
+    def matches(self, candidate: "PortCandidate", reported: "ReportedInfo") -> bool:
+        if (
+            self.usb_serial is None
+            and self.device_name is None
+            and self.port is None
+            and self.pixels is None
+            and self.dimensions is None
+        ):
             return False
         if self.usb_serial is not None and self.usb_serial != (candidate.usb_serial or ""):
             return False
-        if self.device_name is not None and self.device_name != reported_name:
+        if self.device_name is not None and self.device_name != reported.name:
+            return False
+        if self.pixels is not None and self.pixels != reported.pixels:
+            return False
+        if self.dimensions is not None and self.dimensions != reported.dimensions:
             return False
         if self.port is not None and not (
             fnmatch.fnmatch(candidate.path, self.port)
@@ -81,6 +96,32 @@ class DeviceMatch(BaseModel):
         ):
             return False
         return True
+
+
+@dataclass
+class ReportedInfo:
+    """What the device said about itself in the probe handshake."""
+
+    name: str = ""
+    pixels: int | None = None
+    dimensions: str | None = None  # "WxH" for matrices, "N" for strips
+
+    @classmethod
+    def from_device_info(cls, info: Any) -> "ReportedInfo":
+        if info is None:
+            return cls()
+        pixels = getattr(info, "total_pixels", None)
+        dimensions = None
+        if getattr(info, "is_matrix", False):
+            w, h = info.dimensions
+            dimensions = f"{w}x{h}"
+        elif pixels is not None:
+            dimensions = str(pixels)
+        return cls(
+            name=getattr(info, "device_name", "") or "",
+            pixels=pixels,
+            dimensions=dimensions,
+        )
 
 
 class DeviceOverride(BaseModel):
@@ -213,9 +254,11 @@ class SerialFleet:
 
     # -- configuration matching ------------------------------------------
 
-    def _override_for(self, candidate: PortCandidate, reported_name: str) -> DeviceOverride | None:
+    def _override_for(
+        self, candidate: PortCandidate, reported: ReportedInfo
+    ) -> DeviceOverride | None:
         for override in self.config.devices:
-            if override.match.matches(candidate, reported_name):
+            if override.match.matches(candidate, reported):
                 return override
         return None
 
@@ -249,9 +292,9 @@ class SerialFleet:
         return list(await asyncio.gather(*(probe_one(c) for c in candidates)))
 
     def _adopt(self, candidate: PortCandidate, renderer: V2Renderer) -> None:
-        info = renderer.device_info
-        reported_name = (info.device_name if info else "") or ""
-        override = self._override_for(candidate, reported_name)
+        reported = ReportedInfo.from_device_info(renderer.device_info)
+        reported_name = reported.name
+        override = self._override_for(candidate, reported)
 
         if override is not None and not override.enabled:
             logger.info(f"Port {candidate.path}: device disabled by config, skipping")

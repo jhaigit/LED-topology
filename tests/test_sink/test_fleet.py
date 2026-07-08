@@ -15,6 +15,7 @@ from ltp_serial_sink.fleet import (
     FleetConfig,
     FleetScanConfig,
     PortCandidate,
+    ReportedInfo,
     SerialFleet,
     enumerate_candidates,
     load_fleet_config,
@@ -125,30 +126,61 @@ def _cand(path="/dev/ttyUSB0", usb_serial=None):
     return PortCandidate(path=path, real_path=path, usb_serial=usb_serial)
 
 
+def _rep(name="", pixels=None, dimensions=None):
+    return ReportedInfo(name=name, pixels=pixels, dimensions=dimensions)
+
+
 class TestMatching:
     def test_usb_serial_match(self):
         m = DeviceMatch(usb_serial="X1")
-        assert m.matches(_cand(usb_serial="X1"), "any")
-        assert not m.matches(_cand(usb_serial="X2"), "any")
-        assert not m.matches(_cand(), "any")
+        assert m.matches(_cand(usb_serial="X1"), _rep("any"))
+        assert not m.matches(_cand(usb_serial="X2"), _rep("any"))
+        assert not m.matches(_cand(), _rep("any"))
 
     def test_device_name_match(self):
         m = DeviceMatch(device_name="ltp-328p-dual")
-        assert m.matches(_cand(), "ltp-328p-dual")
-        assert not m.matches(_cand(), "other")
+        assert m.matches(_cand(), _rep("ltp-328p-dual"))
+        assert not m.matches(_cand(), _rep("other"))
 
     def test_port_glob_match(self):
         m = DeviceMatch(port="/dev/ttyUSB*")
-        assert m.matches(_cand("/dev/ttyUSB2"), "")
-        assert not m.matches(_cand("/dev/ttyACM0"), "")
+        assert m.matches(_cand("/dev/ttyUSB2"), _rep())
+        assert not m.matches(_cand("/dev/ttyACM0"), _rep())
 
     def test_empty_match_never_matches(self):
-        assert not DeviceMatch().matches(_cand(usb_serial="X1"), "name")
+        assert not DeviceMatch().matches(_cand(usb_serial="X1"), _rep("name"))
 
     def test_fields_are_anded(self):
         m = DeviceMatch(usb_serial="X1", device_name="strip")
-        assert m.matches(_cand(usb_serial="X1"), "strip")
-        assert not m.matches(_cand(usb_serial="X1"), "other")
+        assert m.matches(_cand(usb_serial="X1"), _rep("strip"))
+        assert not m.matches(_cand(usb_serial="X1"), _rep("other"))
+
+    def test_pixels_match(self):
+        # Two boards, same firmware name, no USB serial: pixel count tells
+        # them apart.
+        m160 = DeviceMatch(device_name="LTP-328P-Dual", pixels=160)
+        m80 = DeviceMatch(device_name="LTP-328P-Dual", pixels=80)
+        strip = _rep("LTP-328P-Dual", pixels=160, dimensions="160")
+        matrix = _rep("LTP-328P-Dual", pixels=80, dimensions="16x5")
+        assert m160.matches(_cand(), strip)
+        assert not m160.matches(_cand(), matrix)
+        assert m80.matches(_cand(), matrix)
+
+    def test_dimensions_match(self):
+        m = DeviceMatch(dimensions="16x5")
+        assert m.matches(_cand(), _rep(pixels=80, dimensions="16x5"))
+        assert not m.matches(_cand(), _rep(pixels=80, dimensions="80"))
+
+    def test_reported_info_from_device_info(self):
+        matrix = SimpleNamespace(
+            device_name="X", total_pixels=80, is_matrix=True, dimensions=(16, 5)
+        )
+        strip = SimpleNamespace(
+            device_name="Y", total_pixels=160, is_matrix=False, dimensions=(160, 1)
+        )
+        assert ReportedInfo.from_device_info(matrix).dimensions == "16x5"
+        assert ReportedInfo.from_device_info(strip).dimensions == "160"
+        assert ReportedInfo.from_device_info(None).name == ""
 
 
 class TestStableIdentity:
