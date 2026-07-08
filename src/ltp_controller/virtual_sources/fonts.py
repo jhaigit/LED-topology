@@ -7,6 +7,7 @@ Also supports TrueType font rendering via PIL/Pillow for access to system
 fonts at any size.
 """
 
+from functools import lru_cache
 from typing import NamedTuple
 import logging
 
@@ -520,8 +521,14 @@ def list_system_fonts() -> list[str]:
     return sorted(fonts)
 
 
+@lru_cache(maxsize=256)
 def find_ttf_font(font_name: str) -> str | None:
     """Find the path to a TrueType font by name.
+
+    Result is cached: the resolution walks system font directories with a
+    recursive glob, and this is called per frame for TTF text/counter/clock
+    sources (via is_ttf_font). Font directories don't change at runtime, so a
+    per-name cache turns a full font-tree scan every frame into a one-time cost.
 
     Args:
         font_name: Font name (e.g., "DejaVuSans") or path to .ttf file

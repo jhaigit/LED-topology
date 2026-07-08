@@ -198,34 +198,34 @@ class FailingBulb(VirtualSource):
 
         pixels = np.zeros((num_pixels, 3), dtype=np.uint8)
 
-        for i in range(num_pixels):
-            if self._pixel_dead[i]:
-                continue
+        n = num_pixels
+        living = ~self._pixel_dead
 
-            # Degrade health with per-pixel variation
-            self._pixel_health[i] -= decay_rate * dt * random.uniform(0.5, 1.5)
-            self._pixel_health[i] = max(0.0, self._pixel_health[i])
+        # Degrade health of living bulbs with per-pixel variation. (Vectorized
+        # with numpy's RNG — visually equivalent to the original per-pixel draws
+        # rather than bit-identical, since draw order/source differs.)
+        decay = np.where(living, decay_rate * dt * np.random.uniform(0.5, 1.5, n), 0.0)
+        self._pixel_health = np.maximum(0.0, self._pixel_health - decay).astype(np.float32)
+        h = self._pixel_health
 
-            h = self._pixel_health[i]
+        # Low-health bulbs may die this frame
+        die = living & (h < 0.3) & (np.random.random(n) < failure_rate * dt)
+        self._pixel_dead |= die
+        living = ~self._pixel_dead
 
-            # Low-health bulbs may die
-            if h < 0.3 and random.random() < failure_rate * dt:
-                self._pixel_dead[i] = True
-                continue
+        # Low-health bulbs flicker
+        low = living & (h < 0.5)
+        rate = self._pixel_flicker_rate + (0.5 - h) * 2.0
+        flicker = np.where(low, 0.4 + 0.6 * (0.5 + 0.5 * np.sin(time_elapsed * rate * 40)), 1.0)
+        dip = low & (h < 0.2) & (np.random.random(n) < 0.1)
+        flicker = np.where(dip, flicker * np.random.uniform(0.0, 0.5, n), flicker)
 
-            # Low-health bulbs flicker
-            flicker = 1.0
-            if h < 0.5:
-                rate = self._pixel_flicker_rate[i] + (0.5 - h) * 2.0
-                flicker = 0.4 + 0.6 * (0.5 + 0.5 * math.sin(time_elapsed * rate * 40))
-                if h < 0.2 and random.random() < 0.1:
-                    flicker *= random.uniform(0.0, 0.5)
-
-            brightness = h * flicker
-            pixels[i] = [
-                int(dim_color[j] + (color[j] - dim_color[j]) * brightness)
-                for j in range(3)
-            ]
+        brightness = (h * flicker)[:, None]
+        dim = np.array(dim_color, dtype=np.float64)
+        col = np.array(color, dtype=np.float64)
+        vals = (dim + (col - dim) * brightness).astype(np.uint8)
+        # Dead pixels (including those that just died) stay black.
+        pixels[living] = vals[living]
 
         return pixels
 
@@ -368,12 +368,15 @@ class Lightning(VirtualSource):
             brightness *= flash["intensity"]
 
             ps = flash["pixel_start"]
-            pe = flash["pixel_end"]
-            for i in range(ps, min(pe, num_pixels)):
-                pixels[i] = [
-                    min(255, int(sky[j] + (flash_color[j] - sky[j]) * brightness))
-                    for j in range(3)
-                ]
+            pe = min(flash["pixel_end"], num_pixels)
+            if ps < pe:
+                # Constant color across the flash span; min(255,int(x)) and
+                # int(min(255,x)) agree for these non-negative values.
+                skyf = np.array(sky, dtype=np.float64)
+                val = np.minimum(
+                    255.0, skyf + (np.array(flash_color, dtype=np.float64) - skyf) * brightness
+                ).astype(np.uint8)
+                pixels[ps:pe] = val
 
         self._strike_flashes = active
 

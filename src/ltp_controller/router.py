@@ -105,7 +105,7 @@ class Route:
     _sink_stream_id: str | None = field(default=None, repr=False)
     _frames_routed: int = field(default=0, repr=False)
     _last_frame_time: datetime | None = field(default=None, repr=False)
-    _last_frame: list | None = field(default=None, repr=False)
+    _last_frame: "np.ndarray | None" = field(default=None, repr=False)
 
     # Format negotiation
     _sink_color_format: ColorFormat = field(default=ColorFormat.RGB, repr=False)
@@ -735,8 +735,9 @@ class RoutingEngine:
             f"{virtual_source.name} -> {sink.name}:{sink_udp_port}"
         )
 
-        # Get frame interval from virtual source config
-        frame_interval = 1.0 / virtual_source.config.frame_rate
+        # Get frame interval from virtual source config (clamp rate so a
+        # sub-1 fps or zero rate can't divide-by-zero or produce int(fps)==0)
+        frame_interval = 1.0 / max(0.1, virtual_source.config.frame_rate)
 
         # Calculate render size - use source dimensions, scale to sink later
         source_pixel_count = np.prod(source_dims)
@@ -764,7 +765,7 @@ class RoutingEngine:
                     pixels = (corrected * 255).astype(np.uint8)
 
                 # Store for preview
-                route._last_frame = pixels.tolist()
+                route._last_frame = pixels
 
                 # Send to sink using negotiated format
                 if route._sender:
@@ -776,7 +777,7 @@ class RoutingEngine:
                 logger.warning(f"Error rendering virtual source for route {route.name}: {e}")
 
             # Check if sink is still online (every second or so)
-            if route._frames_routed % int(1.0 / frame_interval) == 0:
+            if route._frames_routed % max(1, int(1.0 / frame_interval)) == 0:
                 current_sink = self.controller.get_sink(route.sink_id)
                 if not current_sink or not current_sink.online:
                     logger.warning(f"Route {route.name}: Sink went offline")
@@ -848,7 +849,7 @@ class RoutingEngine:
             f"({len(route._group_senders)}/{len(group.members)} members)"
         )
 
-        frame_interval = 1.0 / virtual_source.config.frame_rate
+        frame_interval = 1.0 / max(0.1, virtual_source.config.frame_rate)
 
         while route.enabled and self._running:
             try:
@@ -862,7 +863,7 @@ class RoutingEngine:
                     corrected = np.power(normalized, route.transform.gamma)
                     pixels = (corrected * 255).astype(np.uint8)
 
-                route._last_frame = pixels.tolist()
+                route._last_frame = pixels
 
                 for member in group.members:
                     sender = route._group_senders.get(member.sink_id)
@@ -1037,7 +1038,7 @@ class RoutingEngine:
                 corrected = np.power(normalized, route.transform.gamma)
                 pixels = (corrected * 255).astype(np.uint8)
 
-            route._last_frame = pixels.tolist()
+            route._last_frame = pixels
 
             for member in group.members:
                 sender = route._group_senders.get(member.sink_id)
@@ -1088,8 +1089,10 @@ class RoutingEngine:
                 corrected = np.power(normalized, route.transform.gamma)
                 pixels = (corrected * 255).astype(np.uint8)
 
-            # Store for preview (convert to list for JSON serialization)
-            route._last_frame = pixels.tolist()
+            # Store the ndarray for preview; the web handler converts to a list
+            # on demand. Doing .tolist() here ran on every routed frame on the
+            # event-loop thread whether or not anyone was previewing.
+            route._last_frame = pixels
 
             # Send to sink using negotiated format
             if route._sender:
@@ -1196,12 +1199,17 @@ class RoutingEngine:
                 await task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                # A route task that died with a stored exception would otherwise
+                # re-raise here and kill the caller (the monitor loop).
+                logger.warning(f"Route task for {route.name} ended with error: {e}")
 
         await self._cleanup_route(route)
 
     def _sink_has_other_active_routes(self, route: Route) -> bool:
         """Check if another active route uses the same sink."""
-        for other in self._routes.values():
+        # Snapshot: _routes may be mutated by create/delete on a Flask thread.
+        for other in list(self._routes.values()):
             if other.id != route.id and other.sink_id == route.sink_id and other.status == RouteStatus.CONNECTED:
                 return True
         return False
@@ -1288,34 +1296,63 @@ class RoutingEngine:
 
         logger.info(f"Route {route.name} cleaned up")
 
+    def _spawn_route_task(self, route: Route) -> asyncio.Task:
+        """Create and register a route task with self-cleaning done handling.
+
+        The done callback removes the finished task from _route_tasks (so a
+        route that dies on its own can be restarted via _pending_starts, which
+        checks `route_id not in self._route_tasks`) and surfaces any exception
+        instead of letting it sit silently on a dead task.
+        """
+        task = asyncio.create_task(self._run_route(route))
+        self._route_tasks[route.id] = task
+        task.add_done_callback(lambda t: self._on_route_task_done(route.id, t))
+        return task
+
+    def _on_route_task_done(self, route_id: str, task: asyncio.Task) -> None:
+        # Only unregister if this exact task is still the current one (a restart
+        # may have already replaced it).
+        if self._route_tasks.get(route_id) is task:
+            self._route_tasks.pop(route_id, None)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.error(f"Route task {route_id} died: {exc}")
+
     async def _monitor_loop(self) -> None:
-        """Monitor for pending route starts/stops from sync context."""
+        """Monitor for pending route starts/stops from sync context.
+
+        Guarded so a single transient error cannot permanently kill the loop —
+        that would leave every future enable/disable/create queued in the
+        _pending_* sets and never processed.
+        """
         while self._running:
-            # Process pending restarts first (stop then start atomically)
-            while self._pending_restarts:
-                route_id = self._pending_restarts.pop()
-                route = self._routes.get(route_id)
-                if route and route.enabled:
-                    await self._stop_route(route)
-                    self._route_tasks[route_id] = asyncio.create_task(
-                        self._run_route(route)
-                    )
+            try:
+                # Process pending restarts first (stop then start atomically)
+                while self._pending_restarts:
+                    route_id = self._pending_restarts.pop()
+                    route = self._routes.get(route_id)
+                    if route and route.enabled:
+                        await self._stop_route(route)
+                        self._spawn_route_task(route)
 
-            # Process pending starts
-            while self._pending_starts:
-                route_id = self._pending_starts.pop()
-                route = self._routes.get(route_id)
-                if route and route.enabled and route_id not in self._route_tasks:
-                    self._route_tasks[route_id] = asyncio.create_task(
-                        self._run_route(route)
-                    )
+                # Process pending starts
+                while self._pending_starts:
+                    route_id = self._pending_starts.pop()
+                    route = self._routes.get(route_id)
+                    if route and route.enabled and route_id not in self._route_tasks:
+                        self._spawn_route_task(route)
 
-            # Process pending stops
-            while self._pending_stops:
-                route_id = self._pending_stops.pop()
-                route = self._routes.get(route_id)
-                if route:
-                    await self._stop_route(route)
+                # Process pending stops
+                while self._pending_stops:
+                    route_id = self._pending_stops.pop()
+                    route = self._routes.get(route_id)
+                    if route:
+                        await self._stop_route(route)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Route monitor loop error (continuing): {e}")
 
             await asyncio.sleep(0.1)
 
@@ -1327,11 +1364,9 @@ class RoutingEngine:
         self._running = True
 
         # Start enabled routes
-        for route in self._routes.values():
+        for route in list(self._routes.values()):
             if route.enabled:
-                self._route_tasks[route.id] = asyncio.create_task(
-                    self._run_route(route)
-                )
+                self._spawn_route_task(route)
 
         # Start monitor loop for handling routes from sync context
         self._monitor_task = asyncio.create_task(self._monitor_loop())

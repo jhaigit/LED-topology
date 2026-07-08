@@ -162,12 +162,12 @@ class Controller:
     @property
     def online_sources(self) -> list[DeviceState]:
         """Get online sources."""
-        return [s for s in self._sources.values() if s.online]
+        return [s for s in list(self._sources.values()) if s.online]
 
     @property
     def online_sinks(self) -> list[DeviceState]:
         """Get online sinks."""
-        return [s for s in self._sinks.values() if s.online]
+        return [s for s in list(self._sinks.values()) if s.online]
 
     def purge_offline_sinks(self) -> int:
         """Remove all offline sinks. Returns count of removed sinks."""
@@ -461,13 +461,12 @@ class Controller:
         if identifier in self._sources:
             return self._sources[identifier]
 
-        # Try by UUID
-        for state in self._sources.values():
+        # Try by UUID / display name over a snapshot (a Flask-thread purge may
+        # delete entries while the loop thread iterates here).
+        for state in list(self._sources.values()):
             if state.id == identifier:
                 return state
-
-        # Try by display name
-        for state in self._sources.values():
+        for state in list(self._sources.values()):
             if state.name == identifier:
                 return state
 
@@ -479,13 +478,11 @@ class Controller:
         if identifier in self._sinks:
             return self._sinks[identifier]
 
-        # Try by UUID
-        for state in self._sinks.values():
+        # Try by UUID / display name over a snapshot (see get_source).
+        for state in list(self._sinks.values()):
             if state.id == identifier:
                 return state
-
-        # Try by display name
-        for state in self._sinks.values():
+        for state in list(self._sinks.values()):
             if state.name == identifier:
                 return state
 

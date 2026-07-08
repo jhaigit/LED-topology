@@ -234,6 +234,7 @@ class ControlClient:
         self._connection: ControlConnection | None = None
         self._seq = 0
         self._pending: dict[int, asyncio.Future[Message]] = {}
+        self._reader_task: asyncio.Task | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -244,14 +245,23 @@ class ControlClient:
         self._seq += 1
         return self._seq
 
-    async def connect(self) -> None:
-        """Connect to the server."""
-        reader, writer = await asyncio.open_connection(self.host, self.port)
+    async def connect(self, timeout: float = 5.0) -> None:
+        """Connect to the server.
+
+        A timeout bounds the TCP handshake: a host that advertises but
+        blackholes the port (firewall, dead Wi-Fi) would otherwise hang here
+        for the full kernel SYN-retry period (~2 minutes), and any caller
+        holding a lock across connect() would stall for that whole time.
+        """
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(self.host, self.port), timeout=timeout
+        )
         self._connection = ControlConnection(reader, writer, self._handle_response)
         logger.info(f"Connected to {self.host}:{self.port}")
 
-        # Start message handler
-        asyncio.create_task(self._connection.handle_messages())
+        # Start message handler. Keep a reference: a bare create_task() may be
+        # garbage-collected mid-stream per the asyncio docs.
+        self._reader_task = asyncio.create_task(self._connection.handle_messages())
 
     def _handle_response(self, message: Message) -> None:
         """Handle incoming response messages."""
@@ -329,6 +339,16 @@ class DataSender:
             self._transport.close()
             self._transport = None
             self._protocol = None
+
+    def send_bytes(self, data: bytes) -> None:
+        """Send a pre-encoded packet as a single UDP datagram.
+
+        Used by senders (e.g. scalar sources) that build their own packet
+        bytes rather than pixel arrays.
+        """
+        if not self._transport:
+            raise RuntimeError("Sender not started")
+        self._transport.sendto(data)
 
     def send(
         self,

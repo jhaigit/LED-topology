@@ -600,13 +600,15 @@ class CounterSource(VirtualSource):
             width = num_pixels
             height = 1
 
-        # Calculate current count
+        # Calculate current count. time_elapsed already carries the speed
+        # factor (get_time_elapsed applies the speed control); multiplying by
+        # the raw 0-100 speed control again advanced the counter ~50x at the
+        # default speed.
         start = self.get_control("start_value")
         increment = self.get_control("increment")
-        speed = self.get_control("speed")
         decimals = int(self.get_control("decimals"))
 
-        current_value = start + (time_elapsed * increment * speed)
+        current_value = start + (time_elapsed * increment)
 
         # Format number
         if decimals == 0:

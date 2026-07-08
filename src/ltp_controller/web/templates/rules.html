@@ -439,6 +439,14 @@
 
 {% block scripts %}
 <script>
+// Escape user-controlled text before inserting into innerHTML (device/route/
+// source/sequence names are settable via the API).
+function esc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // Initialize search
 if (document.getElementById('rules-list')) {
     LtpListTools.initSearch('rules-list', { type: 'cards', placeholder: 'Search rules...' });
@@ -627,19 +635,19 @@ function addAction(action = null) {
     // Build sink options
     let sinkOptions = '<option value="">Select sink...</option>';
     for (const sink of sinks) {
-        sinkOptions += `<option value="${sink.id}">${sink.name}</option>`;
+        sinkOptions += `<option value="${esc(sink.id)}">${esc(sink.name)}</option>`;
     }
 
     // Build route options
     let routeOptions = '<option value="">Select route...</option>';
     for (const route of routes) {
-        routeOptions += `<option value="${route.id}">${route.name}</option>`;
+        routeOptions += `<option value="${esc(route.id)}">${esc(route.name)}</option>`;
     }
 
     // Build source options
     let sourceOptions = '<option value="">Select source...</option>';
     for (const vs of virtualSources) {
-        sourceOptions += `<option value="${vs.id}">${vs.name}</option>`;
+        sourceOptions += `<option value="${esc(vs.id)}">${esc(vs.name)}</option>`;
     }
 
     row.innerHTML = `
@@ -720,26 +728,26 @@ function updateActionTargets(id) {
         targetType = 'route';
         options = '<option value="">Select route...</option>';
         for (const route of routes) {
-            options += `<option value="${route.id}">${route.name}</option>`;
+            options += `<option value="${esc(route.id)}">${esc(route.name)}</option>`;
         }
     } else if (actionType === 'enable_source' || actionType === 'disable_source') {
         targetType = 'source';
         options = '<option value="">Select source...</option>';
         for (const vs of virtualSources) {
-            options += `<option value="${vs.id}">${vs.name}</option>`;
+            options += `<option value="${esc(vs.id)}">${esc(vs.name)}</option>`;
         }
     } else if (actionType === 'start_sequence' || actionType === 'stop_sequence') {
         targetType = 'sequence';
         options = '<option value="">Select sequence...</option>';
         for (const seq of sequences) {
-            options += `<option value="${seq.id}">${seq.name}</option>`;
+            options += `<option value="${esc(seq.id)}">${esc(seq.name)}</option>`;
         }
     } else {
         // Sink-targeted actions
         targetType = 'sink';
         options = '<option value="">Select sink...</option>';
         for (const sink of sinks) {
-            options += `<option value="${sink.id}">${sink.name}</option>`;
+            options += `<option value="${esc(sink.id)}">${esc(sink.name)}</option>`;
         }
 
         if (actionType === 'set_control') {

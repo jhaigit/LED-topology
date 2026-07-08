@@ -59,6 +59,35 @@ class Palette:
             colors[i] = self.get_color(t)
         return colors
 
+    def get_color_array(self, t: np.ndarray) -> np.ndarray:
+        """Vectorized get_color for an array of positions.
+
+        Bit-identical to calling get_color(t_i) for each element: same
+        stop selection (lower = last stop with position <= t, upper = first
+        with position >= t) and same truncation toward zero. Returns an
+        (N, 3) uint8 array.
+        """
+        t = np.clip(np.asarray(t, dtype=np.float64).ravel(), 0.0, 1.0)
+        n = t.shape[0]
+        if not self.stops:
+            return np.zeros((n, 3), dtype=np.uint8)
+        if len(self.stops) == 1:
+            return np.tile(np.array(self.stops[0].color, dtype=np.uint8), (n, 1))
+
+        pos = np.array([s.position for s in self.stops], dtype=np.float64)
+        col = np.array([s.color for s in self.stops], dtype=np.float64)  # (S, 3)
+        last = len(pos) - 1
+
+        upper = np.clip(np.searchsorted(pos, t, side="left"), 0, last)   # first pos >= t
+        lower = np.clip(np.searchsorted(pos, t, side="right") - 1, 0, last)  # last pos <= t
+
+        same = lower == upper
+        denom = np.where(same, 1.0, pos[upper] - pos[lower])
+        ratio = np.where(same, 0.0, (t - pos[lower]) / denom)
+
+        out = col[lower] + (col[upper] - col[lower]) * ratio[:, None]
+        return out.astype(np.uint8)  # truncates toward zero == int() for non-negative
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {

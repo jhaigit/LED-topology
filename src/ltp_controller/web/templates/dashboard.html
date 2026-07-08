@@ -296,7 +296,7 @@ graphCanvas.addEventListener('node-clicked', function(e) {
             .then(items => {
                 const item = Array.isArray(items) ? items.find(i => i.id === node.id) : null;
                 if (!item) {
-                    content.innerHTML = `<h3>${node.name}</h3><p class="empty-state">Device details not available</p>`;
+                    content.innerHTML = `<h3>${esc(node.name)}</h3><p class="empty-state">Device details not available</p>`;
                     panel.style.display = '';
                     return;
                 }
@@ -308,7 +308,7 @@ graphCanvas.addEventListener('node-clicked', function(e) {
                 panel.style.display = '';
             })
             .catch(() => {
-                content.innerHTML = `<h3>${node.name}</h3><p>Could not load details</p>`;
+                content.innerHTML = `<h3>${esc(node.name)}</h3><p>Could not load details</p>`;
                 panel.style.display = '';
             });
     } else if (snk && snk.type === 'group') {
@@ -333,7 +333,7 @@ graphCanvas.addEventListener('node-clicked', function(e) {
             .then(items => {
                 const item = items.find(i => i.id === node.id);
                 if (!item) {
-                    content.innerHTML = `<h3>${node.name}</h3><p class="empty-state">Device details not available</p>`;
+                    content.innerHTML = `<h3>${esc(node.name)}</h3><p class="empty-state">Device details not available</p>`;
                     panel.style.display = '';
                     return;
                 }
@@ -341,7 +341,7 @@ graphCanvas.addEventListener('node-clicked', function(e) {
                 panel.style.display = '';
             })
             .catch(() => {
-                content.innerHTML = `<h3>${node.name}</h3><p>Could not load details</p>`;
+                content.innerHTML = `<h3>${esc(node.name)}</h3><p>Could not load details</p>`;
                 panel.style.display = '';
             });
     }
@@ -1546,6 +1546,16 @@ function refreshDiscovery() {
 }
 
 // Auto-refresh status
+function isDetailBeingEdited() {
+    // True when the user is actively editing inside the detail panel, so the
+    // 5s poll should not rebuild it.
+    const panel = document.getElementById('detail-content');
+    const a = document.activeElement;
+    if (!panel || !a || !panel.contains(a)) return false;
+    return a.tagName === 'INPUT' || a.tagName === 'SELECT'
+        || a.tagName === 'TEXTAREA' || a.isContentEditable;
+}
+
 function updateStatus() {
     // Update source/sink online state
     fetch('/api/sources').then(r => r.json()).then(sources => {
@@ -1584,7 +1594,9 @@ function updateStatus() {
         LtpRouteGraph.updateSinkData(sinkNodes);
 
         const selId = LtpRouteGraph.getSelectedNode();
-        if (selId) {
+        // Don't rebuild the detail panel out from under an active edit: it
+        // replaces innerHTML, which drops focus and any unsent field/slider value.
+        if (selId && !isDetailBeingEdited()) {
             const item = sinks.find(s => s.id === selId);
             if (item) renderSinkDetail(item);
             const grp = groups.find(g => g.id === selId);
@@ -1600,7 +1612,13 @@ setInterval(updateStatus, 5000);
 
 // Quick actions
 async function bulkRoutes(action) {
-    const ids = rawRoutes.map(r => r.id);
+    // Fetch the current route list rather than the page-load snapshot, which
+    // goes stale as routes are created/deleted via the graph without a reload.
+    let ids;
+    try {
+        const routes = await fetch('/api/routes').then(r => r.json());
+        ids = routes.map(r => r.id);
+    } catch (err) { showToast('Error loading routes: ' + err.message, 'error'); return; }
     if (ids.length === 0) { showToast('No routes to ' + action, 'warning'); return; }
     try {
         const resp = await fetch('/api/routes/bulk-action', {
@@ -1617,7 +1635,11 @@ async function bulkRoutes(action) {
 }
 
 async function bulkVS(action) {
-    const ids = rawVS.map(v => v.id);
+    let ids;
+    try {
+        const vs = await fetch('/api/virtual-sources').then(r => r.json());
+        ids = vs.map(v => v.id);
+    } catch (err) { showToast('Error loading virtual sources: ' + err.message, 'error'); return; }
     if (ids.length === 0) { showToast('No virtual sources to ' + action, 'warning'); return; }
     let errors = 0;
     for (const id of ids) {

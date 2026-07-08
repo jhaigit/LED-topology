@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 
+from ltp_controller import __version__
 from ltp_controller.controller import Controller
 from ltp_controller.input_manager import InputEventManager
 from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngine
@@ -18,6 +20,33 @@ from ltp_controller.sink_control import SinkController
 from ltp_controller.virtual_sources import VirtualSourceManager, VIRTUAL_SOURCE_TYPES
 
 logger = logging.getLogger(__name__)
+
+
+def _git_revision() -> str | None:
+    """Short git commit ID of the running checkout, or None when not running
+    from a git checkout (e.g. an installed wheel) or git is unavailable."""
+    try:
+        result = subprocess.run(
+            # --exclude '*' skips all tags so this always yields the bare
+            # short commit hash, with a -dirty suffix for local modifications.
+            [
+                "git",
+                "-C",
+                str(Path(__file__).parent),
+                "describe",
+                "--always",
+                "--dirty",
+                "--exclude",
+                "*",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None
 
 
 def create_app(
@@ -55,6 +84,12 @@ def create_app(
     app.config["config_path"] = config_path
     app.config["scenes"] = {}  # Scene storage: {id: scene_dict}
 
+    git_revision = _git_revision()
+
+    @app.context_processor
+    def inject_version() -> dict[str, Any]:
+        return {"app_version": __version__, "git_revision": git_revision}
+
     # Helper to run async code from sync Flask handlers
     def run_async(coro: Any) -> Any:
         loop = app.config.get("event_loop")
@@ -66,6 +101,42 @@ def create_app(
         else:
             # Fallback to creating a new loop
             return asyncio.run(coro)
+
+    # Run a *synchronous* engine method on the event-loop thread, from a Flask
+    # worker thread. Use this for engine mutators that touch asyncio primitives
+    # or state the loop also reads (sequence create/update/delete cancel tasks
+    # and set events; render_frame mutates per-source animation buffers that the
+    # router renders on the loop thread). Running them anywhere else is a race.
+    def run_on_loop(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        async def _call() -> Any:
+            return fn(*args, **kwargs)
+
+        return run_async(_call())
+
+    def _coerce_dimensions(dims: Any) -> list[int]:
+        """Validate/coerce request output_dimensions. Raises ValueError on bad input."""
+        if not isinstance(dims, (list, tuple)) or not dims:
+            raise ValueError("output_dimensions must be a non-empty list")
+        out = []
+        for d in dims:
+            try:
+                di = int(d)
+            except (TypeError, ValueError):
+                raise ValueError(f"output_dimensions entries must be integers, got {d!r}")
+            if di < 1:
+                raise ValueError("output_dimensions entries must be >= 1")
+            out.append(di)
+        return out
+
+    def _coerce_frame_rate(rate: Any) -> float:
+        """Validate/coerce request frame_rate. Raises ValueError on bad input."""
+        try:
+            r = float(rate)
+        except (TypeError, ValueError):
+            raise ValueError(f"frame_rate must be a number, got {rate!r}")
+        if r <= 0:
+            raise ValueError("frame_rate must be > 0")
+        return r
 
     # ==================== Pages ====================
 
@@ -154,10 +225,17 @@ def create_app(
 
         results = {}
         for control_id, value in values.items():
-            success = run_async(controller.set_device_control(source, control_id, value))
-            results[control_id] = "ok" if success else "error"
+            try:
+                success = run_async(controller.set_device_control(source, control_id, value))
+                results[control_id] = "ok" if success else "error"
+            except TimeoutError:
+                results[control_id] = "timeout"
+            except Exception:
+                results[control_id] = "error"
 
-        return jsonify({"status": "ok", "results": results})
+        has_errors = any(v != "ok" for v in results.values())
+        status_code = 504 if results and all(v == "timeout" for v in results.values()) else 200
+        return jsonify({"status": "partial" if has_errors else "ok", "results": results}), status_code
 
     @app.route("/api/sources/<source_id>/refresh", methods=["POST"])
     def api_source_refresh(source_id: str) -> Any:
@@ -166,7 +244,10 @@ def create_app(
         if not source:
             return jsonify({"error": "Source not found"}), 404
 
-        run_async(controller.refresh_device(source))
+        try:
+            run_async(controller.refresh_device(source))
+        except TimeoutError:
+            return jsonify({"error": "Device did not respond"}), 504
         return jsonify({"status": "ok"})
 
     # ==================== API: Sinks ====================
@@ -578,15 +659,19 @@ def create_app(
             if field not in data:
                 return jsonify({"error": f"Missing field: {field}"}), 400
 
-        transform = None
-        if "transform" in data:
-            transform = RouteTransform.from_dict(data["transform"])
+        try:
+            transform = None
+            if "transform" in data:
+                transform = RouteTransform.from_dict(data["transform"])
+            mode = RouteMode(data.get("mode", "proxy"))
+        except (ValueError, KeyError) as e:
+            return jsonify({"error": f"Invalid route data: {e}"}), 400
 
         route = router.create_route(
             name=data["name"],
             source_id=data["source_id"],
             sink_id=data["sink_id"],
-            mode=RouteMode(data.get("mode", "proxy")),
+            mode=mode,
             transform=transform,
             enabled=data.get("enabled", True),
         )
@@ -615,11 +700,13 @@ def create_app(
         if not data:
             return jsonify({"error": "No data provided"}), 400
 
-        transform = None
-        if "transform" in data:
-            transform = RouteTransform.from_dict(data["transform"])
-
-        mode = RouteMode(data["mode"]) if "mode" in data else None
+        try:
+            transform = None
+            if "transform" in data:
+                transform = RouteTransform.from_dict(data["transform"])
+            mode = RouteMode(data["mode"]) if "mode" in data else None
+        except (ValueError, KeyError) as e:
+            return jsonify({"error": f"Invalid route data: {e}"}), 400
 
         route = router.update_route(
             route_id,
@@ -856,7 +943,8 @@ def create_app(
                     "brightness": route.transform.brightness,
                     "gamma": route.transform.gamma,
                     "scale_mode": route.transform.scale_mode.value if hasattr(route.transform.scale_mode, 'value') else str(route.transform.scale_mode),
-                    "mirror": route.transform.mirror,
+                    "mirror_x": route.transform.mirror_x,
+                    "mirror_y": route.transform.mirror_y,
                 }
             route_states.append(route_state)
 
@@ -929,7 +1017,8 @@ def create_app(
                 if "transform" in rs and route.transform:
                     route.transform.brightness = rs["transform"].get("brightness", route.transform.brightness)
                     route.transform.gamma = rs["transform"].get("gamma", route.transform.gamma)
-                    route.transform.mirror = rs["transform"].get("mirror", route.transform.mirror)
+                    route.transform.mirror_x = rs["transform"].get("mirror_x", route.transform.mirror_x)
+                    route.transform.mirror_y = rs["transform"].get("mirror_y", route.transform.mirror_y)
                 applied["routes"] += 1
             except Exception as e:
                 logger.warning("Failed to apply route state for %s: %s", rs["route_id"], e)
@@ -981,11 +1070,14 @@ def create_app(
         """
         import yaml
 
-        data = request.get_json() or {}
-        save_path = data.get("path") or app.config.get("config_path")
+        # Always write the server's configured config file. Never honour a
+        # caller-supplied path: this endpoint is unauthenticated, and a
+        # request-controlled path let any LAN client overwrite arbitrary
+        # files writable by the server user.
+        save_path = app.config.get("config_path")
 
         if not save_path:
-            return jsonify({"error": "Config path not specified and no default config file"}), 400
+            return jsonify({"error": "No config file configured on this controller"}), 400
 
         # Load existing config to preserve other settings
         existing_config: dict[str, Any] = {}
@@ -1044,7 +1136,7 @@ def create_app(
                 return _generate_led_svg_2d([], dims[0], dims[1])
             return _generate_led_svg([], 60)
 
-        pixels = route._last_frame
+        pixels = route._last_frame.tolist()
         if is_2d:
             return _generate_led_svg_2d(pixels, dims[0], dims[1])
         return _generate_led_svg(pixels, len(pixels))
@@ -1089,16 +1181,20 @@ def create_app(
             return jsonify({"error": "Route not found"}), 404
 
         dims = route._source_dims or [0]
-        pixels = route._last_frame or []
+        lf = route._last_frame
+        pixels = lf.tolist() if lf is not None else []
 
         return jsonify({
-            "pixels": [[int(c) for c in p] for p in pixels] if pixels else [],
+            "pixels": [[int(c) for c in p] for p in pixels],
             "dimensions": list(dims),
         })
 
     @app.route("/api/sinks/<sink_id>/preview")
     def api_sink_preview(sink_id: str) -> Any:
         """Get LED preview for a sink's paint buffer as SVG."""
+        if not sink_controller:
+            return jsonify({"error": "Sink controller not available"}), 503
+
         sink = controller.get_sink(sink_id)
         if not sink:
             return jsonify({"error": "Sink not found"}), 404
@@ -1233,11 +1329,17 @@ def create_app(
         if source_type not in VIRTUAL_SOURCE_TYPES:
             return jsonify({"error": f"Unknown source type: {source_type}"}), 400
 
+        try:
+            dims = _coerce_dimensions(data.get("output_dimensions", [60]))
+            rate = _coerce_frame_rate(data.get("frame_rate", 30.0))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
         source = virtual_source_manager.create(
             source_type=source_type,
             name=data.get("name"),
-            output_dimensions=data.get("output_dimensions", [60]),
-            frame_rate=data.get("frame_rate", 30.0),
+            output_dimensions=dims,
+            frame_rate=rate,
             adaptive_dimensions=data.get("adaptive_dimensions", False),
             enabled=data.get("enabled", True),
             control_values=data.get("control_values", {}),
@@ -1278,15 +1380,18 @@ def create_app(
 
         # Update dimensions (requires restart if running)
         needs_restart = False
-        if "output_dimensions" in data:
-            source.config.output_dimensions = data["output_dimensions"]
-            source.config._clamp_dimensions()
-            needs_restart = True
+        try:
+            if "output_dimensions" in data:
+                source.config.output_dimensions = _coerce_dimensions(data["output_dimensions"])
+                source.config._clamp_dimensions()
+                needs_restart = True
 
-        # Update frame rate
-        if "frame_rate" in data:
-            source.config.frame_rate = float(data["frame_rate"])
-            needs_restart = True
+            # Update frame rate
+            if "frame_rate" in data:
+                source.config.frame_rate = _coerce_frame_rate(data["frame_rate"])
+                needs_restart = True
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
 
         # Update enabled state
         if "enabled" in data:
@@ -1462,10 +1567,14 @@ def create_app(
             width = dims[0]
             height = 1
 
-        # Render a frame with all transforms (speed, reverse, brightness, mirror)
+        # Render a frame with all transforms (speed, reverse, brightness, mirror).
+        # Marshal onto the event-loop thread: stateful sources mutate shared
+        # animation buffers in render_frame(), and the router renders the same
+        # instance on the loop thread. Running both concurrently corrupts that
+        # state; on the loop thread they serialize.
         num_pixels = width * height
         try:
-            frame = source.render_frame(num_pixels)
+            frame = run_on_loop(source.render_frame, num_pixels)
             pixels = frame.tolist() if hasattr(frame, 'tolist') else list(frame)
         except Exception:
             # Return empty preview on error
@@ -1827,25 +1936,14 @@ def create_app(
             return jsonify({"error": "Missing or empty 'actions' field"}), 400
 
         try:
-            # Parse trigger
-            trigger_data = data["trigger"]
-            trigger = Trigger(
-                type=TriggerType(trigger_data.get("type", "input_change")),
-                sink_id=trigger_data["sink_id"],
-                input_id=trigger_data["input_id"],
-                comparison=ComparisonOp(trigger_data.get("comparison", "changed_to")),
-                value=trigger_data.get("value", True),
-            )
+            # Parse trigger. Trigger.from_dict handles both input triggers
+            # (sink_id/input_id/comparison/value) and schedule triggers
+            # (cron/jitter_minutes/days); building Trigger(...) by hand here
+            # assumed input fields and KeyError'd on every schedule rule.
+            trigger = Trigger.from_dict(data["trigger"])
 
             # Parse actions
-            actions = []
-            for action_data in data["actions"]:
-                actions.append(Action(
-                    type=ActionType(action_data["type"]),
-                    target_id=action_data["target_id"],
-                    control_id=action_data.get("control_id"),
-                    value=action_data.get("value"),
-                ))
+            actions = [Action.from_dict(action_data) for action_data in data["actions"]]
 
             # Create rule
             rule = rule_engine.create_rule(
@@ -1887,29 +1985,15 @@ def create_app(
             return jsonify({"error": "No data provided"}), 400
 
         try:
-            # Parse optional trigger
+            # Parse optional trigger (see api_rules_create for why from_dict).
             trigger = None
             if "trigger" in data:
-                trigger_data = data["trigger"]
-                trigger = Trigger(
-                    type=TriggerType(trigger_data.get("type", "input_change")),
-                    sink_id=trigger_data["sink_id"],
-                    input_id=trigger_data["input_id"],
-                    comparison=ComparisonOp(trigger_data.get("comparison", "changed_to")),
-                    value=trigger_data.get("value", True),
-                )
+                trigger = Trigger.from_dict(data["trigger"])
 
             # Parse optional actions
             actions = None
             if "actions" in data:
-                actions = []
-                for action_data in data["actions"]:
-                    actions.append(Action(
-                        type=ActionType(action_data["type"]),
-                        target_id=action_data["target_id"],
-                        control_id=action_data.get("control_id"),
-                        value=action_data.get("value"),
-                    ))
+                actions = [Action.from_dict(action_data) for action_data in data["actions"]]
 
             # Update rule
             updated_rule = rule_engine.update_rule(
@@ -2034,7 +2118,8 @@ def create_app(
             except Exception as e:
                 return jsonify({"error": f"Invalid step: {e}"}), 400
 
-        seq = sequence_manager.create(
+        seq = run_on_loop(
+            sequence_manager.create,
             name=data["name"],
             steps=steps,
             enabled=data.get("enabled", True),
@@ -2070,7 +2155,8 @@ def create_app(
                 except Exception as e:
                     return jsonify({"error": f"Invalid step: {e}"}), 400
 
-        seq = sequence_manager.update(
+        seq = run_on_loop(
+            sequence_manager.update,
             seq_id,
             name=data.get("name"),
             steps=steps,
@@ -2086,7 +2172,7 @@ def create_app(
         """Delete a sequence."""
         if not sequence_manager:
             return jsonify({"error": "Sequences not available"}), 503
-        if sequence_manager.delete(seq_id):
+        if run_on_loop(sequence_manager.delete, seq_id):
             return jsonify({"status": "ok"})
         return jsonify({"error": "Not found"}), 404
 
