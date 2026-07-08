@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,8 @@ from flask import Flask, jsonify, render_template, request
 
 from ltp_controller import __version__
 from ltp_controller.controller import Controller
+from ltp_controller.security import WebSecuritySettings
+from ltp_controller.web.auth import init_auth
 from ltp_controller.input_manager import InputEventManager
 from ltp_controller.router import Route, RouteMode, RouteTransform, RoutingEngine
 from ltp_controller.rule_engine import RuleEngine
@@ -60,6 +63,7 @@ def create_app(
     sequence_manager: SequenceManager | None = None,
     event_loop: asyncio.AbstractEventLoop | None = None,
     config_path: str | None = None,
+    web_security: WebSecuritySettings | None = None,
 ) -> Flask:
     """Create and configure the Flask application."""
     template_dir = Path(__file__).parent / "templates"
@@ -83,6 +87,23 @@ def create_app(
     app.config["event_loop"] = event_loop
     app.config["config_path"] = config_path
     app.config["scenes"] = {}  # Scene storage: {id: scene_dict}
+
+    # Security: session signing, cookie flags, auth gate + policy. With no
+    # settings (tests, embedded use) auth is disabled and behavior is open,
+    # exactly as before — cli.py decides whether that is acceptable.
+    if web_security is None:
+        web_security = WebSecuritySettings()
+    app.secret_key = web_security.secret_key or os.urandom(32)
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Strict",
+        SESSION_COOKIE_SECURE=web_security.secure_cookies,
+    )
+    if web_security.trust_proxy:
+        from werkzeug.middleware.proxy_fix import ProxyFix
+
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)  # type: ignore[method-assign]
+    init_auth(app, web_security)
 
     git_revision = _git_revision()
 
@@ -152,7 +173,10 @@ def create_app(
             sources_json=[s.to_dict() for s in controller.sources],
             sinks_json=[s.to_dict() for s in controller.sinks],
             routes_json=[r.to_dict() for r in router.routes],
-            vs_json=[vs.to_dict() for vs in (virtual_source_manager.sources if virtual_source_manager else [])],
+            vs_json=[
+                vs.to_dict()
+                for vs in (virtual_source_manager.sources if virtual_source_manager else [])
+            ],
             groups_json=[g.to_dict() for g in controller.sink_group_manager.groups],
         )
 
@@ -235,7 +259,10 @@ def create_app(
 
         has_errors = any(v != "ok" for v in results.values())
         status_code = 504 if results and all(v == "timeout" for v in results.values()) else 200
-        return jsonify({"status": "partial" if has_errors else "ok", "results": results}), status_code
+        return (
+            jsonify({"status": "partial" if has_errors else "ok", "results": results}),
+            status_code,
+        )
 
     @app.route("/api/sources/<source_id>/refresh", methods=["POST"])
     def api_source_refresh(source_id: str) -> Any:
@@ -290,7 +317,10 @@ def create_app(
 
         has_errors = any(v != "ok" for v in results.values())
         status_code = 504 if all(v == "timeout" for v in results.values()) else 200
-        return jsonify({"status": "partial" if has_errors else "ok", "results": results}), status_code
+        return (
+            jsonify({"status": "partial" if has_errors else "ok", "results": results}),
+            status_code,
+        )
 
     @app.route("/api/sinks/<sink_id>/refresh", methods=["POST"])
     def api_sink_refresh(sink_id: str) -> Any:
@@ -532,11 +562,13 @@ def create_app(
             # Return empty/black buffer
             pixels = [[0, 0, 0] for _ in range(pixel_count)]
 
-        return jsonify({
-            "pixels": pixels,
-            "dimensions": [width, height],
-            "pixel_count": pixel_count,
-        })
+        return jsonify(
+            {
+                "pixels": pixels,
+                "dimensions": [width, height],
+                "pixel_count": pixel_count,
+            }
+        )
 
     @app.route("/api/sinks/<sink_id>/paint/sync", methods=["POST"])
     def api_sink_paint_sync(sink_id: str) -> Any:
@@ -564,14 +596,16 @@ def create_app(
             dims = [int(d) for d in props.get("dim", str(pixels)).split("x")]
             sink_type = props.get("type", "string")
 
-            return jsonify({
-                "id": sink_id,
-                "name": sink.name,
-                "pixels": pixels,
-                "dimensions": dims,
-                "type": sink_type,
-                "is_matrix": len(dims) > 1,
-            })
+            return jsonify(
+                {
+                    "id": sink_id,
+                    "name": sink.name,
+                    "pixels": pixels,
+                    "dimensions": dims,
+                    "type": sink_type,
+                    "is_matrix": len(dims) > 1,
+                }
+            )
 
         # Use sink controller for enhanced info
         result = run_async(sink_controller.get_paint_info(sink_id))
@@ -589,25 +623,29 @@ def create_app(
 
         # Add physical sources
         for s in controller.sources:
-            sources.append({
-                "id": s.device.id,
-                "name": s.name,
-                "type": "physical",
-                "online": s.online,
-                "properties": s.device.properties,
-            })
+            sources.append(
+                {
+                    "id": s.device.id,
+                    "name": s.name,
+                    "type": "physical",
+                    "online": s.online,
+                    "properties": s.device.properties,
+                }
+            )
 
         # Add virtual sources
         if virtual_source_manager:
             for vs in virtual_source_manager.sources:
-                sources.append({
-                    "id": vs.id,
-                    "name": vs.name,
-                    "type": "virtual",
-                    "online": True,  # Virtual sources are always "online"
-                    "source_type": vs.source_type,
-                    "running": vs.is_running,
-                })
+                sources.append(
+                    {
+                        "id": vs.id,
+                        "name": vs.name,
+                        "type": "virtual",
+                        "online": True,  # Virtual sources are always "online"
+                        "source_type": vs.source_type,
+                        "running": vs.is_running,
+                    }
+                )
 
         return jsonify(sources)
 
@@ -917,16 +955,19 @@ def create_app(
     def api_scenes_list():
         """List all saved scenes."""
         scenes = app.config["scenes"]
-        return jsonify([
-            {"id": s_id, "name": s["name"], "description": s.get("description", "")}
-            for s_id, s in scenes.items()
-        ])
+        return jsonify(
+            [
+                {"id": s_id, "name": s["name"], "description": s.get("description", "")}
+                for s_id, s in scenes.items()
+            ]
+        )
 
     @app.route("/api/scenes", methods=["POST"])
     def api_scenes_create():
         """Create a new scene from current state."""
         import uuid
         import time
+
         data = request.json or {}
         name = data.get("name", "Untitled Scene")
         description = data.get("description", "")
@@ -942,7 +983,11 @@ def create_app(
                 route_state["transform"] = {
                     "brightness": route.transform.brightness,
                     "gamma": route.transform.gamma,
-                    "scale_mode": route.transform.scale_mode.value if hasattr(route.transform.scale_mode, 'value') else str(route.transform.scale_mode),
+                    "scale_mode": (
+                        route.transform.scale_mode.value
+                        if hasattr(route.transform.scale_mode, "value")
+                        else str(route.transform.scale_mode)
+                    ),
                     "mirror_x": route.transform.mirror_x,
                     "mirror_y": route.transform.mirror_y,
                 }
@@ -955,20 +1000,21 @@ def create_app(
                     "id": vs.id,
                     "is_running": vs.is_running,
                 }
-                if hasattr(vs, 'controls') and vs.controls:
+                if hasattr(vs, "controls") and vs.controls:
                     vs_state["control_values"] = {
-                        ctrl.id: vs.controls.get_value(ctrl.id)
-                        for ctrl in vs.controls.to_list()
+                        ctrl.id: vs.controls.get_value(ctrl.id) for ctrl in vs.controls.to_list()
                     }
                 vs_states.append(vs_state)
 
         rule_states = []
         if rule_engine:
             for rule in rule_engine.rules:
-                rule_states.append({
-                    "id": rule.id,
-                    "enabled": rule.enabled,
-                })
+                rule_states.append(
+                    {
+                        "id": rule.id,
+                        "enabled": rule.enabled,
+                    }
+                )
 
         scene_id = str(uuid.uuid4())[:8]
         scene = {
@@ -1015,10 +1061,16 @@ def create_app(
                     run_async(router.disable_route(route.id))
                 # Apply transform if present
                 if "transform" in rs and route.transform:
-                    route.transform.brightness = rs["transform"].get("brightness", route.transform.brightness)
+                    route.transform.brightness = rs["transform"].get(
+                        "brightness", route.transform.brightness
+                    )
                     route.transform.gamma = rs["transform"].get("gamma", route.transform.gamma)
-                    route.transform.mirror_x = rs["transform"].get("mirror_x", route.transform.mirror_x)
-                    route.transform.mirror_y = rs["transform"].get("mirror_y", route.transform.mirror_y)
+                    route.transform.mirror_x = rs["transform"].get(
+                        "mirror_x", route.transform.mirror_x
+                    )
+                    route.transform.mirror_y = rs["transform"].get(
+                        "mirror_y", route.transform.mirror_y
+                    )
                 applied["routes"] += 1
             except Exception as e:
                 logger.warning("Failed to apply route state for %s: %s", rs["route_id"], e)
@@ -1038,7 +1090,7 @@ def create_app(
                         run_async(virtual_source_manager.start_source(vs.id))
                     elif not vs_state.get("is_running") and vs.is_running:
                         run_async(virtual_source_manager.stop_source(vs.id))
-                    if "control_values" in vs_state and hasattr(vs, 'controls'):
+                    if "control_values" in vs_state and hasattr(vs, "controls"):
                         for ctrl_id, value in vs_state["control_values"].items():
                             vs.controls.set_value(ctrl_id, value)
                     applied["virtual_sources"] += 1
@@ -1090,7 +1142,9 @@ def create_app(
             logger.warning(f"Could not read existing config: {e}")
 
         # Update only the routes, rules, virtual_sources, and sink_groups sections
-        existing_config["virtual_sources"] = virtual_source_manager.to_config() if virtual_source_manager else []
+        existing_config["virtual_sources"] = (
+            virtual_source_manager.to_config() if virtual_source_manager else []
+        )
         existing_config["rules"] = rule_engine.to_config() if rule_engine else []
         existing_config["sequences"] = sequence_manager.to_config() if sequence_manager else []
         existing_config["sink_groups"] = controller.sink_group_manager.to_config()
@@ -1184,10 +1238,12 @@ def create_app(
         lf = route._last_frame
         pixels = lf.tolist() if lf is not None else []
 
-        return jsonify({
-            "pixels": [[int(c) for c in p] for p in pixels],
-            "dimensions": list(dims),
-        })
+        return jsonify(
+            {
+                "pixels": [[int(c) for c in p] for p in pixels],
+                "dimensions": list(dims),
+            }
+        )
 
     @app.route("/api/sinks/<sink_id>/preview")
     def api_sink_preview(sink_id: str) -> Any:
@@ -1278,7 +1334,15 @@ def create_app(
     def api_virtual_source_types() -> Any:
         """List available virtual source types."""
         # Categorization mapping
-        matrix_patterns = {"grid", "corners", "sweep", "checkerboard", "pixel_index", "coordinates", "test_card"}
+        matrix_patterns = {
+            "grid",
+            "corners",
+            "sweep",
+            "checkerboard",
+            "pixel_index",
+            "coordinates",
+            "test_card",
+        }
         media_sources = {"image"}
         visualizers = {"bar_graph", "multi_bar", "vu_meter"}
         monitors = {"system_monitor", "cpu_cores"}
@@ -1304,12 +1368,14 @@ def create_app(
             if type_class.__doc__:
                 description = type_class.__doc__.split("\n")[0].strip()
 
-            types.append({
-                "type": type_name,
-                "name": type_name.replace("_", " ").title(),
-                "category": category,
-                "description": description,
-            })
+            types.append(
+                {
+                    "type": type_name,
+                    "name": type_name.replace("_", " ").title(),
+                    "category": category,
+                    "description": description,
+                }
+            )
         return jsonify(types)
 
     @app.route("/api/virtual-sources", methods=["POST"])
@@ -1505,20 +1571,24 @@ def create_app(
 
             image_data = file.read()
             if source.load_image_bytes(image_data):
-                return jsonify({
-                    "status": "ok",
-                    "image": source.to_dict().get("image_info", {}),
-                })
+                return jsonify(
+                    {
+                        "status": "ok",
+                        "image": source.to_dict().get("image_info", {}),
+                    }
+                )
             return jsonify({"error": "Failed to load image"}), 400
 
         # Handle JSON path
         data = request.get_json(silent=True)
         if data and "path" in data:
             if source._load_image_file(data["path"]):
-                return jsonify({
-                    "status": "ok",
-                    "image": source.to_dict().get("image_info", {}),
-                })
+                return jsonify(
+                    {
+                        "status": "ok",
+                        "image": source.to_dict().get("image_info", {}),
+                    }
+                )
             return jsonify({"error": f"Failed to load image from path: {data['path']}"}), 400
 
         return jsonify({"error": "No file or path provided"}), 400
@@ -1575,7 +1645,7 @@ def create_app(
         num_pixels = width * height
         try:
             frame = run_on_loop(source.render_frame, num_pixels)
-            pixels = frame.tolist() if hasattr(frame, 'tolist') else list(frame)
+            pixels = frame.tolist() if hasattr(frame, "tolist") else list(frame)
         except Exception:
             # Return empty preview on error
             pixels = []
@@ -1603,10 +1673,10 @@ def create_app(
         if not isinstance(source, ImageSource) or source._image is None:
             # Return a 1x1 transparent pixel
             return Response(
-                b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01'
-                b'\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00'
-                b'\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00'
-                b'\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82',
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+                b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
+                b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
+                b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82",
                 mimetype="image/png",
             )
 
@@ -1652,16 +1722,18 @@ def create_app(
 
         vp_x, vp_y, vp_w, vp_h = source.get_viewport_rect()
 
-        return jsonify({
-            "image_width": source._image_width,
-            "image_height": source._image_height,
-            "viewport_x": vp_x,
-            "viewport_y": vp_y,
-            "viewport_width": vp_w,
-            "viewport_height": vp_h,
-            "zoom": source.get_control("zoom"),
-            "pan_mode": source.get_control("pan_mode"),
-        })
+        return jsonify(
+            {
+                "image_width": source._image_width,
+                "image_height": source._image_height,
+                "viewport_x": vp_x,
+                "viewport_y": vp_y,
+                "viewport_width": vp_w,
+                "viewport_height": vp_h,
+                "zoom": source.get_control("zoom"),
+                "pan_mode": source.get_control("pan_mode"),
+            }
+        )
 
     # ==================== Page: Scalar Sources ====================
 
@@ -1687,11 +1759,13 @@ def create_app(
         """List available scalar source types."""
         types = []
         for type_name, type_class in SCALAR_SOURCE_TYPES.items():
-            types.append({
-                "type": type_name,
-                "name": type_name.replace("_", " ").title(),
-                "description": type_class.__doc__.split("\n")[0] if type_class.__doc__ else "",
-            })
+            types.append(
+                {
+                    "type": type_name,
+                    "name": type_name.replace("_", " ").title(),
+                    "description": type_class.__doc__.split("\n")[0] if type_class.__doc__ else "",
+                }
+            )
         return jsonify(types)
 
     @app.route("/api/scalar-sources", methods=["POST"])
@@ -1797,11 +1871,13 @@ def create_app(
             return jsonify({"error": "Scalar source not found"}), 404
 
         sample = source.sample()
-        return jsonify({
-            "values": sample.tolist(),
-            "channels": [ch.model_dump() for ch in source.channels],
-            "channel_arrays": [arr.model_dump() for arr in source.channel_arrays],
-        })
+        return jsonify(
+            {
+                "values": sample.tolist(),
+                "channels": [ch.model_dump() for ch in source.channels],
+                "channel_arrays": [arr.model_dump() for arr in source.channel_arrays],
+            }
+        )
 
     @app.route("/api/scalar-sources/<source_id>/start", methods=["POST"])
     def api_scalar_source_start(source_id: str) -> Any:
@@ -1837,8 +1913,14 @@ def create_app(
         # Serialize objects to dicts for JSON in template
         sinks_data = [{"id": s.id, "name": s.name} for s in controller.sinks]
         routes_data = [{"id": r.id, "name": r.name} for r in router.routes]
-        vs_data = [{"id": vs.id, "name": vs.name} for vs in (virtual_source_manager.sources if virtual_source_manager else [])]
-        seq_data = [{"id": s.id, "name": s.name} for s in (sequence_manager.sequences if sequence_manager else [])]
+        vs_data = [
+            {"id": vs.id, "name": vs.name}
+            for vs in (virtual_source_manager.sources if virtual_source_manager else [])
+        ]
+        seq_data = [
+            {"id": s.id, "name": s.name}
+            for s in (sequence_manager.sequences if sequence_manager else [])
+        ]
 
         return render_template(
             "rules.html",
@@ -1883,12 +1965,14 @@ def create_app(
             return jsonify({"error": "Sink not found"}), 404
 
         inputs = input_manager.get_inputs_for_sink(sink_id)
-        return jsonify({
-            "sink_id": sink_id,
-            "sink_name": sink.name,
-            "connected": input_manager.is_connected_to_sink(sink_id),
-            "inputs": [inp.to_dict() for inp in inputs],
-        })
+        return jsonify(
+            {
+                "sink_id": sink_id,
+                "sink_name": sink.name,
+                "connected": input_manager.is_connected_to_sink(sink_id),
+                "inputs": [inp.to_dict() for inp in inputs],
+            }
+        )
 
     @app.route("/api/sinks/<sink_id>/available-controls")
     def api_sink_available_controls(sink_id: str) -> Any:
@@ -1902,11 +1986,13 @@ def create_app(
             return jsonify({"error": "Sink not found"}), 404
 
         controls = sink.controls or []
-        return jsonify({
-            "sink_id": sink_id,
-            "sink_name": sink.name,
-            "controls": controls,
-        })
+        return jsonify(
+            {
+                "sink_id": sink_id,
+                "sink_name": sink.name,
+                "controls": controls,
+            }
+        )
 
     # ==================== API: Rules ====================
 
@@ -2072,26 +2158,23 @@ def create_app(
     @app.route("/api/rules/action-types")
     def api_rule_action_types() -> Any:
         """List available action types."""
-        return jsonify([
-            {"type": t.value, "name": t.name.replace("_", " ").title()}
-            for t in ActionType
-        ])
+        return jsonify(
+            [{"type": t.value, "name": t.name.replace("_", " ").title()} for t in ActionType]
+        )
 
     @app.route("/api/rules/trigger-types")
     def api_rule_trigger_types() -> Any:
         """List available trigger types."""
-        return jsonify([
-            {"type": t.value, "name": t.name.replace("_", " ").title()}
-            for t in TriggerType
-        ])
+        return jsonify(
+            [{"type": t.value, "name": t.name.replace("_", " ").title()} for t in TriggerType]
+        )
 
     @app.route("/api/rules/comparison-ops")
     def api_rule_comparison_ops() -> Any:
         """List available comparison operators."""
-        return jsonify([
-            {"value": c.value, "name": c.name.replace("_", " ").title()}
-            for c in ComparisonOp
-        ])
+        return jsonify(
+            [{"value": c.value, "name": c.name.replace("_", " ").title()} for c in ComparisonOp]
+        )
 
     # ==================== Sequence API ====================
 

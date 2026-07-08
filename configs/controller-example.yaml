@@ -9,7 +9,46 @@ device:
 web:
   enabled: true
   port: 8080
-  host: "0.0.0.0"
+  host: "127.0.0.1"   # loopback-only by default; set 0.0.0.0 to expose to the LAN.
+                      # A non-loopback host requires auth + TLS below, or the
+                      # explicit allow_insecure_http acknowledgment.
+
+  # Explicit opt-out: serve plain HTTP / no auth on a network-reachable
+  # address. Credentials then cross the network in cleartext — the UI shows
+  # a persistent warning banner. Without this, the controller refuses to
+  # start in that configuration.
+  # allow_insecure_http: true
+
+  # TLS for the web UI/API. mode: auto = HTTPS whenever host is non-loopback
+  # (a self-signed certificate is generated on first run); on/off force it.
+  # tls:
+  #   mode: auto
+  #   cert: "~/.config/ltp/web-cert.pem"
+  #   key: "~/.config/ltp/web-key.pem"
+  #   trust_proxy: false   # true if a reverse proxy terminates TLS in front
+
+  # Authentication + authorization. Roles: admin / operator / viewer.
+  # Scope narrows an operator or token: devices (sink ids or group ids),
+  # automation (none|run|manage), scenes (run|manage).
+  # Generate hashes with: ltp-controller --hash-password / --generate-token
+  # auth:
+  #   session_ttl_seconds: 43200
+  #   users:
+  #     - name: alice
+  #       role: admin
+  #       password_hash: "pbkdf2$sha256$600000$..."
+  #     - name: bob                     # one device, no schedules
+  #       role: operator
+  #       password_hash: "pbkdf2$sha256$600000$..."
+  #       scope:
+  #         devices: ["hall-strip"]
+  #         automation: none
+  #   tokens:
+  #     - name: home-assistant
+  #       role: operator
+  #       hash: "sha256:..."
+  #       scope:
+  #         automation: run
 
 discovery:
   browse_interval: 5.0    # Seconds between mDNS browse refreshes

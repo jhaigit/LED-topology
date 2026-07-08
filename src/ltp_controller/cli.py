@@ -47,6 +47,69 @@ def load_config(path: str) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def resolve_web_security(
+    args: argparse.Namespace, web_config: dict[str, Any], web_host: str
+) -> tuple[Any, Any, str]:
+    """Apply the startup security matrix (implementation plan §Transport modes).
+
+    Returns (WebSecuritySettings, ssl_context-or-None, scheme). Raises
+    SecurityConfigError for combinations the operator has not explicitly
+    accepted.
+    """
+    from ltp_controller.security import (
+        AuthManager,
+        WebSecuritySettings,
+        default_config_dir,
+        ensure_secret_key,
+        ensure_self_signed_cert,
+        resolve_transport,
+    )
+
+    auth_config = web_config.get("auth", {})
+    # Auth defaults on when the block carries any credentials; an absent or
+    # empty block means auth off (backward compatible — the transport matrix
+    # decides whether that is acceptable for this bind address).
+    has_credentials = bool(
+        auth_config.get("users") or auth_config.get("tokens") or auth_config.get("password_hash")
+    )
+    auth_enabled = auth_config.get("enabled", has_credentials)
+
+    tls_config = web_config.get("tls", {})
+    tls_mode = args.tls or tls_config.get("mode", "auto")
+    allow_insecure = args.insecure_http or web_config.get("allow_insecure_http", False)
+
+    decision = resolve_transport(
+        host=web_host,
+        tls_mode=tls_mode,
+        trust_proxy=tls_config.get("trust_proxy", False),
+        allow_insecure_http=allow_insecure,
+        auth_enabled=auth_enabled,
+    )
+    for warning in decision.warnings:
+        logger.warning(warning)
+
+    auth = AuthManager.from_config(auth_config) if auth_enabled else None
+
+    ssl_context = None
+    if decision.use_tls:
+        config_dir = default_config_dir()
+        cert = Path(
+            args.tls_cert or tls_config.get("cert", config_dir / "web-cert.pem")
+        ).expanduser()
+        key = Path(args.tls_key or tls_config.get("key", config_dir / "web-key.pem")).expanduser()
+        ensure_self_signed_cert(cert, key)
+        ssl_context = (str(cert), str(key))
+
+    settings = WebSecuritySettings(
+        auth=auth,
+        secret_key=ensure_secret_key() if auth else None,
+        secure_cookies=decision.secure_cookies,
+        insecure_transport=decision.insecure_transport,
+        trust_proxy=decision.trust_proxy,
+    )
+    return settings, ssl_context, decision.scheme
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
@@ -55,7 +118,8 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         type=str,
         help="Path to configuration file",
     )
@@ -74,14 +138,49 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--web-port",
         type=int,
-        default=8080,
+        default=None,
         help="Web interface port (default: 8080)",
     )
     parser.add_argument(
         "--web-host",
         type=str,
-        default="0.0.0.0",
-        help="Web interface host (default: 0.0.0.0)",
+        default=None,
+        help="Web interface host (default: 127.0.0.1; set explicitly to expose)",
+    )
+    parser.add_argument(
+        "--insecure-http",
+        action="store_true",
+        help="Allow plain HTTP (and/or no auth) on a network-reachable address. "
+        "Credentials will cross the network in cleartext.",
+    )
+    parser.add_argument(
+        "--tls",
+        choices=["auto", "on", "off"],
+        default=None,
+        help="TLS mode for the web interface (default: auto = on when host is " "non-loopback)",
+    )
+    parser.add_argument(
+        "--tls-cert",
+        type=str,
+        default=None,
+        help="Path to TLS certificate (default: auto-generated self-signed)",
+    )
+    parser.add_argument(
+        "--tls-key",
+        type=str,
+        default=None,
+        help="Path to TLS private key",
+    )
+    parser.add_argument(
+        "--hash-password",
+        action="store_true",
+        help="Prompt for a password, print its hash for web.auth, and exit",
+    )
+    parser.add_argument(
+        "--generate-token",
+        action="store_true",
+        help="Generate an API bearer token, print it with its hash for "
+        "web.auth.tokens, and exit",
     )
     parser.add_argument(
         "--no-web",
@@ -120,9 +219,12 @@ async def run_controller(
     rule_engine: RuleEngine | None = None,
     sequence_manager: SequenceManager | None = None,
     web_enabled: bool = True,
-    web_host: str = "0.0.0.0",
+    web_host: str = "127.0.0.1",
     web_port: int = 8080,
     config_path: str | None = None,
+    web_security: Any = None,
+    web_ssl_context: Any = None,
+    web_scheme: str = "http",
 ) -> None:
     """Run the controller."""
     stop_event = asyncio.Event()
@@ -168,7 +270,9 @@ async def run_controller(
 
             # Pass the event loop so Flask can schedule async work on it
             app = create_app(
-                controller, router, sink_controller,
+                controller,
+                router,
+                sink_controller,
                 virtual_source_manager=virtual_source_manager,
                 scalar_source_manager=scalar_source_manager,
                 input_manager=input_manager,
@@ -176,14 +280,21 @@ async def run_controller(
                 sequence_manager=sequence_manager,
                 event_loop=loop,
                 config_path=config_path,
+                web_security=web_security,
             )
 
             def run_web() -> None:
-                app.run(host=web_host, port=web_port, threaded=True, use_reloader=False)
+                app.run(
+                    host=web_host,
+                    port=web_port,
+                    threaded=True,
+                    use_reloader=False,
+                    ssl_context=web_ssl_context,
+                )
 
             web_thread = threading.Thread(target=run_web, daemon=True)
             web_thread.start()
-            logger.info(f"Web interface available at http://{web_host}:{web_port}")
+            logger.info(f"Web interface available at {web_scheme}://{web_host}:{web_port}")
 
         logger.info("Controller running. Press Ctrl+C to stop.")
 
@@ -210,6 +321,27 @@ async def run_controller(
 def main() -> int:
     """Main entry point."""
     args = parse_args()
+
+    # Credential utilities: print and exit, never log the secret.
+    if args.hash_password:
+        import getpass
+
+        from ltp_controller.security import hash_password
+
+        password = getpass.getpass("Password: ")
+        if password != getpass.getpass("Repeat: "):
+            print("Passwords do not match.", file=sys.stderr)
+            return 1
+        print(hash_password(password))
+        return 0
+
+    if args.generate_token:
+        from ltp_controller.security import generate_token
+
+        token, token_hash = generate_token()
+        print(f"Token (give to the client, shown only once): {token}")
+        print(f"Hash (put in web.auth.tokens):               {token_hash}")
+        return 0
 
     # Load config file if specified
     config: dict[str, Any] = {}
@@ -242,11 +374,25 @@ def main() -> int:
         except ValueError:
             pass
 
-    # Get web configuration
+    # Get web configuration. Default bind is loopback-only (fail closed);
+    # exposing to the network requires TLS+auth or an explicit
+    # allow_insecure_http acknowledgment — see resolve_web_security().
     web_config = config.get("web", {})
     web_enabled = not args.no_web and not args.cli and web_config.get("enabled", True)
-    web_host = args.web_host or web_config.get("host", "0.0.0.0")
+    web_host = args.web_host or web_config.get("host", "127.0.0.1")
     web_port = args.web_port or web_config.get("port", 8080)
+
+    web_security = None
+    web_ssl_context = None
+    web_scheme = "http"
+    if web_enabled:
+        try:
+            web_security, web_ssl_context, web_scheme = resolve_web_security(
+                args, web_config, web_host
+            )
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
 
     # Create controller
     controller = Controller(
@@ -378,6 +524,9 @@ def main() -> int:
                 web_host=web_host,
                 web_port=web_port,
                 config_path=args.config,
+                web_security=web_security,
+                web_ssl_context=web_ssl_context,
+                web_scheme=web_scheme,
             )
         )
     except KeyboardInterrupt:

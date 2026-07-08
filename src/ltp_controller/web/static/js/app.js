@@ -1,5 +1,31 @@
 // LTP Controller Web Interface JavaScript
 
+// CSRF + session handling: wrap fetch once so every same-origin mutating
+// request (apiCall and the direct fetch() call sites alike) carries the
+// CSRF token, and an expired session bounces to the login page.
+(function() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    const csrfToken = meta ? meta.content : '';
+    const origFetch = window.fetch.bind(window);
+    window.fetch = function(input, init) {
+        init = init || {};
+        const method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
+        const url = typeof input === 'string' ? input : input.url;
+        const sameOrigin = !/^[a-z]+:\/\//i.test(url) || url.startsWith(window.location.origin);
+        if (csrfToken && sameOrigin && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+            const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+            headers.set('X-CSRF-Token', csrfToken);
+            init.headers = headers;
+        }
+        return origFetch(input, init).then(response => {
+            if (response.status === 401 && !window.location.pathname.startsWith('/login')) {
+                window.location = '/login?next=' + encodeURIComponent(window.location.pathname);
+            }
+            return response;
+        });
+    };
+})();
+
 // Theme management
 (function() {
     const saved = localStorage.getItem('ltp-theme');

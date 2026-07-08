@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - LTP Controller</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .login-wrap {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-card {
+            width: 320px;
+            padding: 2rem;
+            border: 1px solid var(--border, #444);
+            background: var(--bg-secondary, transparent);
+            border-radius: 8px;
+        }
+        .login-card h1 { margin: 0 0 1.5rem; font-size: 1.25rem; text-align: center; }
+        .login-card label { display: block; margin: 0.75rem 0 0.25rem; }
+        .login-card input {
+            width: 100%;
+            padding: 0.5rem;
+            box-sizing: border-box;
+        }
+        .login-card button { width: 100%; margin-top: 1.25rem; padding: 0.5rem; }
+        .login-error { color: #e05555; margin: 0.75rem 0 0; text-align: center; }
+    </style>
+</head>
+<body>
+    {% if insecure_transport %}
+    <div class="insecure-banner" role="alert">
+        Insecure transport &mdash; login credentials are not protected on this network
+    </div>
+    {% endif %}
+    <div class="login-wrap">
+        <form class="login-card" method="post" action="{{ url_for('login', next=request.args.get('next')) }}">
+            <h1>LTP Controller</h1>
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text" autocomplete="username" autofocus required>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <button class="btn btn-primary" type="submit">Log in</button>
+            {% if error %}<p class="login-error">{{ error }}</p>{% endif %}
+        </form>
+    </div>
+</body>
+</html>

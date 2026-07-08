@@ -783,3 +783,18 @@ h2 {
         padding: 0.75rem;
     }
 }
+
+/* Security UI (auth + insecure-transport banner) */
+.insecure-banner {
+    background: #8b1a1a;
+    color: #ffffff;
+    text-align: center;
+    padding: 6px 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.logout-form {
+    display: inline;
+    margin-left: 8px;
+}

@@ -43,6 +43,7 @@ controller = [
     "flask>=3.0.0",
     "flask-cors>=4.0.0",
     "scipy>=1.10.0",
+    "cryptography>=41.0.0",
 ]
 serial = [
     "pyserial>=3.5",

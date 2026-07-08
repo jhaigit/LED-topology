@@ -4,10 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}LTP Controller{% endblock %}</title>
+    <meta name="csrf-token" content="{{ csrf_token }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body>
+    {% if insecure_transport %}
+    <div class="insecure-banner" role="alert">
+        Insecure transport &mdash; login credentials are not protected on this network
+    </div>
+    {% endif %}
     <nav class="navbar">
         <div class="navbar-brand">
             <a href="/">LTP Controller</a>
@@ -22,16 +28,28 @@
             <li><a href="/rules" class="{% if request.path == '/rules' %}active{% endif %}">Rules</a></li>
             <li><a href="/preview" class="{% if request.path == '/preview' %}active{% endif %}">Preview</a></li>
         </ul>
+        {% set is_admin = not auth_enabled or (principal and principal.role == 'admin') %}
+        {% set can_manage_scenes = is_admin or (principal and principal.role == 'operator' and principal.scope.scenes == 'manage') %}
         <div class="navbar-actions">
             <div class="scenes-wrapper">
                 <button class="btn btn-sm" onclick="LtpScenes.toggleDropdown()">Scenes</button>
+                {% if can_manage_scenes %}
                 <button class="btn btn-sm btn-primary" onclick="LtpScenes.save()" title="Save current state as scene">+ Save Scene</button>
+                {% endif %}
                 <div id="scenes-dropdown" class="scenes-dropdown" style="display: none;">
                     <div class="scenes-list"></div>
                 </div>
             </div>
             <button id="theme-toggle-btn" class="btn btn-sm" onclick="toggleTheme()" title="Toggle light/dark theme">Light/Dark</button>
+            {% if is_admin %}
             <button id="save-config-btn" class="btn btn-save" title="Save routes and rules to config file">Save Config</button>
+            {% endif %}
+            {% if auth_enabled and principal %}
+            <form method="post" action="/logout" class="logout-form" title="Logged in as {{ principal.name }} ({{ principal.role }})">
+                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-sm">{{ principal.name }} &middot; Log out</button>
+            </form>
+            {% endif %}
         </div>
     </nav>
 
