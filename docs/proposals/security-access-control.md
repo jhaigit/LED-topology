@@ -218,6 +218,14 @@ Therefore:
 - **Loopback exception:** when `web.host` is `127.0.0.1`, the credential never
   leaves the host, so TLS is optional there (browser-on-same-machine or an
   SSH-tunnel workflow). This keeps the simple single-box case friction-free.
+- **Explicit insecure opt-out:** the system must also be able to run
+  off-loopback *without* TLS when the operator explicitly configures
+  `web.allow_insecure_http: true`. This is a conscious, acknowledged
+  compromise of the confidentiality boundary — credentials then cross the
+  wire in cleartext — and the controller makes it loud (startup warning,
+  persistent UI banner, `Secure` cookie flag dropped). Access control
+  itself (auth, roles, CSRF) still applies in full. See the implementation
+  plan for the exact startup decision matrix.
 - Cookies are issued `Secure` + `HttpOnly` + `SameSite=Strict`; bearer tokens
   are only accepted over TLS (or from loopback).
 
@@ -226,8 +234,9 @@ Therefore:
 - **Default `web.host` becomes `127.0.0.1`.** Local-only by default.
 - The controller **refuses to start** if `web.host` is **non-loopback** and
   either `web.auth.enabled` is false **or** TLS is neither enabled nor delegated
-  to a trusted proxy. You cannot accidentally expose an unauthenticated *or*
-  cleartext-credential API to the LAN.
+  to a trusted proxy — **unless** `web.allow_insecure_http: true` is set
+  (§1.3). You cannot *accidentally* expose an unauthenticated or
+  cleartext-credential API to the LAN; you can only do it on purpose.
 - Set a persistent random `secret_key` (generated on first run, stored in the
   config dir) for session-cookie signing.
 
