@@ -207,11 +207,34 @@ class Controller:
         elif device.is_sink:
             self._handle_sink(device, is_added)
 
+    @staticmethod
+    def _migrate_renamed_device(
+        registry: dict[str, DeviceState], device: DiscoveredDevice, kind: str
+    ) -> None:
+        """Re-key an existing entry when a known device re-advertises under a
+        new mDNS service name (device rename).
+
+        Devices are keyed by service name, but the service name derives from
+        the display name — so a rename would otherwise create a second entry
+        that shares the old one's device UUID, leaving a stale ghost the
+        sinks page shows and id-based lookups can grab until a manual purge.
+        Reusing the existing state also preserves its stable id, first_seen,
+        and control history. Works for either arrival order of the new
+        advertisement vs. the old name's goodbye."""
+        if not device.device_id:
+            return
+        for key, state in list(registry.items()):
+            if key != device.name and state.device.device_id == device.device_id:
+                registry[device.name] = registry.pop(key)
+                logger.info(f"{kind} renamed: '{key}' -> '{device.name}' ({device.device_id})")
+                return
+
     def _handle_source(self, device: DiscoveredDevice, is_added: bool) -> None:
         """Handle source device changes."""
         device_key = device.name
 
         if is_added:
+            self._migrate_renamed_device(self._sources, device, "Source")
             if device_key in self._sources:
                 # Update existing
                 state = self._sources[device_key]
@@ -220,7 +243,11 @@ class Controller:
                 state.device = device
                 state.last_seen = datetime.now()
                 state.online = True
-                reason = "port changed" if state.port != old_port else "back online" if was_offline else "re-advertised"
+                reason = (
+                    "port changed"
+                    if state.port != old_port
+                    else "back online" if was_offline else "re-advertised"
+                )
                 logger.info(f"Source updated ({reason}): {state.name}")
                 asyncio.create_task(self._fetch_device_info(state))
             else:
@@ -247,6 +274,7 @@ class Controller:
         device_key = device.name
 
         if is_added:
+            self._migrate_renamed_device(self._sinks, device, "Sink")
             if device_key in self._sinks:
                 # Update existing
                 state = self._sinks[device_key]
@@ -257,7 +285,11 @@ class Controller:
                 state.online = True
                 # Refetch capabilities on any re-advertisement (covers restart,
                 # port change, and coming back online)
-                reason = "port changed" if state.port != old_port else "back online" if was_offline else "re-advertised"
+                reason = (
+                    "port changed"
+                    if state.port != old_port
+                    else "back online" if was_offline else "re-advertised"
+                )
                 logger.info(f"Sink updated ({reason}): {state.name}")
                 asyncio.create_task(self._fetch_device_info(state))
             else:
@@ -395,7 +427,9 @@ class Controller:
             # Only mark offline after multiple consecutive failures
             if state.online and state._consecutive_failures >= FAILURES_BEFORE_OFFLINE:
                 state.online = False
-                logger.info(f"Device went offline: {state.name} (after {state._consecutive_failures} failed health checks)")
+                logger.info(
+                    f"Device went offline: {state.name} (after {state._consecutive_failures} failed health checks)"
+                )
                 if state.device.is_source and self._on_source_change:
                     self._on_source_change(state, False)
                 elif state.device.is_sink and self._on_sink_change:
@@ -488,9 +522,7 @@ class Controller:
 
         return None
 
-    async def set_device_control(
-        self, state: DeviceState, control_id: str, value: Any
-    ) -> bool:
+    async def set_device_control(self, state: DeviceState, control_id: str, value: Any) -> bool:
         """Set a control value on a device."""
         if not state.online:
             logger.warning(f"Cannot set control on offline device: {state.name}")
@@ -519,9 +551,7 @@ class Controller:
                 logger.info(f"Set {control_id}={value} on {state.name}")
                 return True
             else:
-                logger.warning(
-                    f"Failed to set control on {state.name}: {resp.data}"
-                )
+                logger.warning(f"Failed to set control on {state.name}: {resp.data}")
                 return False
 
         except Exception as e:
