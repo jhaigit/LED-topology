@@ -133,6 +133,11 @@ class DeviceOverride(BaseModel):
     description: str | None = None
     baudrate: int | None = None
     pixels: int = 0  # 0 = auto-detect
+    # Layer 2 PSK (32 hex chars) enabling device-auth for this sink. The
+    # serial bridge enforces it network-side, so the AVR needs no changes
+    # (proposal §Layer 3 — serial devices get anti-hijack for free).
+    auth_psk: str | None = None
+    auth_read_open: bool = True
 
 
 class FleetConfig(BaseModel):
@@ -319,6 +324,8 @@ class SerialFleet:
             baudrate=(override.baudrate if override else None) or self.config.scan.baudrate,
             timeout=self.config.scan.probe_timeout,
             pixels=override.pixels if override else 0,
+            auth_psk=(override.auth_psk if override else None) or "",
+            auth_read_open=override.auth_read_open if override else True,
         )
         sink = SerialSink(sink_config, renderer=renderer)
         task = asyncio.create_task(sink.run(), name=f"sink:{candidate.real_path}")

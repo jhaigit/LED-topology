@@ -5,10 +5,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from libltp import ControlClient, Message, MessageType
+from libltp import ClaimSession, ControlClient, DeviceAuthError, Message, MessageType
 from libltp.addr import format_address_port
+from libltp.deviceauth import PRIVILEGED_TYPES
 
 from ltp_controller.controller import Controller, DeviceState
+from ltp_controller.keystore import KeyStore
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,9 @@ class PooledConnection:
     port: int
     connected: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Layer 2 claim session (None if the device is Level 0 or unkeyed).
+    session: ClaimSession | None = None
+    renew_task: asyncio.Task | None = None
 
 
 class SinkConnectionPool:
@@ -41,8 +46,10 @@ class SinkConnectionPool:
     - Unsolicited message routing (INPUT_EVENT) to registered listeners
     """
 
-    def __init__(self, controller: Controller):
+    def __init__(self, controller: Controller, keystore: KeyStore | None = None):
         self.controller = controller
+        self.keystore = keystore
+        self.controller_id = str(controller.device_id)
         self._connections: dict[str, PooledConnection] = {}
         self._unsolicited_listeners: list[UnsolicitedMessageCallback] = []
         self._running = False
@@ -163,17 +170,98 @@ class SinkConnectionPool:
                 connected=True,
             )
             self._connections[sink_id] = conn
-            logger.info(f"Pool: Connected to sink {sink.name} ({format_address_port(sink.host, sink.port)})")
+            logger.info(
+                f"Pool: Connected to sink {sink.name} ({format_address_port(sink.host, sink.port)})"
+            )
+
+        # Claim the device (Layer 2) outside the pool lock — the handshake is
+        # a network round-trip. A failure here leaves the connection up but
+        # unclaimed; privileged requests will then fail loudly.
+        await self._maybe_claim(sink, conn)
+
+    def _device_auth_mode(self, sink: DeviceState) -> str:
+        """auth mode advertised in the mDNS TXT record (none|siphash)."""
+        props = sink.device.properties or {}
+        return str(props.get("auth", "none"))
+
+    async def _maybe_claim(self, sink: DeviceState, conn: PooledConnection) -> None:
+        """Run the claim handshake if the device requires auth and we hold
+        its key. Sets conn.session and starts the renew loop on success."""
+        if self.keystore is None or self._device_auth_mode(sink) == "none":
+            return
+        psk = self.keystore.get_key(sink.id)
+        if psk is None:
+            logger.warning(
+                f"Pool: sink {sink.name} requires auth but no key is stored — "
+                "privileged commands will be rejected. Pair the device to add its key."
+            )
+            sink.auth_state = "unkeyed"
+            return
+
+        session = ClaimSession(conn.client, psk, self.controller_id)
+        try:
+            await session.claim()
+        except DeviceAuthError as e:
+            if e.code.name == "LEASE_HELD":
+                logger.warning(
+                    f"Pool: sink {sink.name} is claimed by another controller "
+                    f"(retry in {e.retry_after}s)"
+                )
+                sink.auth_state = "held"
+            else:
+                logger.error(f"Pool: claim failed for {sink.name}: {e}")
+                sink.auth_state = "error"
+            return
+        except Exception as e:
+            logger.error(f"Pool: claim error for {sink.name}: {e!r}")
+            return
+
+        conn.session = session
+        sink.auth_state = "owned"
+        conn.renew_task = asyncio.create_task(self._renew_loop(sink_id=sink.id))
+        logger.info(f"Pool: claimed sink {sink.name} (lease {session.lease_seconds:.0f}s)")
+
+    async def _renew_loop(self, sink_id: str) -> None:
+        """Renew the lease at half the lease interval so a transient failure
+        has a second chance before expiry."""
+        while self._running:
+            conn = self._connections.get(sink_id)
+            if conn is None or conn.session is None or not conn.client.is_connected:
+                return
+            await asyncio.sleep(max(2.0, conn.session.lease_seconds / 2))
+            conn = self._connections.get(sink_id)
+            if conn is None or conn.session is None:
+                return
+            async with conn.lock:
+                try:
+                    await conn.session.renew()
+                except Exception as e:
+                    logger.warning(f"Pool: lease renew failed for {sink_id}: {e}")
+                    return
 
     async def _disconnect_from_sink(self, sink_id: str) -> None:
         """Disconnect from a sink."""
         conn = self._connections.pop(sink_id, None)
         if conn:
             conn.connected = False
+            if conn.renew_task:
+                conn.renew_task.cancel()
+                conn.renew_task = None
+            # Best-effort graceful release so the device frees its lease
+            # immediately rather than waiting for expiry.
+            if conn.session and conn.client.is_connected:
+                try:
+                    await conn.session.release()
+                except Exception:
+                    pass
+            conn.session = None
             try:
                 await conn.client.close()
             except Exception:
                 pass
+            sink = self.controller.get_sink(sink_id)
+            if sink is not None:
+                sink.auth_state = "none"
             logger.info(f"Pool: Disconnected from sink {sink_id}")
 
     async def _reconnect_loop(self) -> None:
@@ -220,9 +308,7 @@ class SinkConnectionPool:
             return conn
         return None
 
-    async def request(
-        self, sink_id: str, message: Message, timeout: float = 5.0
-    ) -> Message | None:
+    async def request(self, sink_id: str, message: Message, timeout: float = 5.0) -> Message | None:
         """Send a request and wait for response on a pooled connection.
 
         Args:
@@ -247,10 +333,16 @@ class SinkConnectionPool:
 
         async with conn.lock:
             try:
-                logger.debug(f"Pool: Sending {message.type.value} seq={message.seq} to {sink_id} "
-                             f"(connected={conn.connected}, is_connected={conn.client.is_connected})")
+                if conn.session is not None and message.type in PRIVILEGED_TYPES:
+                    conn.session.sign(message)
+                logger.debug(
+                    f"Pool: Sending {message.type.value} seq={message.seq} to {sink_id} "
+                    f"(connected={conn.connected}, is_connected={conn.client.is_connected})"
+                )
                 result = await conn.client.request(message, timeout=timeout)
-                logger.debug(f"Pool: Got response for {sink_id}: {result.type.value if result else 'None'}")
+                logger.debug(
+                    f"Pool: Got response for {sink_id}: {result.type.value if result else 'None'}"
+                )
                 if result:
                     sink = self.controller.get_sink(sink_id)
                     if sink and sink.backend_connected is False:
@@ -279,6 +371,8 @@ class SinkConnectionPool:
 
         async with conn.lock:
             try:
+                if conn.session is not None and message.type in PRIVILEGED_TYPES:
+                    conn.session.sign(message)
                 await conn.client.send(message)
                 return True
             except Exception as e:

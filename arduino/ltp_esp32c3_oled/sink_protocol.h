@@ -12,6 +12,7 @@
 #include <ArduinoJson.h>
 #include "config.h"
 #include "build_info.h"
+#include "device_auth.h"
 
 // Message types (matching Python libltp.types.MessageType)
 #define MSG_CAPABILITY_REQUEST      "capability_request"
@@ -63,7 +64,20 @@ public:
         config = cfg;
         oled = oledDriver;
         udpPort = dataPort;
+        // Arm the Layer 2 guard from stored config (inert if not enabled).
+        uint8_t deviceId[48];
+        makeDeviceId(deviceIdStr);
+        authGuard.begin(
+            cfg->authEnabled ? cfg->authPsk : nullptr,
+            deviceIdStr,
+            cfg->authReadOpen != 0
+        );
     }
+
+    DeviceAuthGuard& auth() { return authGuard; }
+
+    // Owner IP for data-plane binding (empty when unclaimed/open).
+    const char* streamOwnerIp() { return authGuard.getOwnerIp(); }
 
     // Set callbacks
     void setLocalModeCallback(LocalModeCallback callback) {
@@ -86,8 +100,9 @@ public:
         onReboot = callback;
     }
 
-    // Process a JSON message line, returns response
-    String processMessage(const String& jsonLine) {
+    // Process a JSON message line, returns response. peerIp identifies the
+    // sender (for the auth guard's data-plane binding); may be nullptr.
+    String processMessage(const String& jsonLine, const char* peerIp = nullptr) {
         JsonDocument doc;
         DeserializationError error = deserializeJson(doc, jsonLine);
 
@@ -102,6 +117,18 @@ public:
 
         if (!msgType) {
             return buildError(seq, 1, "INVALID_FORMAT", "Missing message type");
+        }
+
+        // Layer 2 guard: consumes handshake messages and gates privileged
+        // commands. control_set/stream_setup/stream_control mutate state, so
+        // they require a valid MAC once auth is enabled.
+        bool privileged =
+            strcmp(msgType, MSG_CONTROL_SET) == 0 ||
+            strcmp(msgType, MSG_STREAM_SETUP) == 0 ||
+            strcmp(msgType, MSG_STREAM_CONTROL) == 0;
+        String guardResp;
+        if (authGuard.handle(msgType, seq, doc, peerIp, privileged, guardResp)) {
+            return guardResp;
         }
 
         if (strcmp(msgType, MSG_CAPABILITY_REQUEST) == 0) {
@@ -140,6 +167,18 @@ private:
     uint8_t activeColorFormat;
     char streamId[32];
     int lastSeq;
+    DeviceAuthGuard authGuard;
+    char deviceIdStr[48];
+
+    // Build the device UUID from the WiFi MAC (stable per board).
+    static void makeDeviceId(char* out) {
+        uint8_t mac[6];
+        WiFi.macAddress(mac);
+        snprintf(out, 48,
+                 "%02x%02x%02x%02x-%02x%02x-4000-8000-%02x%02x%02x%02x%02x%02x",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
     LocalModeCallback onLocalModeChange;
     CycleTimeCallback onCycleTimeChange;
     BrightnessCallback onBrightnessChange;
@@ -155,13 +194,8 @@ private:
         JsonObject device = doc["device"].to<JsonObject>();
 
         // Device ID - generate from MAC
-        uint8_t mac[6];
-        WiFi.macAddress(mac);
         char deviceId[48];
-        snprintf(deviceId, sizeof(deviceId),
-                 "%02x%02x%02x%02x-%02x%02x-4000-8000-%02x%02x%02x%02x%02x%02x",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        makeDeviceId(deviceId);
         device["id"] = deviceId;
         device["name"] = config->deviceName;
         device["description"] = "ESP32-C3 72x40 OLED Display";
@@ -186,7 +220,11 @@ private:
 
         device["preferred_format"] = "mono_packed";
         device["max_refresh_hz"] = 15;
-        device["protocol_version"] = "0.1";
+        device["protocol_version"] = PROTOCOL_VERSION;
+
+        // Layer 2 auth advertisement (mode/required/claimed)
+        JsonObject authObj = device["auth"].to<JsonObject>();
+        authGuard.fillAuthInfo(authObj);
 
         // Build info
         device["firmware_name"] = FIRMWARE_NAME;

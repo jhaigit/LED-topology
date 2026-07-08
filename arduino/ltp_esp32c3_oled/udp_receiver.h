@@ -86,6 +86,9 @@ public:
     uint16_t getPort() const { return port; }
     bool isRunning() const { return running; }
 
+    // Restrict accepted datagrams to one source IP (empty = accept any).
+    void bindSource(const String& ip) { boundSource = ip; }
+
     // Process incoming packets, read pixels into caller's buffer.
     // Handles chunked frames: each chunk is placed at
     // chunk_index * MAX_CHUNK_PIXELS * 3 in the buffer.
@@ -134,6 +137,7 @@ private:
     uint32_t packetsDropped;
     uint16_t totalPixelsThisFrame;
     uint8_t lastColorFormat;
+    String boundSource;   // Layer 2: accept pixels only from this IP
 
     // Drain any remaining bytes from current UDP packet
     void flushPacket() {
@@ -143,6 +147,14 @@ private:
     // Process a single UDP packet (one chunk).
     // Returns total pixels in frame when frame is complete, 0 otherwise.
     uint16_t receiveOne(uint8_t* pixelBuffer, uint16_t maxPixels) {
+        // Layer 2 data-plane binding (proposal §2.6): once claimed, only the
+        // owner's source IP may feed pixels. Drop everything else.
+        if (boundSource.length() > 0 &&
+            udp.remoteIP().toString() != boundSource) {
+            flushPacket();
+            return 0;
+        }
+
         // Read header (12 bytes: 8 packet + 4 frame)
         uint8_t header[PACKET_HEADER_SIZE + FRAME_HEADER_SIZE];
         int headerLen = udp.read(header, sizeof(header));

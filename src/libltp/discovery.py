@@ -55,6 +55,7 @@ def _set_pdeathsig() -> None:
         except (OSError, AttributeError):
             pass  # Not critical, just a backup mechanism
 
+
 from libltp.types import (
     ColorFormat,
     DataType,
@@ -349,6 +350,7 @@ class SinkAdvertiser(ServiceAdvertiser):
         data_type: DataType = DataType.VISUAL,
         scalar_format: ScalarFormat | None = None,
         channels: int = 0,
+        auth: str = "none",
     ):
         dims = dimensions or [pixels]
         dim_str = "x".join(str(d) for d in dims)
@@ -360,6 +362,9 @@ class SinkAdvertiser(ServiceAdvertiser):
             "color": color_format.name.lower(),
             "rate": str(max_rate),
             "data": data_type.value,
+            # Device-auth mode (none|siphash) so controllers know before
+            # connecting whether a claim handshake is required.
+            "auth": auth,
         }
 
         # Add scalar-specific properties
@@ -505,9 +510,7 @@ class ServiceBrowser:
         state_change: ServiceStateChange,
     ) -> None:
         """Handle service state change (sync callback, schedules async work)."""
-        asyncio.create_task(
-            self._handle_service_change(zeroconf, service_type, name, state_change)
-        )
+        asyncio.create_task(self._handle_service_change(zeroconf, service_type, name, state_change))
 
     async def _handle_service_change(
         self,
@@ -531,9 +534,7 @@ class ServiceBrowser:
         except Exception as e:
             logger.error(f"Error handling service change for {name}: {e}", exc_info=True)
 
-    async def _add_service(
-        self, zeroconf: Zeroconf, service_type: str, name: str
-    ) -> None:
+    async def _add_service(self, zeroconf: Zeroconf, service_type: str, name: str) -> None:
         """Add or update a discovered service."""
         logger.debug(f"Resolving service: {name} ({service_type})")
         info = AsyncServiceInfo(service_type, name)
@@ -603,7 +604,9 @@ class ServiceBrowser:
 
         # Prefer IPv4, fall back to IPv6
         addresses = ipv4_addresses if ipv4_addresses else ipv6_addresses
-        logger.debug(f"Addresses for {name}: IPv4={ipv4_addresses}, IPv6={ipv6_addresses}, using={addresses}")
+        logger.debug(
+            f"Addresses for {name}: IPv4={ipv4_addresses}, IPv6={ipv6_addresses}, using={addresses}"
+        )
 
         if not addresses:
             logger.warning(f"No addresses for {name} (server={info.server})")
@@ -650,9 +653,7 @@ class ServiceBrowser:
             f"Service disappeared: {device.display_name} "
             f"(grace period {self._removal_grace_period}s)"
         )
-        self._pending_removals[name] = asyncio.create_task(
-            self._delayed_removal(name)
-        )
+        self._pending_removals[name] = asyncio.create_task(self._delayed_removal(name))
 
     async def _delayed_removal(self, name: str) -> None:
         """Wait for the grace period, then remove the service."""

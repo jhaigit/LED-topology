@@ -42,6 +42,9 @@ class DeviceState:
     capabilities: dict[str, Any] | None = None
     controls: dict[str, Any] | None = None
     control_values: dict[str, Any] = field(default_factory=dict)
+    # Layer 2 claim state: none|owned|held|unkeyed|error (proposal Layer 2).
+    # "none" = device is not auth-gated or we haven't attempted a claim.
+    auth_state: str = "none"
     # Stable ID that persists across device restarts
     _stable_id: str | None = field(default=None, repr=False)
     # Track consecutive failures before marking offline
@@ -104,6 +107,7 @@ class DeviceState:
             "capabilities": self.capabilities,
             "controls": self.controls,
             "control_values": self.control_values,
+            "auth_state": self.auth_state,
         }
         if self.backend_connected is not None:
             result["backend_connected"] = self.backend_connected

@@ -94,6 +94,12 @@ void loadConfig() {
     }
     config.cycleTime = preferences.getUShort("cycleTime", 10);
 
+    // Layer 2 auth (absent on v1 configs -> disabled, i.e. Level 0).
+    config.authEnabled = preferences.getUChar("authEn", 0);
+    config.authReadOpen = preferences.getUChar("authRdOpen", 1);
+    size_t got = preferences.getBytes("authPsk", config.authPsk, 16);
+    if (got != 16) memset(config.authPsk, 0, 16);
+
     preferences.end();
 
     // Ensure device name is set
@@ -115,6 +121,9 @@ void saveConfig() {
     preferences.putUChar("localMode", config.localMode);
     preferences.putString("timezone", config.timezone);
     preferences.putUShort("cycleTime", config.cycleTime);
+    preferences.putUChar("authEn", config.authEnabled);
+    preferences.putUChar("authRdOpen", config.authReadOpen);
+    preferences.putBytes("authPsk", config.authPsk, 16);
 
     preferences.end();
     dualOut.println("Config saved to NVS");
@@ -131,6 +140,9 @@ void resetConfig() {
     config.localMode = LOCAL_MODE_INFO;
     strncpy(config.timezone, CLOCK_DEFAULT_TZ, sizeof(config.timezone));
     config.cycleTime = 10;
+    config.authEnabled = 0;
+    config.authReadOpen = 1;
+    memset(config.authPsk, 0, sizeof(config.authPsk));
 
     saveConfig();
     dualOut.println("Config reset to defaults");
@@ -219,10 +231,47 @@ void UsbTerminal::processCommand(const char* line) {
         cmdReset();
     } else if (strcmp(cmd, "reboot") == 0) {
         cmdReboot();
+    } else if (strcmp(cmd, "auth-key") == 0) {
+        cmdAuthKey(args);
+    } else if (strcmp(cmd, "auth-off") == 0) {
+        cmdAuthOff();
     } else {
         dualOut.printf("Unknown command: %s\r\n", cmd);
         dualOut.println("Type 'help' for available commands");
     }
+}
+
+// Set the Layer 2 pre-shared key over USB (the cleartext-free enrollment
+// path — physical access is already full trust). Arg is 32 hex chars.
+void UsbTerminal::cmdAuthKey(const char* args) {
+    size_t len = strlen(args);
+    if (len != 32) {
+        dualOut.println("Usage: auth-key <32 hex chars>  (16-byte PSK)");
+        dualOut.println("Generate one with: openssl rand -hex 16");
+        return;
+    }
+    uint8_t key[16];
+    for (int i = 0; i < 16; i++) {
+        char b[3] = { args[i * 2], args[i * 2 + 1], 0 };
+        char* endp = nullptr;
+        long v = strtol(b, &endp, 16);
+        if (endp == b || *endp != '\0') {
+            dualOut.println("auth-key: invalid hex");
+            return;
+        }
+        key[i] = (uint8_t)v;
+    }
+    memcpy(config->authPsk, key, 16);
+    config->authEnabled = 1;
+    dualOut.println("Auth key set. Device now requires a claim (Level 2).");
+    dualOut.println("Run 'save' to persist, then 'reboot'. Add the SAME key to");
+    dualOut.println("the controller keystore under this device's UUID.");
+}
+
+void UsbTerminal::cmdAuthOff() {
+    config->authEnabled = 0;
+    memset(config->authPsk, 0, 16);
+    dualOut.println("Auth disabled (Level 0). Run 'save' then 'reboot'.");
 }
 
 void UsbTerminal::cmdHelp() {
@@ -235,6 +284,8 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("     0=blank, 1=info, 2=clock, 3=pattern, 255=cycle");
     dualOut.println("  timezone <tz_string>    - Set POSIX timezone");
     dualOut.println("  info                    - Show current status");
+    dualOut.println("  auth-key <32 hex>       - Set Layer 2 PSK, require claim");
+    dualOut.println("  auth-off                - Disable Layer 2 auth (open)");
     dualOut.println("  save                    - Save config to NVS");
     dualOut.println("  reboot                  - Reboot the device");
     dualOut.println("  reset                   - Factory reset");
@@ -251,6 +302,7 @@ void UsbTerminal::cmdInfo() {
     dualOut.printf("Uptime: %lu sec\r\n", millis() / 1000);
     dualOut.printf("Display: %dx%d OLED\r\n", OLED_WIDTH, OLED_HEIGHT);
     dualOut.printf("WiFi SSID: %s\r\n", config->wifiSsid);
+    dualOut.printf("Auth: %s\r\n", config->authEnabled ? "Level 2 (siphash)" : "Level 0 (open)");
 
     if (transport) {
         const char* stateStr;
@@ -520,11 +572,18 @@ void loop() {
         // Start UDP receiver now that WiFi is ready
         udpReceiver.begin(5001);
 
-        // Start mDNS advertisement
-        wifi.startMdns(deviceId, config.deviceName, OLED_TOTAL_PIXELS, "rgb", 15);
+        // Start mDNS advertisement (advertise auth mode so controllers know
+        // a claim is required before connecting)
+        wifi.startMdns(deviceId, config.deviceName, OLED_TOTAL_PIXELS, "rgb", 15,
+                       protocol.auth().isEnabled() ? "siphash" : "none");
 
-        // Start telnet server
+        // Start telnet server (disabled by default — unauthenticated LAN
+        // shell; build with -DLTP_ENABLE_TELNET=1 to restore for debugging)
+#if LTP_ENABLE_TELNET
         telnet.begin();
+#else
+        dualOut.println("Telnet: disabled (LTP_ENABLE_TELNET=0)");
+#endif
 
         // Start NTP time sync
         configTzTime(config.timezone, CLOCK_NTP_SERVER);
@@ -558,10 +617,16 @@ void loop() {
         String line = wifi.readLine();
         if (line.length() > 0) {
             dualOut.printf("TCP rx[%d]: %d bytes\r\n", wifi.getActiveClient(), line.length());
-            String response = protocol.processMessage(line);
+            String peerIp = wifi.getActiveClientIp();
+            String response = protocol.processMessage(line, peerIp.c_str());
             if (response.length() > 0) {
                 dualOut.printf("TCP tx[%d]: %d bytes\r\n", wifi.getActiveClient(), response.length());
                 wifi.send(response);
+            }
+            // Layer 2: bind the pixel receiver to the claim owner's IP so
+            // only the authorized controller can feed frames (empty = open).
+            if (protocol.auth().isEnabled()) {
+                udpReceiver.bindSource(String(protocol.streamOwnerIp()));
             }
         }
     }
@@ -605,10 +670,12 @@ void loop() {
     // Update USB terminal
     terminal.update();
 
-    // Update telnet server and process commands
+    // Update telnet server and process commands (only when compiled in)
+#if LTP_ENABLE_TELNET
     if (telnet.update()) {
         terminal.processCommand(telnet.getLine());
     }
+#endif
 
     yield();
 }

@@ -131,7 +131,8 @@ public:
 
     // Start mDNS with sink service advertisement
     void startMdns(const char* deviceId, const char* displayName,
-                   int pixels, const char* colorFormat, int maxRate) {
+                   int pixels, const char* colorFormat, int maxRate,
+                   const char* authMode = "none") {
         if (mdnsStarted) return;
 
         if (!MDNS.begin(hostname)) {
@@ -159,6 +160,7 @@ public:
         txt.add("color", colorFormat);
         txt.add("rate", maxRate);
         txt.add("data", "visual");
+        txt.add("auth", authMode);
         txt.apply();
 
         mdnsStarted = true;
@@ -209,6 +211,15 @@ public:
 
     // Get active client index (for debugging)
     int getActiveClient() const { return activeClientIdx; }
+
+    // IP of the client that last sent a line (for auth data-plane binding).
+    String getActiveClientIp() {
+        if (activeClientIdx >= 0 && activeClientIdx < MAX_TCP_CLIENTS
+            && clients[activeClientIdx]) {
+            return clients[activeClientIdx].remoteIP().toString();
+        }
+        return String();
+    }
 
     // Read a line from any client (returns empty string if no complete line)
     // Sets activeClientIdx to the client that sent the message

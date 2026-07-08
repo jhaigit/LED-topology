@@ -192,6 +192,11 @@ class SinkConfig(BaseModel):
     # Inputs: list of {"name": str, "type": str} dicts
     inputs: list[dict[str, str]] = Field(default_factory=list)
 
+    # Layer 2 device auth (proposal §2): psk = 32 hex chars (16 bytes),
+    # empty = Level 0 (open). read_open allows reads without a claim.
+    auth_psk: str = ""
+    auth_read_open: bool = True
+
 
 class Sink:
     """LTP Sink - receives and displays LED data."""
@@ -219,6 +224,15 @@ class Sink:
         self._control_server: ControlServer | None = None
         self._data_receiver: DataReceiver | None = None
         self._stream_manager = StreamManager()
+
+        from libltp.deviceauth import DeviceAuthGuard
+
+        _psk = bytes.fromhex(self.config.auth_psk) if self.config.auth_psk else None
+        self._auth_guard = DeviceAuthGuard(
+            psk=_psk,
+            device_id=str(self.config.device_id),
+            read_open=self.config.auth_read_open,
+        )
 
         # Statistics
         self._stats = SinkStats()
@@ -293,26 +307,34 @@ class Sink:
     def _setup_renderer(self) -> None:
         """Set up the renderer."""
         if self.config.renderer_type == "terminal":
-            term_config = TerminalConfig(
-                title=self.config.name, **self.config.renderer_config
-            )
+            term_config = TerminalConfig(title=self.config.name, **self.config.renderer_config)
             self._renderer = TerminalRenderer(term_config)
         elif self.config.renderer_type == "gui":
             from ltp_sink.renderers.gui import GuiConfig, GuiRenderer
 
-            gui_config = GuiConfig(
-                title=self.config.name, **self.config.renderer_config
-            )
+            gui_config = GuiConfig(title=self.config.name, **self.config.renderer_config)
             renderer = GuiRenderer(gui_config)
             renderer.set_stats_provider(self.get_stats)
             renderer.set_input_callback(self._gui_input_callback)
             renderer.set_input_defs(self._inputs)
             self._renderer = renderer
 
-    def _handle_message(self, message: Message) -> Message | None:
+    def _handle_message(self, message: Message, conn: Any = None) -> Message | None:
         """Handle incoming control channel messages."""
         logger.debug(f"Handling message: {message.type}")
         self._stats.record_control_rx()
+
+        peer_ip = getattr(conn, "peer_ip", None)
+        guard_response = self._auth_guard.handle_message(message, peer_ip)
+        if guard_response is not None:
+            self._stats.record_control_tx()
+            return guard_response
+        if (
+            message.type == MessageType.STREAM_SETUP
+            and self._auth_guard.enabled
+            and self._data_receiver is not None
+        ):
+            self._data_receiver.bind_source(self._auth_guard.owner_ip)
 
         response = None
         if message.type == MessageType.CAPABILITY_REQUEST:
@@ -344,6 +366,7 @@ class Sink:
             "max_refresh_hz": self.config.max_refresh_hz,
             "protocol_version": "0.1",
             "controls": self._controls.to_list(),
+            "auth": self._auth_guard.auth_info(),
         }
         if self._inputs:
             device_info["inputs"] = [
@@ -390,7 +413,9 @@ class Sink:
             self._stream_manager.stop_stream(stream_id)
             self._stats.active_streams = len(self._stream_manager.active_streams)
             # Clear renderer display when stream stops
-            logger.info(f"Stopping stream {stream_id}, clearing renderer (renderer={self._renderer})")
+            logger.info(
+                f"Stopping stream {stream_id}, clearing renderer (renderer={self._renderer})"
+            )
             if self._renderer:
                 self._renderer.clear()
                 logger.info(f"Renderer cleared for stream {stream_id}")
@@ -568,6 +593,7 @@ class Sink:
             color_format=self.config.color_format,
             max_rate=self.config.max_refresh_hz,
             has_controls=True,
+            auth="siphash" if self._auth_guard.enabled else "none",
         )
         await self._advertiser.start()
 
