@@ -17,6 +17,7 @@ from ltp_serial_cli.protocol import (
     CMD_PIXEL_SET_RANGE,
     CMD_RESET,
     CMD_SET_CONTROL,
+    CMD_SET_NAME,
     CMD_SHOW,
     FLAG_ACK_REQ,
     FLAG_ERROR,
@@ -104,6 +105,48 @@ class TestBuildPacket:
     def test_max_payload_ok(self):
         data = LtpProtocol.build_packet(CMD_NOP, b"\x00" * LTP_MAX_PAYLOAD)
         assert len(data) == 6 + LTP_MAX_PAYLOAD
+
+
+class TestSetNameCommand:
+    def _device(self):
+        # __init__ does not open the port; stub the transport so set_name
+        # only exercises the encoding + opcode path.
+        from ltp_serial_cli.device import LtpDevice
+
+        dev = LtpDevice("/dev/null")
+        dev._sent = []
+        dev._send = lambda pkt: dev._sent.append(pkt)  # type: ignore[method-assign]
+        dev._wait_for_ack = lambda cmd: None  # type: ignore[method-assign]
+        return dev
+
+    def _payload_of(self, raw):
+        length = raw[2] | (raw[3] << 8)
+        assert raw[4] == CMD_SET_NAME
+        return raw[5 : 5 + length]
+
+    def test_ascii_name(self):
+        dev = self._device()
+        dev.set_name("Hall Strip")
+        assert self._payload_of(dev._sent[0]) == b"Hall Strip"
+
+    def test_truncated_to_15_bytes(self):
+        dev = self._device()
+        dev.set_name("A very long device name")
+        assert self._payload_of(dev._sent[0]) == b"A very long dev"  # 15 bytes
+
+    def test_utf8_not_split_mid_sequence(self):
+        dev = self._device()
+        # 5x "é" (2 bytes each) = 10 bytes, + "1234567" would exceed 15 in a
+        # way that lands mid-character; the cut must fall on a char boundary.
+        dev.set_name("ééééé123456")
+        payload = self._payload_of(dev._sent[0])
+        assert len(payload) <= 15
+        payload.decode("utf-8")  # must not raise
+
+    def test_empty_name_sends_empty_payload(self):
+        dev = self._device()
+        dev.set_name("")
+        assert self._payload_of(dev._sent[0]) == b""
 
 
 class TestFeedAndParse:

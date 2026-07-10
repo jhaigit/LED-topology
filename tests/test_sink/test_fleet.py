@@ -126,8 +126,10 @@ def _cand(path="/dev/ttyUSB0", usb_serial=None):
     return PortCandidate(path=path, real_path=path, usb_serial=usb_serial)
 
 
-def _rep(name="", pixels=None, dimensions=None):
-    return ReportedInfo(name=name, pixels=pixels, dimensions=dimensions)
+def _rep(name="", pixels=None, dimensions=None, firmware_name=""):
+    return ReportedInfo(
+        name=name, pixels=pixels, dimensions=dimensions, firmware_name=firmware_name
+    )
 
 
 class TestMatching:
@@ -141,6 +143,22 @@ class TestMatching:
         m = DeviceMatch(device_name="ltp-328p-dual")
         assert m.matches(_cand(), _rep("ltp-328p-dual"))
         assert not m.matches(_cand(), _rep("other"))
+
+    def test_firmware_name_match(self):
+        # firmware_name targets a software LOAD, regardless of instance name.
+        m = DeviceMatch(firmware_name="ltp-328p-dual")
+        assert m.matches(_cand(), _rep("Hall Strip", firmware_name="ltp-328p-dual"))
+        assert m.matches(_cand(), _rep("Kitchen", firmware_name="ltp-328p-dual"))
+        assert not m.matches(_cand(), _rep("Hall Strip", firmware_name="ltp-apa102"))
+        # A rule that keys only on firmware_name must not match a device that
+        # reported no build info.
+        assert not m.matches(_cand(), _rep("Hall Strip"))
+
+    def test_firmware_name_anded_with_instance(self):
+        # firmware_name (type) AND device_name (instance) together.
+        m = DeviceMatch(firmware_name="ltp-328p-dual", device_name="Hall Strip")
+        assert m.matches(_cand(), _rep("Hall Strip", firmware_name="ltp-328p-dual"))
+        assert not m.matches(_cand(), _rep("Kitchen", firmware_name="ltp-328p-dual"))
 
     def test_port_glob_match(self):
         m = DeviceMatch(port="/dev/ttyUSB*")
@@ -182,6 +200,19 @@ class TestMatching:
         assert ReportedInfo.from_device_info(strip).dimensions == "160"
         assert ReportedInfo.from_device_info(None).name == ""
 
+    def test_reported_info_captures_firmware_name(self):
+        info = SimpleNamespace(
+            device_name="Hall Strip", total_pixels=160, is_matrix=False, dimensions=(160, 1)
+        )
+        build = SimpleNamespace(firmware_name="ltp-328p-dual")
+        rep = ReportedInfo.from_device_info(info, build)
+        assert rep.firmware_name == "ltp-328p-dual"
+        assert rep.name == "Hall Strip"
+        # No build info -> empty firmware_name, not an error.
+        assert ReportedInfo.from_device_info(info).firmware_name == ""
+        # firmware_name available even when device_info is None.
+        assert ReportedInfo.from_device_info(None, build).firmware_name == "ltp-328p-dual"
+
 
 class TestStableIdentity:
     def test_uuid_stable_across_port_moves(self):
@@ -214,8 +245,9 @@ class TestStableIdentity:
 
 
 class FakeRenderer:
-    def __init__(self, device_name="ltp-328p-dual"):
+    def __init__(self, device_name="ltp-328p-dual", firmware_name="ltp-328p-dual"):
         self.device_info = SimpleNamespace(device_name=device_name)
+        self.build_info = SimpleNamespace(firmware_name=firmware_name)
         self.closed = False
 
     def close(self):

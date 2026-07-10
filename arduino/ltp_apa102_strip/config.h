@@ -69,8 +69,9 @@
 
 #define FIRMWARE_VERSION_MAJOR  1
 #define FIRMWARE_VERSION_MINOR  0
-#define DEVICE_NAME         "LTP-APA102"
+#define DEVICE_NAME         "LTP-APA102"           // factory default instance name
 #define FIRMWARE_NAME       "ltp-apa102-strip"
+#define DEVICE_NAME_MAXLEN  15                 // wire cap: 15 chars + NUL (INFO_ALL/SET_NAME)
 
 // Maximum payload size (Teensy 3.2 has 64KB RAM)
 #define MAX_PAYLOAD_SIZE    2048

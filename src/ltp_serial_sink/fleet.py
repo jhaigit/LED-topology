@@ -66,6 +66,10 @@ class DeviceMatch(BaseModel):
 
     usb_serial: str | None = None
     device_name: str | None = None  # exact match on device-reported name
+    # Firmware/software-load identity (e.g. "ltp-328p-dual") — the same for
+    # every board running a given build, distinct from the per-instance
+    # device_name. Use to target every device of a firmware type at once.
+    firmware_name: str | None = None
     port: str | None = None  # fnmatch glob on the port path
     # Device-reported geometry, for telling apart two boards with identical
     # firmware name and indistinguishable USB adapters (no serial, same
@@ -77,6 +81,7 @@ class DeviceMatch(BaseModel):
         if (
             self.usb_serial is None
             and self.device_name is None
+            and self.firmware_name is None
             and self.port is None
             and self.pixels is None
             and self.dimensions is None
@@ -85,6 +90,8 @@ class DeviceMatch(BaseModel):
         if self.usb_serial is not None and self.usb_serial != (candidate.usb_serial or ""):
             return False
         if self.device_name is not None and self.device_name != reported.name:
+            return False
+        if self.firmware_name is not None and self.firmware_name != reported.firmware_name:
             return False
         if self.pixels is not None and self.pixels != reported.pixels:
             return False
@@ -105,11 +112,12 @@ class ReportedInfo:
     name: str = ""
     pixels: int | None = None
     dimensions: str | None = None  # "WxH" for matrices, "N" for strips
+    firmware_name: str = ""  # software-load id from INFO_BUILD, e.g. "ltp-328p-dual"
 
     @classmethod
-    def from_device_info(cls, info: Any) -> "ReportedInfo":
+    def from_device_info(cls, info: Any, build: Any = None) -> "ReportedInfo":
         if info is None:
-            return cls()
+            return cls(firmware_name=getattr(build, "firmware_name", "") or "")
         pixels = getattr(info, "total_pixels", None)
         dimensions = None
         if getattr(info, "is_matrix", False):
@@ -121,6 +129,7 @@ class ReportedInfo:
             name=getattr(info, "device_name", "") or "",
             pixels=pixels,
             dimensions=dimensions,
+            firmware_name=getattr(build, "firmware_name", "") or "",
         )
 
 
@@ -297,7 +306,7 @@ class SerialFleet:
         return list(await asyncio.gather(*(probe_one(c) for c in candidates)))
 
     def _adopt(self, candidate: PortCandidate, renderer: V2Renderer) -> None:
-        reported = ReportedInfo.from_device_info(renderer.device_info)
+        reported = ReportedInfo.from_device_info(renderer.device_info, renderer.build_info)
         reported_name = reported.name
         override = self._override_for(candidate, reported)
 

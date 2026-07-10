@@ -71,8 +71,9 @@
 
 #define FIRMWARE_VERSION_MAJOR  1
 #define FIRMWARE_VERSION_MINOR  0
-#define DEVICE_NAME         "LTP-328P-Dual"
+#define DEVICE_NAME         "LTP-328P-Dual"   // factory default; runtime name is EEPROM-backed
 #define FIRMWARE_NAME       "ltp-328p-dual"
+#define DEVICE_NAME_MAXLEN  15                 // wire cap: 15 chars + NUL (INFO_ALL/SET_NAME)
 
 // Maximum payload size (ATmega328P has 2KB RAM - keep small)
 #define MAX_PAYLOAD_SIZE    256

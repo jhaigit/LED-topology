@@ -83,7 +83,19 @@ device.set_auto_show(bool)       # Auto-display after PIXEL_FRAME
 device.set_frame_ack(bool)       # Enable frame acknowledgments
 device.set_control(id, value)    # Set generic control
 device.get_control(id)           # Get control value
+device.set_name("Hall Strip")    # Set + persist instance name (<=15 bytes)
 ```
+
+The instance name is stored in EEPROM, so identical boards can be told apart
+without reflashing. From the command line:
+
+```bash
+python -m ltp_serial_cli -p /dev/ttyUSB0 set-name "Hall Strip"
+```
+
+An empty name (`set-name ""`) restores the firmware's factory-default name.
+The name is distinct from `firmware_name` (the software-load/type id shown in
+`info` under Build), which is fixed per firmware build.
 
 #### Query Commands
 

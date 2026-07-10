@@ -45,7 +45,7 @@ LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 // ============================================================================
 
 #define CONFIG_MAGIC        0x4C54  // "LT" - magic number for validation
-#define CONFIG_VERSION      2
+#define CONFIG_VERSION      3       // v3: appended EEPROM-backed device name
 #define EEPROM_CONFIG_ADDR  0
 
 // Local display modes
@@ -71,6 +71,9 @@ struct Config {
     uint8_t localMode;          // Local display mode (0 = blank/off)
     bool inputEventsEnabled;    // Send input events over serial
     uint16_t cycleTime;         // Seconds per mode when cycling
+    // v3: EEPROM-backed instance name. Appended last so an older blob
+    // migrates without disturbing the offsets of any field above it.
+    char name[DEVICE_NAME_MAXLEN + 1];
 } config = {
     CONFIG_MAGIC,
     CONFIG_VERSION,
@@ -82,7 +85,8 @@ struct Config {
     0,                          // statusInterval
     LOCAL_MODE_BLANK,           // localMode (default blank)
     true,                       // inputEventsEnabled
-    10                          // cycleTime (seconds)
+    10,                         // cycleTime (seconds)
+    DEVICE_NAME                 // name (factory default)
 };
 
 // ============================================================================
@@ -232,7 +236,16 @@ void loadConfig() {
 
     if (stored.magic == CONFIG_MAGIC && stored.version == CONFIG_VERSION) {
         config = stored;
+    } else if (stored.magic == CONFIG_MAGIC && stored.version == 2) {
+        // Migrate v2 -> v3: name field appended; earlier fields keep their
+        // offsets, so keep them and just default the (stale) name.
+        config = stored;
+        config.version = CONFIG_VERSION;
+        strncpy(config.name, DEVICE_NAME, DEVICE_NAME_MAXLEN);
+        config.name[DEVICE_NAME_MAXLEN] = '\0';
+        saveConfig();
     }
+    config.name[DEVICE_NAME_MAXLEN] = '\0';  // never let a stale EEPROM name run past bounds
 }
 
 void resetConfig() {
@@ -246,7 +259,30 @@ void resetConfig() {
     config.statusInterval = 0;
     config.localMode = LOCAL_MODE_BLANK;
     config.inputEventsEnabled = true;
+    strncpy(config.name, DEVICE_NAME, DEVICE_NAME_MAXLEN);
+    config.name[DEVICE_NAME_MAXLEN] = '\0';
     saveConfig();
+}
+
+// CMD_SET_NAME: payload is the new instance name (raw UTF-8, no length
+// prefix). Copied up to DEVICE_NAME_MAXLEN bytes, persisted immediately,
+// and acked. An empty payload restores the factory default name.
+void handleSetName(const uint8_t* payload, uint16_t length) {
+    uint8_t n = 0;
+    while (n < length && n < DEVICE_NAME_MAXLEN) {
+        uint8_t c = payload[n];
+        if (c == 0) break;
+        if (c < 0x20) c = '_';
+        config.name[n] = (char)c;
+        n++;
+    }
+    config.name[n] = '\0';
+    if (n == 0) {
+        strncpy(config.name, DEVICE_NAME, DEVICE_NAME_MAXLEN);
+        config.name[DEVICE_NAME_MAXLEN] = '\0';
+    }
+    saveConfig();
+    protocol.sendAck(CMD_SET_NAME);
 }
 
 // ============================================================================
@@ -779,9 +815,9 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             response[respLen++] = NUM_INPUTS;
             // Device name
             {
-                const char* name = DEVICE_NAME;
+                const char* name = config.name;
                 uint8_t i = 0;
-                while (name[i] && i < 15) {
+                while (name[i] && i < DEVICE_NAME_MAXLEN) {
                     response[respLen++] = name[i++];
                 }
                 response[respLen++] = 0;
@@ -1336,6 +1372,10 @@ void processPacket(const LtpPacket& pkt) {
             resetConfig();
             setBrightness(config.brightness);
             protocol.sendAck(CMD_RESET_CONFIG);
+            break;
+
+        case CMD_SET_NAME:
+            handleSetName(pkt.payload, pkt.length);
             break;
 
         default:

@@ -63,6 +63,8 @@ CMD_SAVE_CONFIG = 0x42
 CMD_LOAD_CONFIG = 0x43
 CMD_RESET_CONFIG = 0x44
 CMD_SET_SEGMENT = 0x45
+CMD_SET_NAME = 0x46  # payload: UTF-8 name (<=15 bytes), persisted to EEPROM
+# 0x48 reserved for CMD_SET_AUTH_KEY (security plan, Layer 3)
 
 # Event Commands (0x50-0x5F)
 CMD_STATUS_UPDATE = 0x50
