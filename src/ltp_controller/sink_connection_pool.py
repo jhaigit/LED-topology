@@ -264,6 +264,16 @@ class SinkConnectionPool:
                 sink.auth_state = "none"
             logger.info(f"Pool: Disconnected from sink {sink_id}")
 
+    async def reclaim(self, sink_id: str) -> None:
+        """Drop and re-establish a sink's connection so it re-reads the
+        keystore and claims with the current key. Called after a key is
+        set/rotated/removed via the admin UI so the change takes effect at
+        once instead of waiting for the next reconnect."""
+        await self._disconnect_from_sink(sink_id)
+        sink = self.controller.get_sink(sink_id)
+        if sink is not None and sink.online:
+            await self._connect_to_sink(sink)
+
     async def _reconnect_loop(self) -> None:
         """Periodically check and reconnect to disconnected sinks."""
         while self._running:
