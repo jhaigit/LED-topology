@@ -63,6 +63,7 @@ from libltp.types import (
     PROTOCOL_VERSION,
     ScalarFormat,
     SERVICE_TYPE_CONTROLLER,
+    SERVICE_TYPE_FLEET,
     SERVICE_TYPE_SINK,
     SERVICE_TYPE_SOURCE,
     SourceMode,
@@ -98,6 +99,10 @@ class DiscoveredDevice:
     @property
     def is_controller(self) -> bool:
         return SERVICE_TYPE_CONTROLLER in self.service_type
+
+    @property
+    def is_fleet(self) -> bool:
+        return SERVICE_TYPE_FLEET in self.service_type
 
 
 def _parse_txt_properties(info: ServiceInfo) -> dict[str, str]:

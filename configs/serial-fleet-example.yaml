@@ -67,3 +67,16 @@ fleet:
     # Ignore a device without unplugging it:
     # - match: { port: "/dev/ttyUSB3" }
     #   enabled: false
+
+  # Fleet enrollment (Phase 5.1). When enabled, the fleet gets a static X25519
+  # identity and advertises a small control endpoint (_ltp-fleet._tcp) that a
+  # controller enrolls against — so device keys can be provisioned from the
+  # controller UI instead of hand-editing auth_psk above (that push lands in
+  # P5.2). The fleet pins the FIRST controller that enrolls (trust-on-first-use).
+  #   ltp-serial-sink --enroll-status   # show this fleet's fingerprint + state
+  #   ltp-serial-sink --enroll-reset    # forget the controller, allow re-enroll
+  enroll:
+    enabled: true        # set false to disable the endpoint entirely
+    port: 7420           # 0 = ephemeral; the advertised port is the bound one
+    # identity_path: ~/.config/ltp/fleet-identity   # default shown
+    # trust_path: ~/.config/ltp/fleet-trust.yaml    # default shown

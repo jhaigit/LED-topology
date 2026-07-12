@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}Fleets - LTP Controller{% endblock %}
+
+{% block content %}
+{% set is_admin = not auth_enabled or (principal and principal.role == 'admin') %}
+<div class="page-header">
+    <div>
+        <h1>Fleets</h1>
+        <p class="subtitle">Serial-sink fleets — enroll once to provision device keys remotely (no YAML editing)</p>
+    </div>
+    <div class="btn-group">
+        <button class="btn" onclick="loadFleets()" id="refresh-btn">Refresh</button>
+    </div>
+</div>
+
+<div id="controller-identity" class="subtitle" style="margin-bottom:1rem"></div>
+
+<div id="fleets-container">
+    <p class="subtitle">Loading…</p>
+</div>
+
+<script>
+const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
+function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+async function loadFleets() {
+    const container = document.getElementById('fleets-container');
+    try {
+        const resp = await fetch('/api/fleets');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        renderIdentity(data.controller_fingerprint, data.store_available);
+        renderFleets(data.fleets || []);
+    } catch (e) {
+        container.innerHTML = '<p class="error">Failed to load fleets: ' + esc(e.message) + '</p>';
+    }
+}
+
+function renderIdentity(fpr, storeAvailable) {
+    const el = document.getElementById('controller-identity');
+    if (!storeAvailable) {
+        el.innerHTML = '<span class="badge badge-warning">Fleet trust store not configured on this controller</span>';
+        return;
+    }
+    el.innerHTML = fpr
+        ? 'This controller\'s identity: <code>' + esc(fpr) + '</code>'
+        : '';
+}
+
+function renderFleets(fleets) {
+    const container = document.getElementById('fleets-container');
+    if (!fleets.length) {
+        container.innerHTML = '<p class="subtitle">No fleets discovered. Start a serial-sink fleet on the network (it advertises automatically).</p>';
+        return;
+    }
+    const rows = fleets.map(f => {
+        const status = f.trusted
+            ? '<span class="badge badge-success">Trusted</span>'
+            : (f.online ? '<span class="badge">Discovered</span>' : '<span class="badge badge-muted">Offline</span>');
+        const online = f.online ? '' : ' <span class="badge badge-muted">offline</span>';
+        let action = '';
+        if (IS_ADMIN) {
+            if (f.trusted) {
+                action = '<button class="btn btn-sm btn-danger" onclick="revokeFleet(\'' + esc(f.fleet_pub) + '\')">Revoke</button>';
+            } else if (f.online) {
+                action = '<button class="btn btn-sm btn-primary" onclick="enrollFleet(\'' + esc(f.fleet_pub) + '\', \'' + esc(f.fingerprint) + '\')">Enroll</button>';
+            }
+        }
+        return '<tr>'
+            + '<td>' + esc(f.name || '(unnamed)') + online + '</td>'
+            + '<td><code>' + esc(f.fingerprint) + '</code></td>'
+            + '<td>' + esc(f.host) + ':' + esc(f.port) + '</td>'
+            + '<td>' + status + '</td>'
+            + '<td class="actions">' + action + '</td>'
+            + '</tr>';
+    }).join('');
+    container.innerHTML =
+        '<table class="data-table">'
+        + '<thead><tr><th>Fleet</th><th>Fingerprint</th><th>Address</th><th>Status</th><th></th></tr></thead>'
+        + '<tbody>' + rows + '</tbody></table>';
+}
+
+async function enrollFleet(fleetPub, fingerprint) {
+    if (!confirm('Enroll this fleet?\n\nVerify the fingerprint matches the one shown on the fleet host:\n\n' + fingerprint)) {
+        return;
+    }
+    try {
+        const resp = await fetch('/api/fleets/' + encodeURIComponent(fleetPub) + '/enroll', {method: 'POST'});
+        const data = await resp.json();
+        if (!resp.ok || !data.enrolled) {
+            alert('Enrollment failed: ' + (data.error || resp.status));
+            return;
+        }
+        alert('Enrolled. Fingerprint: ' + data.fingerprint);
+        loadFleets();
+    } catch (e) {
+        alert('Enrollment error: ' + e.message);
+    }
+}
+
+async function revokeFleet(fleetPub) {
+    if (!confirm('Revoke trust in this fleet? Device provisioning to it will stop until re-enrolled.')) {
+        return;
+    }
+    try {
+        const resp = await fetch('/api/fleets/' + encodeURIComponent(fleetPub), {method: 'DELETE'});
+        const data = await resp.json();
+        if (!resp.ok || !data.revoked) {
+            alert('Revoke failed: ' + (data.error || resp.status));
+            return;
+        }
+        loadFleets();
+    } catch (e) {
+        alert('Revoke error: ' + e.message);
+    }
+}
+
+loadFleets();
+</script>
+{% endblock %}

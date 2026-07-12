@@ -18,7 +18,7 @@ from libltp import (
     control_get,
     control_set,
 )
-from libltp.types import SERVICE_TYPE_SINK, SERVICE_TYPE_SOURCE
+from libltp.types import SERVICE_TYPE_FLEET, SERVICE_TYPE_SINK, SERVICE_TYPE_SOURCE
 from ltp_controller.sink_group import SinkGroupManager
 
 # Avoid circular import
@@ -140,6 +140,8 @@ class Controller:
         self._advertiser: ControllerAdvertiser | None = None
         self._sources: dict[str, DeviceState] = {}
         self._sinks: dict[str, DeviceState] = {}
+        # Discovered serial-sink fleets (Phase 5.1), keyed by mDNS service name.
+        self._fleets: dict[str, DiscoveredDevice] = {}
         self._running = False
         self._health_check_task: asyncio.Task | None = None
 
@@ -152,6 +154,11 @@ class Controller:
         """Set the connection pool for shared sink connections."""
         self._connection_pool = pool
         pool.add_unsolicited_listener(self._handle_unsolicited_message)
+
+    @property
+    def fleets(self) -> list[DiscoveredDevice]:
+        """Get all discovered serial-sink fleets."""
+        return list(self._fleets.values())
 
     @property
     def sources(self) -> list[DeviceState]:
@@ -210,6 +217,18 @@ class Controller:
             self._handle_source(device, is_added)
         elif device.is_sink:
             self._handle_sink(device, is_added)
+        elif device.is_fleet:
+            self._handle_fleet(device, is_added)
+
+    def _handle_fleet(self, device: DiscoveredDevice, is_added: bool) -> None:
+        """Track discovered serial-sink fleets (advertise-only; no capability
+        fetch — the enrollment endpoint is contacted on demand)."""
+        if is_added:
+            self._fleets[device.name] = device
+            logger.info(f"Fleet discovered: {device.display_name} ({device.host})")
+        else:
+            self._fleets.pop(device.name, None)
+            logger.info(f"Fleet went offline: {device.name}")
 
     @staticmethod
     def _migrate_renamed_device(
@@ -448,7 +467,7 @@ class Controller:
 
         # Start service browser
         self._browser = ServiceBrowser(
-            service_types=[SERVICE_TYPE_SINK, SERVICE_TYPE_SOURCE],
+            service_types=[SERVICE_TYPE_SINK, SERVICE_TYPE_SOURCE, SERVICE_TYPE_FLEET],
             callback=self._on_device_discovered,
         )
         await self._browser.start()

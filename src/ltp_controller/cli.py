@@ -266,7 +266,15 @@ async def run_controller(
         # Start web interface in a separate thread
         web_thread = None
         if web_enabled:
+            from libltp.identity import Identity
+            from ltp_controller.fleet_manager import FleetStore
             from ltp_controller.web import create_app
+
+            # Fleet enrollment (Phase 5.1): the controller's static identity and
+            # its pinned-fleet trust store, both persisted 0600 under ~/.config/ltp.
+            fleet_identity = Identity.load_or_create(name="controller-identity")
+            fleet_store = FleetStore()
+            fleet_store.load()
 
             # Pass the event loop so Flask can schedule async work on it
             app = create_app(
@@ -282,6 +290,8 @@ async def run_controller(
                 config_path=config_path,
                 web_security=web_security,
                 keystore=connection_pool.keystore,
+                fleet_store=fleet_store,
+                fleet_identity=fleet_identity,
             )
 
             def run_web() -> None:

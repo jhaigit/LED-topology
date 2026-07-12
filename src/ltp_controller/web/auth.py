@@ -157,6 +157,15 @@ _POLICY: list[tuple[frozenset[str], re.Pattern[str], Any]] = [
         re.compile(r"^/api/sinks/[^/]+/(key|pair)$"),
         _R(min_role="admin"),
     ),
+    # --- fleet enrollment (Phase 5.1): mutating actions (enroll/revoke) are
+    #     admin-only; listing requires a signed-in viewer.
+    (
+        frozenset(_MUTATING),
+        re.compile(r"^/api/fleets(/[^/]+)?(/enroll)?$"),
+        _R(min_role="admin"),
+    ),
+    (frozenset({"GET"}), re.compile(r"^/api/fleets$"), _R(min_role="viewer")),
+    (frozenset({"GET"}), re.compile(r"^/fleets$"), _R(min_role="viewer")),
     # --- per-device control (scope-checked at the resolved target) ---
     (
         frozenset(_MUTATING),

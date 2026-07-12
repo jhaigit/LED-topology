@@ -66,6 +66,8 @@ def create_app(
     config_path: str | None = None,
     web_security: WebSecuritySettings | None = None,
     keystore: Any = None,
+    fleet_store: Any = None,
+    fleet_identity: Any = None,
 ) -> Flask:
     """Create and configure the Flask application."""
     template_dir = Path(__file__).parent / "templates"
@@ -89,6 +91,8 @@ def create_app(
     app.config["event_loop"] = event_loop
     app.config["config_path"] = config_path
     app.config["keystore"] = keystore
+    app.config["fleet_store"] = fleet_store
+    app.config["fleet_identity"] = fleet_identity
     app.config["scenes"] = {}  # Scene storage: {id: scene_dict}
 
     # Security: session signing, cookie flags, auth gate + policy. With no
@@ -192,6 +196,11 @@ def create_app(
     def sinks_page() -> str:
         """Sinks management page."""
         return render_template("sinks.html", sinks=controller.sinks)
+
+    @app.route("/fleets")
+    def fleets_page() -> str:
+        """Serial-sink fleet enrollment page (Phase 5.1)."""
+        return render_template("fleets.html")
 
     @app.route("/routes")
     def routes_page() -> str:
@@ -476,6 +485,113 @@ def create_app(
         if not ok:
             return jsonify({"paired": False, "error": message}), 400
         return jsonify({"paired": True, "has_key": True, "device_id": sink_id})
+
+    # ==================== Fleets (Phase 5.1) ====================
+
+    def _fleet_view() -> list[dict[str, Any]]:
+        """Merge discovered fleets with the pinned/trusted store into one list."""
+        from libltp.fleet_enroll import fingerprint as _fpr
+
+        store = app.config.get("fleet_store")
+        trusted = {f.fleet_pub.hex(): f for f in (store.all() if store else [])}
+        seen: set[str] = set()
+        rows: list[dict[str, Any]] = []
+        for dev in getattr(controller, "fleets", []):
+            pub = (dev.properties or {}).get("fleet_pub", "")
+            seen.add(pub)
+            pinned = trusted.get(pub)
+            rows.append(
+                {
+                    "fleet_pub": pub,
+                    "fingerprint": (dev.properties or {}).get("fpr", "")
+                    or (_fpr(bytes.fromhex(pub)) if pub else ""),
+                    "name": dev.display_name,
+                    "host": dev.host,
+                    "port": dev.port,
+                    "online": True,
+                    "trusted": pinned is not None,
+                    "device_enrolled": (dev.properties or {}).get("enrolled") == "1",
+                }
+            )
+        # Trusted fleets that aren't currently advertising (offline).
+        for pub, f in trusted.items():
+            if pub in seen:
+                continue
+            rows.append(
+                {
+                    "fleet_pub": pub,
+                    "fingerprint": f.fingerprint,
+                    "name": f.name,
+                    "host": f.host,
+                    "port": f.port,
+                    "online": False,
+                    "trusted": True,
+                    "device_enrolled": True,
+                }
+            )
+        return rows
+
+    @app.route("/api/fleets", methods=["GET"])
+    def api_fleets() -> Any:
+        """List discovered + trusted fleets (never returns channel keys)."""
+        store = app.config.get("fleet_store")
+        ident = app.config.get("fleet_identity")
+        return jsonify(
+            {
+                "fleets": _fleet_view(),
+                "controller_fingerprint": ident.fingerprint if ident else None,
+                "store_available": store is not None,
+            }
+        )
+
+    @app.route("/api/fleets/<fleet_pub>/enroll", methods=["POST"])
+    def api_fleet_enroll(fleet_pub: str) -> Any:
+        """Enroll (pin) a discovered fleet: run the TOFU X25519 handshake and
+        store the derived channel key. Admin-only (see auth policy)."""
+        from libltp.fleet_enroll import EnrollError
+        from ltp_controller.fleet_manager import enroll_fleet as _enroll
+
+        store = app.config.get("fleet_store")
+        ident = app.config.get("fleet_identity")
+        if store is None or ident is None:
+            return jsonify({"error": "fleet store not configured"}), 409
+        try:
+            expected_pub = bytes.fromhex(fleet_pub)
+        except ValueError:
+            return jsonify({"error": "fleet_pub must be hex"}), 400
+
+        target = next(
+            (r for r in _fleet_view() if r["fleet_pub"] == fleet_pub and r["online"]),
+            None,
+        )
+        if target is None:
+            return jsonify({"error": "fleet not currently discoverable"}), 404
+        try:
+            pinned = run_async(
+                _enroll(ident, target["host"], int(target["port"]), expected_pub)
+            )
+        except EnrollError as e:
+            return jsonify({"enrolled": False, "error": str(e)}), 400
+        except Exception as e:  # pragma: no cover - transport failure
+            return jsonify({"enrolled": False, "error": str(e)}), 502
+        pinned.name = target["name"]
+        store.pin(pinned)
+        logger.info("Enrolled fleet %s (%s)", pinned.fingerprint, target["name"])
+        return jsonify(
+            {"enrolled": True, "fleet_pub": fleet_pub, "fingerprint": pinned.fingerprint}
+        )
+
+    @app.route("/api/fleets/<fleet_pub>", methods=["DELETE"])
+    def api_fleet_revoke(fleet_pub: str) -> Any:
+        """Revoke trust in a fleet (drops the pinned key + channel secret)."""
+        store = app.config.get("fleet_store")
+        if store is None:
+            return jsonify({"error": "fleet store not configured"}), 409
+        removed = store.revoke(fleet_pub)
+        if not removed:
+            return jsonify({"error": "fleet not trusted"}), 404
+        logger.info("Revoked fleet %s", fleet_pub)
+        return jsonify({"revoked": True, "fleet_pub": fleet_pub})
 
     @app.route("/api/sinks/<sink_id>/refresh", methods=["POST"])
     def api_sink_refresh(sink_id: str) -> Any:

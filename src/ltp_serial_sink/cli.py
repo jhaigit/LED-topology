@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import signal
+import socket
 import sys
 import time
 from pathlib import Path
@@ -118,6 +119,18 @@ def parse_args() -> argparse.Namespace:
         "--no-serial",
         action="store_true",
         help="Run without serial device (for testing network data flow)",
+    )
+    parser.add_argument(
+        "--enroll-status",
+        action="store_true",
+        help="Show this fleet's enrollment identity (fingerprint) and trust "
+        "state, then exit",
+    )
+    parser.add_argument(
+        "--enroll-reset",
+        action="store_true",
+        help="Clear the pinned controller so a new controller can enroll "
+        "(trust-on-first-use reset), then exit",
     )
 
     return parser.parse_args()
@@ -300,6 +313,75 @@ def test_connection(config: SerialSinkConfig) -> bool:
     return True
 
 
+class _EnrollEndpoint:
+    """Bundles the fleet enroll server and its mDNS advertisement so run_fleet
+    can start/stop both together."""
+
+    def __init__(self, server, advertiser):
+        self.server = server
+        self.advertiser = advertiser
+
+    async def stop(self) -> None:
+        if self.advertiser is not None:
+            await self.advertiser.stop()
+        await self.server.stop()
+
+
+async def _start_enroll_endpoint(fleet_config) -> "_EnrollEndpoint | None":
+    """Start the fleet enrollment control endpoint + advertise it via mDNS.
+
+    Returns None when enrollment is disabled in config."""
+    cfg = getattr(fleet_config, "enroll", None)
+    if cfg is None or not cfg.enabled:
+        return None
+
+    import uuid
+    from pathlib import Path
+
+    from libltp.discovery import ServiceAdvertiser
+    from libltp.identity import Identity
+    from libltp.types import SERVICE_TYPE_FLEET
+    from ltp_serial_sink.enrollment import FleetEnrollServer, FleetTrustStore
+
+    identity = Identity.load_or_create(
+        path=Path(cfg.identity_path) if cfg.identity_path else None
+    )
+    trust = FleetTrustStore(
+        path=Path(cfg.trust_path) if cfg.trust_path else None
+    )
+    trust.load()
+    server = FleetEnrollServer(identity, trust, port=cfg.port)
+    await server.start()
+
+    # Stable UUID derived from the identity so the advert survives restarts.
+    fleet_uuid = uuid.uuid5(uuid.NAMESPACE_OID, identity.public_key.hex())
+    advertiser = ServiceAdvertiser(
+        service_type=SERVICE_TYPE_FLEET,
+        name=f"ltp-fleet-{socket.gethostname()}",
+        port=server.bound_port,
+        device_id=fleet_uuid,
+        display_name=f"Fleet @ {socket.gethostname()}",
+        properties={
+            "fleet_pub": identity.public_key.hex(),
+            "fpr": identity.fingerprint,
+            "enrolled": "1" if trust.is_enrolled else "0",
+        },
+    )
+    try:
+        await advertiser.start()
+    except Exception as exc:  # noqa: BLE001 - advert is best-effort
+        logging.getLogger(__name__).warning(f"Fleet mDNS advert failed: {exc}")
+        advertiser = None
+
+    # Let the server refresh the advert's enrolled flag when a controller pins it.
+    server.advertiser = advertiser
+
+    print(f"  Enroll endpoint: :{server.bound_port} "
+          f"(fingerprint {identity.fingerprint}, "
+          f"{'enrolled' if trust.is_enrolled else 'un-enrolled'})")
+    return _EnrollEndpoint(server, advertiser)
+
+
 async def run_fleet(fleet_config) -> None:
     """Run fleet mode until SIGINT/SIGTERM.
 
@@ -311,6 +393,7 @@ async def run_fleet(fleet_config) -> None:
     from ltp_serial_sink.fleet import SerialFleet
 
     fleet = SerialFleet(fleet_config)
+    enroll_endpoint = await _start_enroll_endpoint(fleet_config)
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
@@ -336,6 +419,8 @@ async def run_fleet(fleet_config) -> None:
                 pass
     finally:
         await fleet.stop()
+        if enroll_endpoint is not None:
+            await enroll_endpoint.stop()
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.remove_signal_handler(sig)
 
@@ -387,6 +472,32 @@ async def run_sink(config: SerialSinkConfig) -> None:
         signal.signal(signal.SIGINT, original_sigint)
 
 
+def _handle_enroll_command(args: argparse.Namespace) -> int:
+    """Handle --enroll-status / --enroll-reset (fleet-side, no server running)."""
+    from libltp.identity import Identity
+    from ltp_serial_sink.enrollment import FleetTrustStore
+
+    identity = Identity.load_or_create()
+    trust = FleetTrustStore()
+    trust.load()
+
+    if args.enroll_reset:
+        trust.reset()
+        print("Enrollment reset — this fleet will pin the next controller to enroll.")
+        return 0
+
+    print(f"Fleet identity fingerprint: {identity.fingerprint}")
+    print(f"Identity file: {identity.path}")
+    if trust.is_enrolled:
+        assert trust.controller_pub is not None
+        print(f"Enrolled to controller: {trust.controller_pub.hex()}")
+        print(f"Trust file: {trust.path}")
+        print("Run with --enroll-reset to allow a different controller.")
+    else:
+        print("Not enrolled — no controller pinned yet.")
+    return 0
+
+
 def main() -> int:
     """Main entry point."""
     args = parse_args()
@@ -403,6 +514,9 @@ def main() -> int:
     if args.list_ports:
         list_ports()
         return 0
+
+    if args.enroll_status or args.enroll_reset:
+        return _handle_enroll_command(args)
 
     # Fleet mode: --fleet flag, or a config file with fleet/devices keys.
     raw_config: dict = {}
