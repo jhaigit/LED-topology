@@ -66,11 +66,14 @@ Notes:
 - Pairing runs *before* the auth guard, so it works while the device is still
   unkeyed (that is how the first key is installed). Re-running `pair` on an
   already-keyed device re-pairs and overwrites the PSK.
-- The derivation is byte-identical to `pairing.py` and verified against the
-  pinned interop vectors on the host (byte order, clamping, HKDF/HMAC layout);
-  it has not yet been exercised on real ESP32-C3 mbedTLS. Confirm the pinned
-  vectors on-chip once (temporary Serial print of the derived pub/shared for the
-  fixed test keys) if you want end-to-end certainty.
+- The derivation is byte-identical to `pairing.py`, verified against the pinned
+  interop vectors on the host (byte order, clamping, HKDF/HMAC layout).
+- VERIFIED ON HARDWARE (2026-07-12): a live "Pair (ECDH)" against a real
+  ESP32-C3 (10.0.1.173) succeeded — the device reached key-confirmation and
+  enabled auth, which only happens when its mbedTLS X25519/HKDF/HMAC derive the
+  exact same PSK as the controller. This confirms `mbedtls_ecp_mul` on
+  Curve25519 produces the correct RFC 7748 result on-chip; no Serial-print
+  sanity check is needed.
 
 ## Checks
 
