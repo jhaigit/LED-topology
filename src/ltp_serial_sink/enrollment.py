@@ -157,7 +157,13 @@ class FleetEnrollServer:
         except (TimeoutError, asyncio.TimeoutError):
             logger.debug(f"Enroll connection from {peer} timed out")
         except Exception as exc:  # noqa: BLE001 - endpoint must not crash the fleet
-            logger.error(f"Enroll handler error from {peer}: {exc}")
+            # Report rather than silently closing, so the controller shows a
+            # real reason (e.g. a read-only config dir failing trust.pin) instead
+            # of an opaque "fleet closed the connection".
+            logger.error(f"Enroll handler error from {peer}: {exc!r}")
+            await self._send_error(
+                writer, None, ErrorCode.INTERNAL, f"enroll failed: {exc}"
+            )
         finally:
             writer.close()
 

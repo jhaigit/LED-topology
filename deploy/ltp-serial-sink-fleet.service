@@ -17,6 +17,9 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=read-only
+# Fleet enrollment (Phase 5.1) persists its X25519 identity and pinned-
+# controller trust file under the config dir, so that subtree must be writable.
+ReadWritePaths=/home/ltp/.config/ltp
 
 [Install]
 WantedBy=multi-user.target

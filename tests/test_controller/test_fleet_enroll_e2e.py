@@ -59,6 +59,26 @@ async def test_controller_store_persists_pin(tmp_path):
     assert got.channel_key == pinned.channel_key
 
 
+async def test_trust_write_failure_is_reported(tmp_path):
+    """If the fleet can't persist the pin (e.g. a read-only config dir under
+    systemd ProtectHome), the controller must get a real error message, not an
+    opaque 'fleet closed the connection'."""
+    fleet_id, trust, server = await _serve(tmp_path)
+    ctrl_id = _identity(tmp_path, "ctrl-identity")
+
+    def _boom(*_a, **_k):
+        raise OSError("read-only file system")
+
+    trust.pin = _boom  # simulate the unwritable state dir
+    try:
+        with pytest.raises(EnrollError, match="enroll failed"):
+            await enroll_fleet(
+                ctrl_id, "127.0.0.1", server.bound_port, fleet_id.public_key
+            )
+    finally:
+        await server.stop()
+
+
 async def test_reject_wrong_advertised_key(tmp_path):
     fleet_id, trust, server = await _serve(tmp_path)
     ctrl_id = _identity(tmp_path, "ctrl-identity")
