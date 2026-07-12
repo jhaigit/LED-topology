@@ -188,6 +188,11 @@ class MessageType(str, Enum):
     PAIR_CONFIRM = "pair_confirm"
     PAIR_COMPLETE = "pair_complete"
 
+    # Fleet enrollment: controller <-> serial-sink-fleet static-static X25519
+    # trust establishment (protocol 0.4, Phase 5.1). See fleet_enroll.py.
+    FLEET_ENROLL_REQUEST = "fleet_enroll_request"
+    FLEET_ENROLL_RESPONSE = "fleet_enroll_response"
+
     # Error
     ERROR = "error"
 
@@ -215,6 +220,7 @@ class ErrorCode(IntEnum):
     LEASE_HELD = 9
     NOT_PAIRING = 10  # device is not in an armed pairing window
     PAIR_FAILED = 11  # PIN mismatch or key-confirmation failure
+    ENROLL_REJECTED = 12  # fleet already enrolled / confirmation mismatch
 
 
 class MatrixOrigin(str, Enum):
@@ -432,9 +438,10 @@ class ScalarFrameHeader(BaseModel):
 SERVICE_TYPE_SINK = "_ltp-sink._tcp.local."
 SERVICE_TYPE_SOURCE = "_ltp-source._tcp.local."
 SERVICE_TYPE_CONTROLLER = "_ltp-controller._tcp.local."
+SERVICE_TYPE_FLEET = "_ltp-fleet._tcp.local."  # serial-sink fleet control endpoint
 
 # Protocol constants
-PROTOCOL_VERSION = "0.3"  # 0.3: X25519+PIN device pairing (Phase 4b)
+PROTOCOL_VERSION = "0.4"  # 0.4: fleet enrollment (Phase 5.1); 0.3: device pairing
 PACKET_MAGIC = 0x4C54
 # Max UDP packet size - 8KB works on most local networks
 MAX_PACKET_SIZE = 8192

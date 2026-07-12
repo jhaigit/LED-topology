@@ -149,9 +149,20 @@ class DeviceOverride(BaseModel):
     auth_read_open: bool = True
 
 
+class FleetEnrollConfig(BaseModel):
+    """Fleet enrollment endpoint (Phase 5.1). When enabled the fleet advertises
+    a static X25519 identity and accepts one controller's enrollment (TOFU)."""
+
+    enabled: bool = True
+    port: int = 7420  # 0 = ephemeral (advertised port is the bound one)
+    identity_path: str | None = None  # default: ~/.config/ltp/fleet-identity
+    trust_path: str | None = None  # default: ~/.config/ltp/fleet-trust.yaml
+
+
 class FleetConfig(BaseModel):
     scan: FleetScanConfig = Field(default_factory=FleetScanConfig)
     devices: list[DeviceOverride] = Field(default_factory=list)
+    enroll: FleetEnrollConfig = Field(default_factory=FleetEnrollConfig)
 
 
 @dataclass
@@ -435,4 +446,5 @@ def load_fleet_config(data: dict[str, Any]) -> FleetConfig:
     return FleetConfig(
         scan=FleetScanConfig(**data.get("scan", {})),
         devices=[DeviceOverride(**d) for d in data.get("devices", [])],
+        enroll=FleetEnrollConfig(**data.get("enroll", {})),
     )

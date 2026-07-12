@@ -1,6 +1,27 @@
 # Proposal: Fleet Enrollment & Remote Key Provisioning (Phase 5)
 
-**Status:** draft — awaiting sign-off on the enrollment-trust model (§5) before implementation.
+**Status:** P5.1 **implemented** (2026-07-12). Decisions: enrollment-trust =
+**Option A, Pure TOFU** (§5); transport = LTP newline-JSON socket; payload
+encryption = XChaCha20-Poly1305 (§13, lands in P5.2). P5.2 (provisioning push)
+not yet started.
+
+> **P5.1 delivered.** Fleet + controller static X25519 identities
+> (`libltp/identity.py`, persisted `0600`), interop-locked enrollment crypto
+> (`libltp/fleet_enroll.py`, pinned vector + tests), fleet enroll endpoint +
+> trust store + mDNS advert (`ltp_serial_sink/enrollment.py`, `_ltp-fleet._tcp`,
+> `--enroll-status`/`--enroll-reset` CLI), controller discovery + pinned-fleet
+> store + enroll client (`ltp_controller/fleet_manager.py`), and the controller
+> **Fleets** tab with admin-gated enroll/revoke (`/api/fleets*`). Protocol
+> bumped 0.3→0.4. The derived channel key is stored on both sides ready for the
+> P5.2 provisioning channel; no device PSK is pushed yet.
+
+> TOFU note: the fleet pins the **first** controller that enrolls (SSH
+> trust-on-first-use). The controller still displays the fleet fingerprint for
+> optional out-of-band verification. Accepted residual risk: an attacker who
+> races enrollment on the LAN before the legitimate controller can pin itself.
+> `ltp-serial-sink enroll --reset` clears the pin to re-enroll. The design keeps
+> a one-time enroll code (Option B) as a drop-in future hardening — it only adds
+> a binding factor to the same handshake.
 
 ## 1. Problem
 
@@ -181,10 +202,12 @@ notices. Noting so the message set is designed to be extensible, not built now.
 
 ## 12. Phasing
 
-1. **P5.1 — Fleet identity + enrollment.** Identity keypair, mDNS advert,
-   enroll handshake (reusing `pairing.py`), pinning on both sides, `enroll`
-   CLI, controller "Fleets" tab (discover/verify/trust/revoke). Interop-locked
-   with pinned vectors + tests; no device provisioning yet.
+1. **P5.1 — Fleet identity + enrollment.** ✅ **Done (2026-07-12).** Identity
+   keypair, mDNS advert, enroll handshake (static-static X25519 + HKDF + HMAC
+   confirmation), pinning on both sides, `--enroll-status`/`--enroll-reset` CLI,
+   controller "Fleets" tab (discover/verify/trust/revoke). Interop-locked with a
+   pinned vector + unit/e2e/web tests; no device provisioning yet. (For TOFU the
+   fleet-side `enroll` verb is just status/reset — there is no code to enter.)
 2. **P5.2 — Provisioning channel + push.** Encrypted+MAC'd channel, the
    `fleet_provision` message, fleet applies/persists/re-adopts, keystore UI
    wired to push. End-to-end serial-device set/rotate/unpair from the UI.
