@@ -13,6 +13,10 @@
 #include "config.h"
 #include "build_info.h"
 #include "device_auth.h"
+#include "device_pairing.h"
+
+// Persisted in the .ino; needed here to save the PSK after a successful pair.
+extern void saveConfig();
 
 // Message types (matching Python libltp.types.MessageType)
 #define MSG_CAPABILITY_REQUEST      "capability_request"
@@ -27,6 +31,12 @@
 #define MSG_CONTROL_SET_RESPONSE    "control_set_response"
 #define MSG_CONTROL_CHANGED         "control_changed"
 #define MSG_ERROR                   "error"
+
+// X25519 + PIN pairing (protocol 0.3)
+#define MSG_PAIR_BEGIN              "pair_begin"
+#define MSG_PAIR_BEGIN_RESPONSE     "pair_begin_response"
+#define MSG_PAIR_CONFIRM           "pair_confirm"
+#define MSG_PAIR_COMPLETE          "pair_complete"
 
 // Stream actions
 #define ACTION_START    "start"
@@ -72,9 +82,11 @@ public:
             deviceIdStr,
             cfg->authReadOpen != 0
         );
+        pairingObj.setDeviceId(deviceIdStr);
     }
 
     DeviceAuthGuard& auth() { return authGuard; }
+    DevicePairing& pairing() { return pairingObj; }
 
     // Owner IP for data-plane binding (empty when unclaimed/open).
     const char* streamOwnerIp() { return authGuard.getOwnerIp(); }
@@ -117,6 +129,28 @@ public:
 
         if (!msgType) {
             return buildError(seq, 1, "INVALID_FORMAT", "Missing message type");
+        }
+
+        // X25519 + PIN pairing runs BEFORE the auth guard: it must work while
+        // the device is still unkeyed (that is how the first key is installed).
+        if (strcmp(msgType, MSG_PAIR_BEGIN) == 0) {
+            return pairingObj.handleBegin(seq, doc);
+        }
+        if (strcmp(msgType, MSG_PAIR_CONFIRM) == 0) {
+            uint8_t newPsk[16];
+            bool paired = false;
+            String resp = pairingObj.handleConfirm(seq, doc, newPsk, paired);
+            if (paired) {
+                memcpy(config->authPsk, newPsk, 16);
+                config->authEnabled = 1;
+                saveConfig();
+                // Re-arm the guard with the freshly paired key.
+                authGuard.begin(config->authPsk, deviceIdStr,
+                                config->authReadOpen != 0);
+                dualOut.println("Paired: Layer 2 key installed, auth enabled");
+            }
+            memset(newPsk, 0, sizeof(newPsk));
+            return resp;
         }
 
         // Layer 2 guard: consumes handshake messages and gates privileged
@@ -168,6 +202,7 @@ private:
     char streamId[32];
     int lastSeq;
     DeviceAuthGuard authGuard;
+    DevicePairing pairingObj;
     char deviceIdStr[48];
 
     // Build the device UUID from the WiFi MAC (stable per board).

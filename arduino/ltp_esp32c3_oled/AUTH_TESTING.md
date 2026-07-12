@@ -37,6 +37,44 @@ devices:
   <device-uuid>: "00112233445566778899aabbccddeeff"
 ```
 
+## Pairing (X25519 + PIN)
+
+An alternative to typing a raw `auth-key`: derive the Layer 2 PSK over the
+network with an ephemeral X25519 ECDH, bound by a PIN shown on the OLED. The
+key never crosses the wire. See `device_pairing.h` (the C/mbedTLS twin of
+`src/libltp/pairing.py`).
+
+```
+# in the device USB console:
+pair
+```
+
+The console prints an 8-digit PIN and the OLED shows `PAIR` with the PIN in a
+large font. Then in the controller web UI, click **Pair (ECDH)** on this sink
+and type the PIN.
+
+Expected: the exchange completes, the device persists the derived PSK, enables
+Level 2 auth automatically (`saveConfig`), and re-arms the auth guard — the
+sink's `auth_state` becomes `owned` and the dashboard shows `keyed`. The device
+console logs `Paired: Layer 2 key installed, auth enabled`.
+
+Notes:
+- The pairing window is **120 s** and **one-shot**: a single `pair_confirm`
+  (right or wrong PIN) closes it. A wrong PIN fails key confirmation (`error`
+  code 11) and you must re-run `pair`. `pair_begin` before `pair` (or after the
+  window expires) returns `error` code 10 (not in pairing mode).
+- Pairing runs *before* the auth guard, so it works while the device is still
+  unkeyed (that is how the first key is installed). Re-running `pair` on an
+  already-keyed device re-pairs and overwrites the PSK.
+- The derivation is byte-identical to `pairing.py`, verified against the pinned
+  interop vectors on the host (byte order, clamping, HKDF/HMAC layout).
+- VERIFIED ON HARDWARE (2026-07-12): a live "Pair (ECDH)" against a real
+  ESP32-C3 (10.0.1.173) succeeded — the device reached key-confirmation and
+  enabled auth, which only happens when its mbedTLS X25519/HKDF/HMAC derive the
+  exact same PSK as the controller. This confirms `mbedtls_ecp_mul` on
+  Curve25519 produces the correct RFC 7748 result on-chip; no Serial-print
+  sanity check is needed.
+
 ## Checks
 
 1. **Discovery advertises auth.** `avahi-browse -r _ltp-sink._tcp` shows

@@ -3,6 +3,7 @@
 {% block title %}Sinks - LTP Controller{% endblock %}
 
 {% block content %}
+{% set is_admin = not auth_enabled or (principal and principal.role == 'admin') %}
 <div class="page-header">
     <div>
         <h1>Sinks</h1>
@@ -75,7 +76,23 @@
                 <span class="value build-info" title="{{ sink.capabilities.firmware_name or '' }} {{ sink.capabilities.build_date or '' }}">{{ sink.capabilities.git_commit[:8] }}{% if sink.capabilities.build_date %} ({{ sink.capabilities.build_date }}){% endif %}</span>
             </div>
             {% endif %}
+            <div class="detail-row">
+                <span class="label">Auth:</span>
+                <span class="value auth-badge auth-{{ sink.auth_state }}" title="Layer 2 device authentication state">{{ sink.auth_state }}</span>
+            </div>
         </div>
+
+        {% if is_admin %}
+        <div class="device-auth" data-sink-id="{{ sink.id }}">
+            <h4>Auth Key <span class="key-indicator" data-key-indicator="{{ sink.id }}"></span></h4>
+            <div class="auth-actions" data-auth-actions="{{ sink.id }}">
+                <button class="btn btn-sm" onclick="pairDevice('{{ sink.id }}', false)" data-act="set">Set Key</button>
+                <button class="btn btn-sm" onclick="pairEcdh('{{ sink.id }}')" data-act="ecdh" title="X25519 + PIN pairing (armed network device)">Pair (ECDH)</button>
+                <button class="btn btn-sm" onclick="pairDevice('{{ sink.id }}', true)" data-act="rotate" style="display:none;">Rotate</button>
+                <button class="btn btn-sm btn-danger" onclick="unpairDevice('{{ sink.id }}')" data-act="unpair" style="display:none;">Unpair</button>
+            </div>
+        </div>
+        {% endif %}
 
         {% if sink.controls %}
         <div class="device-controls">
@@ -190,7 +207,40 @@
     </div>
 </div>
 
+<!-- Device Key Modal (shown once after generating a key) -->
+<div id="keyModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Device Key Generated</h2>
+            <button class="close-btn" onclick="hideKeyModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p class="key-warning">This key is shown <strong>once</strong>. Copy it now — it cannot be retrieved later. It is already stored in the controller keystore; you must now put the <em>same</em> key on the device.</p>
+            <div class="form-group">
+                <label>Key (16 bytes, hex)</label>
+                <input type="text" id="keyHexValue" readonly onclick="this.select()">
+                <button class="btn btn-sm" onclick="copyKeyHex()">Copy</button>
+            </div>
+            <div id="keyProvisioning" class="key-provisioning"></div>
+        </div>
+    </div>
+</div>
+
 <style>
+.device-auth { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border, #333); }
+.device-auth h4 { margin: 0 0 0.4rem; font-size: 0.85rem; }
+.auth-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.auth-badge { text-transform: capitalize; }
+.auth-owned { color: #2ecc71; }
+.auth-held { color: #e67e22; }
+.auth-error { color: #e74c3c; }
+.auth-unkeyed { color: #e67e22; }
+.auth-none { opacity: 0.7; }
+.key-indicator { font-size: 0.75rem; opacity: 0.8; }
+.key-warning { color: #e67e22; font-size: 0.85rem; }
+.key-provisioning { margin-top: 0.6rem; font-size: 0.8rem; white-space: pre-wrap; }
+.key-provisioning code { display: block; padding: 0.4rem; background: rgba(0,0,0,0.25); border-radius: 4px; margin: 0.2rem 0; overflow-x: auto; }
+#keyHexValue { font-family: monospace; width: 100%; }
 .fill-tabs {
     display: flex;
     gap: 8px;
@@ -635,6 +685,114 @@ function updateSinkStatus() {
 
 // Start status refresh
 setInterval(updateSinkStatus, 5000);
+
+// ==================== Device Auth Keys (admin only) ====================
+
+// Reflect key-presence into each card's Auth section: label the buttons and
+// show a "keyed"/"no key" indicator. Runs only if the admin-only DOM exists.
+function loadKeyStatuses() {
+    document.querySelectorAll('.device-auth').forEach(el => {
+        const id = el.dataset.sinkId;
+        fetch(`/api/sinks/${id}/key`)
+            .then(r => r.ok ? r.json() : null)
+            .then(s => { if (s) applyKeyStatus(id, s); })
+            .catch(() => {});
+    });
+}
+
+function applyKeyStatus(id, s) {
+    const ind = document.querySelector(`[data-key-indicator="${id}"]`);
+    const actions = document.querySelector(`[data-auth-actions="${id}"]`);
+    if (!actions) return;
+    const has = s.has_key;
+    if (ind) ind.textContent = has ? '• keyed' : (s.keystore_available ? '• no key' : '• keystore off');
+    actions.querySelector('[data-act="set"]').style.display = has ? 'none' : '';
+    actions.querySelector('[data-act="ecdh"]').style.display = has ? 'none' : '';
+    actions.querySelector('[data-act="rotate"]').style.display = has ? '' : 'none';
+    actions.querySelector('[data-act="unpair"]').style.display = has ? '' : 'none';
+}
+
+function pairDevice(id, rotate) {
+    fetch(`/api/sinks/${id}/key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rotate: !!rotate })
+    })
+    .then(r => r.json().then(data => ({ ok: r.ok, status: r.status, data })))
+    .then(({ ok, status, data }) => {
+        if (ok) {
+            if (data.provisioning) showKeyModal(data.provisioning);
+            loadKeyStatuses();
+            showToast(rotate ? 'Key rotated' : 'Key set', 'success');
+        } else if (status === 409) {
+            showToast('Device already keyed — use Rotate to replace.', 'error');
+        } else {
+            showToast('Error: ' + (data.error || status), 'error');
+        }
+    })
+    .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function pairEcdh(id) {
+    const pin = prompt('Enter the pairing PIN shown on the device (arm it first via its console/button):');
+    if (!pin) return;
+    showToast('Pairing…', 'info');
+    fetch(`/api/sinks/${id}/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pin.trim() })
+    })
+    .then(r => r.json().then(data => ({ ok: r.ok, data })))
+    .then(({ ok, data }) => {
+        if (ok && data.paired) {
+            loadKeyStatuses();
+            showToast('Paired — key established over ECDH', 'success');
+        } else {
+            showToast('Pairing failed: ' + (data.error || 'unknown'), 'error');
+        }
+    })
+    .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function unpairDevice(id) {
+    if (!confirm('Remove this device’s key? The controller will reconnect and the device becomes unclaimed.')) return;
+    fetch(`/api/sinks/${id}/key`, { method: 'DELETE' })
+        .then(r => r.json())
+        .then(() => { loadKeyStatuses(); showToast('Device unpaired', 'success'); })
+        .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function showKeyModal(prov) {
+    document.getElementById('keyHexValue').value = prov.key;
+    const cls = prov.likely_class === 'serial' ? 'serial_bridge' : 'network_device';
+    const primary = prov.likely_class === 'serial'
+        ? `Serial device (bridge enforces auth):\n${prov.serial_bridge}`
+        : `Network device:\n${prov.network_device}`;
+    const other = prov.likely_class === 'serial' ? prov.network_device : prov.serial_bridge;
+    document.getElementById('keyProvisioning').innerHTML =
+        `<div><strong>Provision the device:</strong></div><code>${escapeHtml(primary)}</code>` +
+        `<details><summary>Other device type</summary><code>${escapeHtml(other)}</code></details>`;
+    document.getElementById('keyModal').style.display = 'flex';
+}
+
+function hideKeyModal() { document.getElementById('keyModal').style.display = 'none'; }
+
+function copyKeyHex() {
+    const el = document.getElementById('keyHexValue');
+    el.select();
+    navigator.clipboard?.writeText(el.value).then(
+        () => showToast('Key copied', 'success'),
+        () => document.execCommand('copy')
+    );
+}
+
+function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+document.addEventListener('DOMContentLoaded', loadKeyStatuses);
 </script>
 <style>
 .page-header {

@@ -150,6 +150,13 @@ _POLICY: list[tuple[frozenset[str], re.Pattern[str], Any]] = [
         re.compile(r"^/api/(sinks|sources)/purge$|^/api/discovery/refresh$"),
         _R(min_role="operator"),
     ),
+    # --- device auth keys + pairing: admin-only, and BEFORE the operator
+    #     device rule below so it doesn't capture these as a device target.
+    (
+        frozenset({"GET", "POST", "PUT", "DELETE"}),
+        re.compile(r"^/api/sinks/[^/]+/(key|pair)$"),
+        _R(min_role="admin"),
+    ),
     # --- per-device control (scope-checked at the resolved target) ---
     (
         frozenset(_MUTATING),

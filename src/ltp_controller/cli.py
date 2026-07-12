@@ -281,6 +281,7 @@ async def run_controller(
                 event_loop=loop,
                 config_path=config_path,
                 web_security=web_security,
+                keystore=connection_pool.keystore,
             )
 
             def run_web() -> None:

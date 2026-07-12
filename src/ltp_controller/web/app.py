@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import secrets
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,7 @@ def create_app(
     event_loop: asyncio.AbstractEventLoop | None = None,
     config_path: str | None = None,
     web_security: WebSecuritySettings | None = None,
+    keystore: Any = None,
 ) -> Flask:
     """Create and configure the Flask application."""
     template_dir = Path(__file__).parent / "templates"
@@ -86,6 +88,7 @@ def create_app(
     app.config["sequence_manager"] = sequence_manager
     app.config["event_loop"] = event_loop
     app.config["config_path"] = config_path
+    app.config["keystore"] = keystore
     app.config["scenes"] = {}  # Scene storage: {id: scene_dict}
 
     # Security: session signing, cookie flags, auth gate + policy. With no
@@ -321,6 +324,158 @@ def create_app(
             jsonify({"status": "partial" if has_errors else "ok", "results": results}),
             status_code,
         )
+
+    # ==================== API: Device Auth Keys (Layer 2) ====================
+    #
+    # Admin-only management of the per-device pre-shared keys the controller
+    # uses to claim a device (proposal §Key Management, Phase 4a). The key
+    # itself is only ever returned once, at generation — never on a GET.
+    # Policy entries in web/auth.py gate these to admin explicitly (otherwise
+    # the operator-scoped /api/sinks/<id> rule would capture them).
+
+    def _reclaim_after_key_change(sink_id: str) -> None:
+        """Drop + reconnect a sink so it re-reads the keystore and claims with
+        the new key. Best-effort: silently skipped without a running loop."""
+        pool = getattr(controller, "_connection_pool", None)
+        loop = app.config.get("event_loop")
+        if pool is None or loop is None or not getattr(loop, "is_running", lambda: False)():
+            return
+        try:
+            run_async(pool.reclaim(sink_id))
+        except Exception as e:  # pragma: no cover - best effort
+            logger.warning(f"Re-claim after key change failed for {sink_id}: {e}")
+
+    def _provisioning_hint(sink: Any, hexkey: str) -> dict[str, Any]:
+        """Tell the operator how to get the SAME key onto the device side,
+        which differs by device class and never happens over the LAN."""
+        desc = ""
+        try:
+            desc = (sink.device.properties or {}).get("desc", "") or ""
+        except Exception:
+            desc = ""
+        looks_serial = "/dev/tty" in desc or "serial" in desc.lower() or "arduino" in desc.lower()
+        return {
+            "key": hexkey,
+            "likely_class": "serial" if looks_serial else "network",
+            "network_device": (
+                f"On the device USB console: `auth-key {hexkey}` then `save` and `reboot`."
+            ),
+            "serial_bridge": (
+                "Add to the device's serial-fleet.yaml override and restart the "
+                f'fleet:\n  auth_psk: "{hexkey}"'
+            ),
+        }
+
+    @app.route("/api/sinks/<sink_id>/key", methods=["GET"])
+    def api_sink_key_status(sink_id: str) -> Any:
+        """Pairing status for a device. Never returns the key material."""
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+        ks = app.config.get("keystore")
+        auth_mode = "none"
+        try:
+            auth_mode = (sink.device.properties or {}).get("auth", "none") or "none"
+        except Exception:
+            pass
+        return jsonify(
+            {
+                "device_id": sink_id,
+                "has_key": bool(ks and ks.has_key(sink_id)),
+                "auth_state": getattr(sink, "auth_state", "none"),
+                "auth_mode": auth_mode,
+                "keystore_available": ks is not None,
+            }
+        )
+
+    @app.route("/api/sinks/<sink_id>/key", methods=["POST"])
+    def api_sink_key_set(sink_id: str) -> Any:
+        """Associate a key with a device.
+
+        Body (all optional):
+          - key: 32 hex chars to associate a key the device already holds
+                 (e.g. one typed into an ESP32 console). Omit to generate.
+          - rotate: true to replace an existing key (else 409 if one exists).
+        A freshly generated key is returned ONCE in the response; a caller-
+        supplied key is never echoed back.
+        """
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+        ks = app.config.get("keystore")
+        if ks is None:
+            return jsonify({"error": "keystore not configured"}), 409
+
+        body = request.get_json(silent=True) or {}
+        had_key = ks.has_key(sink_id)
+        if had_key and not body.get("rotate"):
+            return (
+                jsonify({"error": "device already keyed; pass rotate=true to replace"}),
+                409,
+            )
+
+        supplied = body.get("key")
+        generated = False
+        if supplied:
+            try:
+                key = bytes.fromhex(str(supplied))
+            except ValueError:
+                return jsonify({"error": "key must be hex"}), 400
+            if len(key) != 16:
+                return jsonify({"error": "key must be 16 bytes (32 hex chars)"}), 400
+        else:
+            key = secrets.token_bytes(16)
+            generated = True
+
+        ks.set_key(sink_id, key)  # persists 0600
+        _reclaim_after_key_change(sink_id)
+        logger.info(
+            "Device key %s for %s (%s)",
+            "rotated" if had_key else "set",
+            sink_id,
+            "generated" if generated else "supplied",
+        )
+
+        resp: dict[str, Any] = {"device_id": sink_id, "has_key": True, "rotated": had_key}
+        if generated:
+            # Shown once — the operator must now provision the device side.
+            resp["provisioning"] = _provisioning_hint(sink, key.hex())
+        return jsonify(resp)
+
+    @app.route("/api/sinks/<sink_id>/key", methods=["DELETE"])
+    def api_sink_key_delete(sink_id: str) -> Any:
+        """Unpair: remove the device's key and reconnect (drops the lease)."""
+        ks = app.config.get("keystore")
+        if ks is None:
+            return jsonify({"error": "keystore not configured"}), 409
+        ks.remove_key(sink_id)
+        _reclaim_after_key_change(sink_id)
+        logger.info("Device key removed for %s", sink_id)
+        return jsonify({"device_id": sink_id, "has_key": False})
+
+    @app.route("/api/sinks/<sink_id>/pair", methods=["POST"])
+    def api_sink_pair(sink_id: str) -> Any:
+        """X25519+PIN pairing (Phase 4b): derive the PSK with a network device
+        over ECDH — nothing secret crosses the wire. The device must already be
+        in an armed pairing window showing the PIN on its display; the operator
+        types that PIN here."""
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+        body = request.get_json(silent=True) or {}
+        pin = str(body.get("pin", "")).strip()
+        if not pin:
+            return jsonify({"error": "pin required"}), 400
+        pool = getattr(controller, "_connection_pool", None)
+        if pool is None:
+            return jsonify({"error": "no connection pool"}), 409
+        try:
+            ok, message = run_async(pool.pair_device(sink_id, pin))
+        except Exception as e:  # pragma: no cover - transport failure
+            return jsonify({"paired": False, "error": str(e)}), 502
+        if not ok:
+            return jsonify({"paired": False, "error": message}), 400
+        return jsonify({"paired": True, "has_key": True, "device_id": sink_id})
 
     @app.route("/api/sinks/<sink_id>/refresh", methods=["POST"])
     def api_sink_refresh(sink_id: str) -> Any:
