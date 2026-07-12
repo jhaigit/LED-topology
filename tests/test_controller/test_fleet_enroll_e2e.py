@@ -59,6 +59,28 @@ async def test_controller_store_persists_pin(tmp_path):
     assert got.channel_key == pinned.channel_key
 
 
+async def test_advert_refreshed_on_enroll(tmp_path):
+    """On a successful enroll the fleet refreshes its mDNS advert so discovery
+    reports enrolled=1 without waiting for a restart."""
+    fleet_id, trust, server = await _serve(tmp_path)
+    ctrl_id = _identity(tmp_path, "ctrl-identity")
+
+    updates = []
+
+    class FakeAdvertiser:
+        async def update_properties(self, **kwargs):
+            updates.append(kwargs)
+
+    server.advertiser = FakeAdvertiser()
+    try:
+        await enroll_fleet(
+            ctrl_id, "127.0.0.1", server.bound_port, fleet_id.public_key
+        )
+    finally:
+        await server.stop()
+    assert {"enrolled": "1"} in updates
+
+
 async def test_trust_write_failure_is_reported(tmp_path):
     """If the fleet can't persist the pin (e.g. a read-only config dir under
     systemd ProtectHome), the controller must get a real error message, not an

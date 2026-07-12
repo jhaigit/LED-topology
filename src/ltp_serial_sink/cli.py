@@ -373,6 +373,9 @@ async def _start_enroll_endpoint(fleet_config) -> "_EnrollEndpoint | None":
         logging.getLogger(__name__).warning(f"Fleet mDNS advert failed: {exc}")
         advertiser = None
 
+    # Let the server refresh the advert's enrolled flag when a controller pins it.
+    server.advertiser = advertiser
+
     print(f"  Enroll endpoint: :{server.bound_port} "
           f"(fingerprint {identity.fingerprint}, "
           f"{'enrolled' if trust.is_enrolled else 'un-enrolled'})")

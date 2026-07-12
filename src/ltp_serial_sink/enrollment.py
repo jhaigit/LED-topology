@@ -89,10 +89,19 @@ class FleetEnrollServer:
     single FLEET_ENROLL_REQUEST per connection and answers FLEET_ENROLL_RESPONSE.
     """
 
-    def __init__(self, identity: Identity, trust: FleetTrustStore, port: int = 0):
+    def __init__(
+        self,
+        identity: Identity,
+        trust: FleetTrustStore,
+        port: int = 0,
+        advertiser: Any = None,
+    ):
         self.identity = identity
         self.trust = trust
         self.port = port
+        # Optional mDNS advertiser whose `enrolled` TXT flag is refreshed when a
+        # controller pins us, so discovery reflects the live trust state.
+        self.advertiser = advertiser
         self._server: asyncio.Server | None = None
 
     @property
@@ -151,6 +160,12 @@ class FleetEnrollServer:
             writer.write(reply.to_bytes())
             await writer.drain()
             logger.info(f"Enrolled controller {controller_pub.hex()[:16]}… from {peer}")
+            # Refresh the advert so discovery/UI show enrolled=1 without a restart.
+            if self.advertiser is not None:
+                try:
+                    await self.advertiser.update_properties(enrolled="1")
+                except Exception as exc:  # noqa: BLE001 - advert refresh is best-effort
+                    logger.warning(f"Advert refresh after enroll failed: {exc}")
         except EnrollError as exc:
             logger.warning(f"Enrollment from {peer} rejected: {exc}")
             await self._send_error(writer, None, ErrorCode.ENROLL_REJECTED, str(exc))
