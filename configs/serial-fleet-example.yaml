@@ -33,10 +33,13 @@ fleet:
   # Optional per-device overrides. First match wins. Match keys AND together:
   #   usb_serial  — USB adapter serial number (most stable; CH340 clones
   #                 often have none — use the self-reported keys below)
-  #   device_name — exact name the device reports in its INFO response
-  #   pixels      — device-reported total pixel count
-  #   dimensions  — device-reported geometry: "WxH" for matrices, "N" for strips
-  #   port        — glob on the port path (by-path globs pin a physical socket)
+  #   device_name  — exact per-INSTANCE name the device reports in INFO
+  #   firmware_name — software-load / device TYPE (e.g. "ltp-328p-dual"),
+  #                  the same for every board of that build. Use to target
+  #                  all devices of a type at once, regardless of instance name.
+  #   pixels       — device-reported total pixel count
+  #   dimensions   — device-reported geometry: "WxH" for matrices, "N" for strips
+  #   port         — glob on the port path (by-path globs pin a physical socket)
   devices:
     - match: { usb_serial: "A5069RR4" }
       name: "Hall Strip"
@@ -55,6 +58,11 @@ fleet:
       name: "Workbench Matrix"
     - match: { device_name: "LTP-328P-Dual", pixels: 160 }
       name: "Workbench Strip"
+
+    # Target every board of a firmware type, regardless of instance name —
+    # e.g. give all APA102 strips the same auth key:
+    # - match: { firmware_name: "ltp-apa102" }
+    #   auth_psk: "00112233445566778899aabbccddeeff"
 
     # Ignore a device without unplugging it:
     # - match: { port: "/dev/ttyUSB3" }

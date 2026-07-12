@@ -155,6 +155,16 @@ def cmd_brightness(device: LtpDevice, args: argparse.Namespace):
     print(f"Brightness set to {args.value}")
 
 
+def cmd_set_name(device: LtpDevice, args: argparse.Namespace):
+    """Set and persist the device's instance name."""
+    device.set_name(args.name)
+    # Re-read so the user sees exactly what the firmware stored (it caps at
+    # 15 bytes and an empty name reverts to the factory default).
+    info = device.refresh_info()
+    stored = info.device_name if info else args.name
+    print(f"Device name set to: {stored!r}")
+
+
 def cmd_rainbow(device: LtpDevice, args: argparse.Namespace):
     """Display a rainbow pattern."""
     num_pixels = device.pixel_count or 160
@@ -269,6 +279,12 @@ def main():
     p = subparsers.add_parser("brightness", help="Set brightness")
     p.add_argument("value", type=int, help="Brightness (0-255)")
 
+    # set-name
+    p = subparsers.add_parser(
+        "set-name", help="Set and persist the device instance name (<=15 chars)"
+    )
+    p.add_argument("name", help="New device name (empty string resets to default)")
+
     # rainbow
     subparsers.add_parser("rainbow", help="Display rainbow pattern")
 
@@ -300,6 +316,7 @@ def main():
         "fill": cmd_fill,
         "clear": cmd_clear,
         "brightness": cmd_brightness,
+        "set-name": cmd_set_name,
         "rainbow": cmd_rainbow,
         "chase": cmd_chase,
         "ping": cmd_ping,

@@ -65,7 +65,7 @@ LtpProtocol protocol(Serial, protocolBuffer, MAX_PAYLOAD_SIZE);
 // ============================================================================
 
 #define CONFIG_MAGIC        0x4C50  // "LP" - magic for PWM controller
-#define CONFIG_VERSION      1
+#define CONFIG_VERSION      2       // v2: appended EEPROM-backed device name
 #define EEPROM_CONFIG_ADDR  0
 
 // Local display modes
@@ -104,6 +104,9 @@ struct Config {
     uint16_t cycleTime;
     uint8_t numChannels;        // Active channel count (1..MAX_CHANNELS)
     uint8_t pwmFreq;            // Frequency preset index (0-5)
+    // v2: EEPROM-backed instance name. Appended last so an older blob
+    // migrates without disturbing the offsets of any field above it.
+    char name[DEVICE_NAME_MAXLEN + 1];
 } config = {
     CONFIG_MAGIC,
     CONFIG_VERSION,
@@ -116,7 +119,8 @@ struct Config {
     LOCAL_MODE_BLANK,
     10,                         // cycleTime
     DEFAULT_NUM_CHANNELS,
-    PWM_FREQ_976HZ              // default frequency
+    PWM_FREQ_976HZ,             // default frequency
+    DEVICE_NAME                 // name (factory default)
 };
 
 // Runtime channel count (mirrors config.numChannels)
@@ -426,7 +430,16 @@ void loadConfig() {
     EEPROM.get(EEPROM_CONFIG_ADDR, stored);
     if (stored.magic == CONFIG_MAGIC && stored.version == CONFIG_VERSION) {
         config = stored;
+    } else if (stored.magic == CONFIG_MAGIC && stored.version == 1) {
+        // Migrate v1 -> v2: name field appended; earlier fields keep their
+        // offsets, so keep them and just default the (stale) name.
+        config = stored;
+        config.version = CONFIG_VERSION;
+        strncpy(config.name, DEVICE_NAME, DEVICE_NAME_MAXLEN);
+        config.name[DEVICE_NAME_MAXLEN] = '\0';
+        saveConfig();
     }
+    config.name[DEVICE_NAME_MAXLEN] = '\0';  // never let a stale EEPROM name run past bounds
     if (config.numChannels == 0 || config.numChannels > MAX_CHANNELS) {
         config.numChannels = DEFAULT_NUM_CHANNELS;
     }
@@ -449,9 +462,32 @@ void resetConfig() {
     config.cycleTime = 10;
     config.numChannels = DEFAULT_NUM_CHANNELS;
     config.pwmFreq = PWM_FREQ_976HZ;
+    strncpy(config.name, DEVICE_NAME, DEVICE_NAME_MAXLEN);
+    config.name[DEVICE_NAME_MAXLEN] = '\0';
     numChannels = config.numChannels;
     applyPwmFrequency(config.pwmFreq);
     saveConfig();
+}
+
+// CMD_SET_NAME: payload is the new instance name (raw UTF-8, no length
+// prefix). Copied up to DEVICE_NAME_MAXLEN bytes, persisted immediately,
+// and acked. An empty payload restores the factory default name.
+void handleSetName(const uint8_t* payload, uint16_t length) {
+    uint8_t n = 0;
+    while (n < length && n < DEVICE_NAME_MAXLEN) {
+        uint8_t c = payload[n];
+        if (c == 0) break;
+        if (c < 0x20) c = '_';
+        config.name[n] = (char)c;
+        n++;
+    }
+    config.name[n] = '\0';
+    if (n == 0) {
+        strncpy(config.name, DEVICE_NAME, DEVICE_NAME_MAXLEN);
+        config.name[DEVICE_NAME_MAXLEN] = '\0';
+    }
+    saveConfig();
+    protocol.sendAck(CMD_SET_NAME);
 }
 
 // ============================================================================
@@ -758,9 +794,9 @@ void handleGetInfo(const uint8_t* payload, uint16_t length) {
             response[respLen++] = CAPS_PIXEL_READBACK | CAPS_EEPROM;
             response[respLen++] = NUM_CONTROLS;
             {
-                const char* name = DEVICE_NAME;
+                const char* name = config.name;
                 uint8_t i = 0;
-                while (name[i] && i < 15) {
+                while (name[i] && i < DEVICE_NAME_MAXLEN) {
                     response[respLen++] = name[i++];
                 }
                 response[respLen++] = 0;
@@ -1215,6 +1251,10 @@ void processPacket(const LtpPacket& pkt) {
         case CMD_RESET_CONFIG:
             resetConfig();
             protocol.sendAck(CMD_RESET_CONFIG);
+            break;
+
+        case CMD_SET_NAME:
+            handleSetName(pkt.payload, pkt.length);
             break;
 
         default:

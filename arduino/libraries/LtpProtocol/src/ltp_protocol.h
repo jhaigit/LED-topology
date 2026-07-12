@@ -63,6 +63,8 @@
 #define CMD_LOAD_CONFIG     0x43
 #define CMD_RESET_CONFIG    0x44
 #define CMD_SET_SEGMENT     0x45
+#define CMD_SET_NAME        0x46  // payload: UTF-8 name (<=15 bytes), persisted
+// 0x48 reserved for CMD_SET_AUTH_KEY (security plan, Layer 3)
 
 // Event Commands (0x50-0x5F)
 #define CMD_STATUS_UPDATE   0x50

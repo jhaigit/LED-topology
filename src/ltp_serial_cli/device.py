@@ -61,6 +61,7 @@ from .protocol import (
     CMD_LOAD_CONFIG,
     CMD_RESET_CONFIG,
     CMD_SET_CONTROL,
+    CMD_SET_NAME,
 )
 from .exceptions import (
     LtpConnectionError,
@@ -265,6 +266,13 @@ class LtpDevice:
     @property
     def info(self) -> Optional[DeviceInfo]:
         """Device information (populated after connect)."""
+        return self._info
+
+    def refresh_info(self) -> Optional[DeviceInfo]:
+        """Re-query INFO_ALL and update the cached device info."""
+        self._send(LtpProtocol.build_get_info(INFO_ALL))
+        packet = self._wait_for_response(CMD_INFO_RESPONSE)
+        self._info = self._parse_info_response(packet)
         return self._info
 
     @property
@@ -572,6 +580,24 @@ class LtpDevice:
         """Reset configuration to factory defaults."""
         self._send(LtpProtocol.build_packet(CMD_RESET_CONFIG))
         self._wait_for_ack(CMD_RESET_CONFIG)
+
+    def set_name(self, name: str):
+        """Set the device's instance name and persist it to EEPROM.
+
+        The firmware caps the name at 15 bytes; longer names are truncated
+        here (on a UTF-8 boundary) to match. An empty name restores the
+        firmware's factory-default name.
+        """
+        encoded = name.encode("utf-8")[:15]
+        # Avoid splitting a multi-byte UTF-8 sequence at the 15-byte cut.
+        while encoded:
+            try:
+                encoded.decode("utf-8")
+                break
+            except UnicodeDecodeError:
+                encoded = encoded[:-1]
+        self._send(LtpProtocol.build_packet(CMD_SET_NAME, encoded))
+        self._wait_for_ack(CMD_SET_NAME)
 
     # =========================================================================
     # Query Commands

@@ -45,6 +45,7 @@
 #define FIRMWARE_VERSION_MINOR  0
 #define DEVICE_NAME         "LTP-Octo8"
 #define FIRMWARE_NAME       "ltp-octo-v2"
+#define DEVICE_NAME_MAXLEN  15                 // wire cap: 15 chars + NUL (INFO_ALL/SET_NAME)
 
 // Maximum payload size (Teensy 3.2 has 64KB RAM)
 #define MAX_PAYLOAD_SIZE    4096
