@@ -30,8 +30,9 @@
 #define MDNS_SERVICE_NAME       "_ltp"  // mDNS service type
 #define MDNS_PROTOCOL           "_tcp"
 
-// Protocol version string (0.2 adds Layer 2 device-auth claim protocol)
-#define PROTOCOL_VERSION        "0.2"
+// Protocol version string (0.2 adds Layer 2 device-auth claim protocol;
+// 0.3 adds X25519+PIN pairing to establish the Layer 2 PSK over the wire)
+#define PROTOCOL_VERSION        "0.3"
 
 // Telnet console (port 23). Off by default: it is an unauthenticated shell
 // on the LAN (proposal §Problem). Define LTP_ENABLE_TELNET=1 at build time

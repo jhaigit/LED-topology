@@ -235,6 +235,8 @@ void UsbTerminal::processCommand(const char* line) {
         cmdAuthKey(args);
     } else if (strcmp(cmd, "auth-off") == 0) {
         cmdAuthOff();
+    } else if (strcmp(cmd, "pair") == 0) {
+        cmdPair();
     } else {
         dualOut.printf("Unknown command: %s\r\n", cmd);
         dualOut.println("Type 'help' for available commands");
@@ -274,6 +276,34 @@ void UsbTerminal::cmdAuthOff() {
     dualOut.println("Auth disabled (Level 0). Run 'save' then 'reboot'.");
 }
 
+// Arm X25519+PIN pairing: generate fresh ephemeral material and a PIN, show
+// the PIN on the console and big on the OLED, then let the controller pair
+// over the network. The window is one-shot and auto-expires (PAIR_WINDOW_MS);
+// on success the derived PSK is persisted and auth turns on automatically.
+void UsbTerminal::cmdPair() {
+    char pin[9];
+    if (!protocol.pairing().arm(pin)) {
+        dualOut.println("pair: failed to generate pairing material");
+        return;
+    }
+    dualOut.println("=== Pairing armed (120s, one attempt) ===");
+    dualOut.printf("PIN: %s\r\n", pin);
+    dualOut.println("In the controller web UI, click 'Pair (ECDH)' on this");
+    dualOut.println("sink and enter the PIN. On success the key is saved and");
+    dualOut.println("Level 2 auth turns on automatically.");
+
+    // Show the PIN big on the OLED. We do not clear it on a timer — the next
+    // local-mode update (or a paired stream) overwrites the display.
+    if (oled) {
+        oled->clearBuffer();
+        oled->setFont(u8g2_font_5x7_tr);
+        oled->drawText(0, 8, "PAIR");
+        oled->setFont(u8g2_font_7x14B_tr);
+        oled->drawTextF(0, 30, "%s", pin);
+        oled->sendBuffer();
+    }
+}
+
 void UsbTerminal::cmdHelp() {
     dualOut.println("Available commands:");
     dualOut.println("  wifi <ssid> <password>  - Set WiFi credentials");
@@ -286,6 +316,7 @@ void UsbTerminal::cmdHelp() {
     dualOut.println("  info                    - Show current status");
     dualOut.println("  auth-key <32 hex>       - Set Layer 2 PSK, require claim");
     dualOut.println("  auth-off                - Disable Layer 2 auth (open)");
+    dualOut.println("  pair                    - Arm X25519+PIN pairing (PIN on OLED)");
     dualOut.println("  save                    - Save config to NVS");
     dualOut.println("  reboot                  - Reboot the device");
     dualOut.println("  reset                   - Factory reset");

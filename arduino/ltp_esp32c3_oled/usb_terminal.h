@@ -98,6 +98,7 @@ private:
     void cmdReboot();
     void cmdAuthKey(const char* args);
     void cmdAuthOff();
+    void cmdPair();
 };
 
 // Implementation in main .ino file to access config structure
