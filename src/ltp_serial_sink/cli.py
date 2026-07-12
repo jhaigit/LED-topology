@@ -327,9 +327,11 @@ class _EnrollEndpoint:
         await self.server.stop()
 
 
-async def _start_enroll_endpoint(fleet_config) -> "_EnrollEndpoint | None":
+async def _start_enroll_endpoint(fleet_config, fleet=None) -> "_EnrollEndpoint | None":
     """Start the fleet enrollment control endpoint + advertise it via mDNS.
 
+    When a `fleet` is given, the endpoint also accepts encrypted device-PSK
+    provisioning (Phase 5.2), applied via ``fleet.apply_provision``.
     Returns None when enrollment is disabled in config."""
     cfg = getattr(fleet_config, "enroll", None)
     if cfg is None or not cfg.enabled:
@@ -350,7 +352,12 @@ async def _start_enroll_endpoint(fleet_config) -> "_EnrollEndpoint | None":
         path=Path(cfg.trust_path) if cfg.trust_path else None
     )
     trust.load()
-    server = FleetEnrollServer(identity, trust, port=cfg.port)
+    server = FleetEnrollServer(
+        identity,
+        trust,
+        port=cfg.port,
+        apply_fn=fleet.apply_provision if fleet is not None else None,
+    )
     await server.start()
 
     # Stable UUID derived from the identity so the advert survives restarts.
@@ -390,10 +397,15 @@ async def run_fleet(fleet_config) -> None:
     epoll_wait without draining the ready queue — the loop would sleep until
     its next timer. run_sink tolerates that because it polls every 100ms;
     the fleet has no such heartbeat."""
+    from ltp_serial_sink.enrollment import FleetProvisionStore
     from ltp_serial_sink.fleet import SerialFleet
 
-    fleet = SerialFleet(fleet_config)
-    enroll_endpoint = await _start_enroll_endpoint(fleet_config)
+    # Shared between the fleet (reads keys at adopt) and the control endpoint
+    # (writes pushed keys), so Phase 5.2 provisioning is applied and persisted.
+    provision_store = FleetProvisionStore()
+    provision_store.load()
+    fleet = SerialFleet(fleet_config, provision_store=provision_store)
+    enroll_endpoint = await _start_enroll_endpoint(fleet_config, fleet)
     shutdown_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 

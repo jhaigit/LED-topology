@@ -271,11 +271,21 @@ class FleetMember:
 class SerialFleet:
     """Runs one SerialSink per discovered LTP device in a single process."""
 
-    def __init__(self, config: FleetConfig | None = None):
+    def __init__(
+        self, config: FleetConfig | None = None, provision_store: Any = None
+    ):
         self.config = config or FleetConfig()
         self.members: dict[str, FleetMember] = {}  # keyed by real_path
         self._failed_ports: set[str] = set()  # probed, not LTP — log once
         self._running = False
+        # Controller-pushed per-device PSKs (Phase 5.2); takes precedence over
+        # a static auth_psk in config so the controller UI is the source of truth.
+        if provision_store is None:
+            from ltp_serial_sink.enrollment import FleetProvisionStore
+
+            provision_store = FleetProvisionStore()
+            provision_store.load()
+        self.provision_store = provision_store
 
     # -- configuration matching ------------------------------------------
 
@@ -336,15 +346,21 @@ class SerialFleet:
             f"{candidate.usb_description or 'serial device'} on {candidate.real_path}"
         )
 
+        device_id = stable_device_id(candidate, reported_name)
+        # A controller-pushed key (Phase 5.2) wins over a static config auth_psk.
+        auth_psk = self.provision_store.get(str(device_id)) or (
+            (override.auth_psk if override else None) or ""
+        )
+
         sink_config = SerialSinkConfig(
-            device_id=stable_device_id(candidate, reported_name),
+            device_id=device_id,
             name=name,
             description=description,
             port=candidate.path,
             baudrate=(override.baudrate if override else None) or self.config.scan.baudrate,
             timeout=self.config.scan.probe_timeout,
             pixels=override.pixels if override else 0,
-            auth_psk=(override.auth_psk if override else None) or "",
+            auth_psk=auth_psk,
             auth_read_open=override.auth_read_open if override else True,
         )
         sink = SerialSink(sink_config, renderer=renderer)
@@ -367,6 +383,40 @@ class SerialFleet:
             await member.task
         except (asyncio.CancelledError, Exception):
             pass
+
+    async def apply_provision(
+        self, device_id: str, psk_hex: str | None
+    ) -> tuple[bool, str]:
+        """Apply a controller-pushed PSK (Phase 5.2): persist it, then re-adopt
+        the affected device so the change takes effect. `psk_hex` None disables
+        auth for that device. Safe to call for a device not currently present."""
+        if psk_hex:
+            self.provision_store.set(device_id, psk_hex)
+            action = "set"
+        else:
+            self.provision_store.remove(device_id)
+            action = "cleared"
+
+        target = next(
+            (
+                rp
+                for rp, m in self.members.items()
+                if str(m.sink.config.device_id) == device_id
+            ),
+            None,
+        )
+        if target is None:
+            return True, f"key {action}; will apply when the device is next adopted"
+
+        await self._retire(target, f"re-adopting to apply {action} key")
+        # Re-probe/adopt so the sink is rebuilt with the new auth_psk.
+        await self.scan_once()
+        readopted = any(
+            str(m.sink.config.device_id) == device_id for m in self.members.values()
+        )
+        if readopted:
+            return True, f"key {action}; device re-adopted"
+        return True, f"key {action}; device was not re-adopted (check the port)"
 
     async def scan_once(self) -> None:
         """One discovery pass: adopt new devices, retire vanished ones."""

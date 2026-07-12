@@ -193,6 +193,13 @@ class MessageType(str, Enum):
     FLEET_ENROLL_REQUEST = "fleet_enroll_request"
     FLEET_ENROLL_RESPONSE = "fleet_enroll_response"
 
+    # Fleet device-PSK provisioning over the enrollment-derived encrypted
+    # channel (protocol 0.5, Phase 5.2). See fleet_channel.py.
+    FLEET_PROVISION_BEGIN = "fleet_provision_begin"
+    FLEET_PROVISION_CHALLENGE = "fleet_provision_challenge"
+    FLEET_PROVISION = "fleet_provision"
+    FLEET_PROVISION_RESULT = "fleet_provision_result"
+
     # Error
     ERROR = "error"
 
@@ -441,7 +448,7 @@ SERVICE_TYPE_CONTROLLER = "_ltp-controller._tcp.local."
 SERVICE_TYPE_FLEET = "_ltp-fleet._tcp.local."  # serial-sink fleet control endpoint
 
 # Protocol constants
-PROTOCOL_VERSION = "0.4"  # 0.4: fleet enrollment (Phase 5.1); 0.3: device pairing
+PROTOCOL_VERSION = "0.5"  # 0.5: fleet provisioning (Phase 5.2); 0.4: fleet enroll
 PACKET_MAGIC = 0x4C54
 # Max UDP packet size - 8KB works on most local networks
 MAX_PACKET_SIZE = 8192

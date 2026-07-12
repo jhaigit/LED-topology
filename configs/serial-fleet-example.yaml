@@ -50,6 +50,12 @@ fleet:
       # same key in the controller keystore (~/.config/ltp/keys.yaml) under
       # this device's UUID. Generate one with: openssl rand -hex 16
       # auth_psk: "00112233445566778899aabbccddeeff"
+      #
+      # Simpler (Phase 5.2): once this fleet is enrolled with the controller
+      # (Fleets tab), "Set Key"/"Rotate"/"Unpair" in the controller UI pushes
+      # the key here automatically over the encrypted channel — no auth_psk line
+      # and no restart needed. A pushed key (stored in
+      # ~/.config/ltp/fleet-provisioned.yaml) overrides any auth_psk set here.
 
     # Two boards with identical firmware name and indistinguishable USB
     # adapters (no serial, same VID:PID): tell them apart by what they

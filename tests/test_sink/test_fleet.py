@@ -383,3 +383,87 @@ class TestFleetLoop:
         assert len(fleet.members) == 1
         assert next(iter(fleet.members.values())) is not member
         await fleet.stop()
+
+
+# ---------------------------------------------------------------------------
+# Provisioning (Phase 5.2): pushed key precedence + apply/re-adopt
+# ---------------------------------------------------------------------------
+
+
+class TestFleetProvision:
+    async def test_pushed_key_wins_and_reprovisions(
+        self, fake_sink_cls, monkeypatch, tmp_path
+    ):
+        from ltp_serial_sink.enrollment import FleetProvisionStore
+
+        port = tmp_path / "ttyUSB0"
+        port.touch()
+        monkeypatch.setattr(fleet_mod, "probe_port", lambda c, s: FakeRenderer("Dev A"))
+        store = FleetProvisionStore(path=tmp_path / "prov.yaml")
+        # A static config auth_psk that the pushed key should override.
+        fleet = SerialFleet(
+            FleetConfig(
+                scan=FleetScanConfig(include=[str(port)], rescan_interval=0),
+                devices=[
+                    DeviceOverride(
+                        match=DeviceMatch(device_name="Dev A"), auth_psk="ee" * 16
+                    )
+                ],
+            ),
+            provision_store=store,
+        )
+        await fleet.scan_once()
+        await asyncio.sleep(0)
+        m = next(iter(fleet.members.values()))
+        did = str(m.sink.config.device_id)
+        assert m.sink.config.auth_psk == "ee" * 16  # config key initially
+
+        ok, msg = await fleet.apply_provision(did, "11" * 16)
+        assert ok
+        assert store.get(did) == "11" * 16
+        m2 = next(iter(fleet.members.values()))
+        assert m2.sink.config.auth_psk == "11" * 16  # pushed key won, re-adopted
+        await fleet.stop()
+
+    async def test_apply_disable_clears_key(self, fake_sink_cls, monkeypatch, tmp_path):
+        from ltp_serial_sink.enrollment import FleetProvisionStore
+
+        port = tmp_path / "ttyUSB0"
+        port.touch()
+        monkeypatch.setattr(fleet_mod, "probe_port", lambda c, s: FakeRenderer("Dev B"))
+        store = FleetProvisionStore(path=tmp_path / "prov.yaml")
+        fleet = SerialFleet(
+            FleetConfig(scan=FleetScanConfig(include=[str(port)], rescan_interval=0)),
+            provision_store=store,
+        )
+        await fleet.scan_once()
+        await asyncio.sleep(0)
+        did = str(next(iter(fleet.members.values())).sink.config.device_id)
+        await fleet.apply_provision(did, "22" * 16)
+        assert store.get(did) == "22" * 16
+        ok, _ = await fleet.apply_provision(did, None)
+        assert ok
+        assert store.get(did) is None
+        assert next(iter(fleet.members.values())).sink.config.auth_psk == ""
+        await fleet.stop()
+
+    async def test_apply_absent_device_stores_only(self, tmp_path):
+        from ltp_serial_sink.enrollment import FleetProvisionStore
+
+        store = FleetProvisionStore(path=tmp_path / "prov.yaml")
+        fleet = SerialFleet(
+            FleetConfig(scan=FleetScanConfig(include=[], rescan_interval=0)),
+            provision_store=store,
+        )
+        ok, msg = await fleet.apply_provision("dev-x", "33" * 16)
+        assert ok and "next adopted" in msg
+        assert store.get("dev-x") == "33" * 16
+
+    async def test_provision_store_persists(self, tmp_path):
+        from ltp_serial_sink.enrollment import FleetProvisionStore
+
+        store = FleetProvisionStore(path=tmp_path / "prov.yaml")
+        store.set("dev-1", "44" * 16)
+        reloaded = FleetProvisionStore(path=tmp_path / "prov.yaml")
+        reloaded.load()
+        assert reloaded.get("dev-1") == "44" * 16

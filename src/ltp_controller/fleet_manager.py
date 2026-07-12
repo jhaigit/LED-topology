@@ -16,12 +16,26 @@ from typing import Any
 
 import yaml
 
+from libltp.fleet_channel import (
+    DIR_C2F,
+    DIR_F2C,
+    ChannelError,
+    build_provision,
+    new_nonce,
+    open_,
+    parse_result,
+    seal,
+)
 from libltp.fleet_enroll import ControllerEnroller, EnrollError, fingerprint
 from libltp.identity import Identity, config_dir
 from libltp.protocol import Message
 from libltp.types import MessageType
 
 logger = logging.getLogger(__name__)
+
+
+class ProvisionError(Exception):
+    """A device-PSK push to a fleet failed (channel error, or fleet rejected)."""
 
 
 class PinnedFleet:
@@ -150,3 +164,71 @@ async def enroll_fleet(
     finally:
         writer.close()
     return PinnedFleet(expected_fleet_pub, channel_key, host=host, port=port)
+
+
+async def provision_device(
+    identity: Identity,
+    fleet: PinnedFleet,
+    device_id: str,
+    psk_hex: str | None,
+    timeout: float = 5.0,
+) -> str:
+    """Push a device PSK (or None to disable auth) to a trusted fleet over the
+    encrypted channel (Phase 5.2). Returns the fleet's status message; raises
+    ProvisionError on any failure. The PSK never crosses the wire in cleartext.
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(fleet.host, fleet.port), timeout=timeout
+        )
+    except (OSError, TimeoutError, asyncio.TimeoutError) as exc:
+        raise ProvisionError(f"cannot reach fleet at {fleet.host}:{fleet.port} ({exc})") from exc
+    try:
+        begin = Message(
+            MessageType.FLEET_PROVISION_BEGIN, 1, controller_pub=identity.public_key.hex()
+        )
+        writer.write(begin.to_bytes())
+        await writer.drain()
+
+        line = await asyncio.wait_for(reader.readline(), timeout=timeout)
+        if not line:
+            raise ProvisionError("fleet closed the connection")
+        msg = Message.from_bytes(line)
+        if msg.type == MessageType.ERROR:
+            raise ProvisionError(f"fleet rejected: {msg.data.get('message', '')}")
+        if msg.type != MessageType.FLEET_PROVISION_CHALLENGE:
+            raise ProvisionError(f"unexpected reply {msg.type.value}")
+        challenge = bytes.fromhex(msg.data.get("challenge", ""))
+
+        nonce = new_nonce()
+        ct = seal(
+            fleet.channel_key, DIR_C2F, build_provision(device_id, psk_hex, challenge), nonce
+        )
+        prov = Message(MessageType.FLEET_PROVISION, 1, nonce=nonce.hex(), ct=ct.hex())
+        writer.write(prov.to_bytes())
+        await writer.drain()
+
+        line = await asyncio.wait_for(reader.readline(), timeout=timeout)
+        if not line:
+            raise ProvisionError("fleet closed the connection after provision")
+        rmsg = Message.from_bytes(line)
+        if rmsg.type == MessageType.ERROR:
+            raise ProvisionError(f"fleet rejected: {rmsg.data.get('message', '')}")
+        if rmsg.type != MessageType.FLEET_PROVISION_RESULT:
+            raise ProvisionError(f"unexpected reply {rmsg.type.value}")
+        try:
+            result = parse_result(
+                open_(
+                    fleet.channel_key,
+                    DIR_F2C,
+                    bytes.fromhex(rmsg.data.get("nonce", "")),
+                    bytes.fromhex(rmsg.data.get("ct", "")),
+                )
+            )
+        except (ChannelError, ValueError) as exc:
+            raise ProvisionError(f"bad provision result: {exc}") from exc
+    finally:
+        writer.close()
+    if not result.get("ok"):
+        raise ProvisionError(result.get("message", "fleet reported failure"))
+    return str(result.get("message", "provisioned"))
