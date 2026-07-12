@@ -87,6 +87,7 @@
             <h4>Auth Key <span class="key-indicator" data-key-indicator="{{ sink.id }}"></span></h4>
             <div class="auth-actions" data-auth-actions="{{ sink.id }}">
                 <button class="btn btn-sm" onclick="pairDevice('{{ sink.id }}', false)" data-act="set">Set Key</button>
+                <button class="btn btn-sm" onclick="pairEcdh('{{ sink.id }}')" data-act="ecdh" title="X25519 + PIN pairing (armed network device)">Pair (ECDH)</button>
                 <button class="btn btn-sm" onclick="pairDevice('{{ sink.id }}', true)" data-act="rotate" style="display:none;">Rotate</button>
                 <button class="btn btn-sm btn-danger" onclick="unpairDevice('{{ sink.id }}')" data-act="unpair" style="display:none;">Unpair</button>
             </div>
@@ -706,6 +707,7 @@ function applyKeyStatus(id, s) {
     const has = s.has_key;
     if (ind) ind.textContent = has ? '• keyed' : (s.keystore_available ? '• no key' : '• keystore off');
     actions.querySelector('[data-act="set"]').style.display = has ? 'none' : '';
+    actions.querySelector('[data-act="ecdh"]').style.display = has ? 'none' : '';
     actions.querySelector('[data-act="rotate"]').style.display = has ? '' : 'none';
     actions.querySelector('[data-act="unpair"]').style.display = has ? '' : 'none';
 }
@@ -726,6 +728,27 @@ function pairDevice(id, rotate) {
             showToast('Device already keyed — use Rotate to replace.', 'error');
         } else {
             showToast('Error: ' + (data.error || status), 'error');
+        }
+    })
+    .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function pairEcdh(id) {
+    const pin = prompt('Enter the pairing PIN shown on the device (arm it first via its console/button):');
+    if (!pin) return;
+    showToast('Pairing…', 'info');
+    fetch(`/api/sinks/${id}/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pin.trim() })
+    })
+    .then(r => r.json().then(data => ({ ok: r.ok, data })))
+    .then(({ ok, data }) => {
+        if (ok && data.paired) {
+            loadKeyStatuses();
+            showToast('Paired — key established over ECDH', 'success');
+        } else {
+            showToast('Pairing failed: ' + (data.error || 'unknown'), 'error');
         }
     })
     .catch(err => showToast('Error: ' + err.message, 'error'));

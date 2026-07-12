@@ -181,6 +181,13 @@ class MessageType(str, Enum):
     RELEASE = "release"
     RELEASE_RESPONSE = "release_response"
 
+    # Device pairing: X25519 + PIN key establishment (protocol 0.3, Phase 4b).
+    # Derives the Layer 2 PSK on both sides without it crossing the wire.
+    PAIR_BEGIN = "pair_begin"
+    PAIR_BEGIN_RESPONSE = "pair_begin_response"
+    PAIR_CONFIRM = "pair_confirm"
+    PAIR_COMPLETE = "pair_complete"
+
     # Error
     ERROR = "error"
 
@@ -206,6 +213,8 @@ class ErrorCode(IntEnum):
     READONLY = 7
     UNAUTHORIZED = 8
     LEASE_HELD = 9
+    NOT_PAIRING = 10  # device is not in an armed pairing window
+    PAIR_FAILED = 11  # PIN mismatch or key-confirmation failure
 
 
 class MatrixOrigin(str, Enum):
@@ -425,7 +434,7 @@ SERVICE_TYPE_SOURCE = "_ltp-source._tcp.local."
 SERVICE_TYPE_CONTROLLER = "_ltp-controller._tcp.local."
 
 # Protocol constants
-PROTOCOL_VERSION = "0.2"  # 0.2: device-auth claim protocol (Layer 2)
+PROTOCOL_VERSION = "0.3"  # 0.3: X25519+PIN device pairing (Phase 4b)
 PACKET_MAGIC = 0x4C54
 # Max UDP packet size - 8KB works on most local networks
 MAX_PACKET_SIZE = 8192

@@ -453,6 +453,30 @@ def create_app(
         logger.info("Device key removed for %s", sink_id)
         return jsonify({"device_id": sink_id, "has_key": False})
 
+    @app.route("/api/sinks/<sink_id>/pair", methods=["POST"])
+    def api_sink_pair(sink_id: str) -> Any:
+        """X25519+PIN pairing (Phase 4b): derive the PSK with a network device
+        over ECDH — nothing secret crosses the wire. The device must already be
+        in an armed pairing window showing the PIN on its display; the operator
+        types that PIN here."""
+        sink = controller.get_sink(sink_id)
+        if not sink:
+            return jsonify({"error": "Sink not found"}), 404
+        body = request.get_json(silent=True) or {}
+        pin = str(body.get("pin", "")).strip()
+        if not pin:
+            return jsonify({"error": "pin required"}), 400
+        pool = getattr(controller, "_connection_pool", None)
+        if pool is None:
+            return jsonify({"error": "no connection pool"}), 409
+        try:
+            ok, message = run_async(pool.pair_device(sink_id, pin))
+        except Exception as e:  # pragma: no cover - transport failure
+            return jsonify({"paired": False, "error": str(e)}), 502
+        if not ok:
+            return jsonify({"paired": False, "error": message}), 400
+        return jsonify({"paired": True, "has_key": True, "device_id": sink_id})
+
     @app.route("/api/sinks/<sink_id>/refresh", methods=["POST"])
     def api_sink_refresh(sink_id: str) -> Any:
         """Refresh sink info."""

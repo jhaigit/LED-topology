@@ -264,6 +264,57 @@ class SinkConnectionPool:
                 sink.auth_state = "none"
             logger.info(f"Pool: Disconnected from sink {sink_id}")
 
+    async def pair_device(self, sink_id: str, pin: str) -> tuple[bool, str]:
+        """Run the X25519+PIN pairing handshake with a device (Phase 4b),
+        derive the Layer 2 PSK, store it in the keystore, and re-claim.
+
+        The device must already be in an armed pairing window (its OLED shows
+        the PIN). Nothing secret crosses the wire — only ephemeral public
+        points and key-confirmation MACs. Returns (success, human message)."""
+        from libltp.pairing import ControllerPairing, PairingError
+
+        if self.keystore is None:
+            return False, "keystore not configured"
+        sink = self.controller.get_sink(sink_id)
+        if sink is None or not sink.online:
+            return False, "device is offline"
+
+        pairing = ControllerPairing()
+        begin = Message(MessageType.PAIR_BEGIN, seq=1, **pairing.begin())
+        resp = await self.request(sink_id, begin, timeout=4.0)
+        if resp is None:
+            return False, "no response to pair_begin"
+        if resp.type == MessageType.ERROR:
+            return False, f"device: {resp.data.get('message', 'error')}"
+        if resp.type != MessageType.PAIR_BEGIN_RESPONSE:
+            return False, f"unexpected reply {resp.type.value}"
+
+        try:
+            confirm = pairing.on_begin_response(resp.data, pin)
+        except Exception as e:  # malformed response
+            return False, f"pairing derivation failed: {e}"
+
+        resp2 = await self.request(
+            sink_id, Message(MessageType.PAIR_CONFIRM, seq=2, **confirm), timeout=4.0
+        )
+        if resp2 is None:
+            return False, "no response to pair_confirm"
+        if resp2.type == MessageType.ERROR:
+            # Wrong PIN or tampered transcript — device refused.
+            return False, f"device rejected pairing: {resp2.data.get('message', 'failed')}"
+        if resp2.type != MessageType.PAIR_COMPLETE:
+            return False, f"unexpected reply {resp2.type.value}"
+
+        try:
+            psk = pairing.on_complete(resp2.data)
+        except PairingError as e:
+            return False, f"device confirmation failed: {e}"
+
+        self.keystore.set_key(sink_id, psk)  # persists 0600
+        await self.reclaim(sink_id)
+        logger.info(f"Pool: paired device {sink_id} via X25519+PIN")
+        return True, "paired"
+
     async def reclaim(self, sink_id: str) -> None:
         """Drop and re-establish a sink's connection so it re-reads the
         keystore and claims with the current key. Called after a key is

@@ -245,3 +245,41 @@ def test_ui_hides_auth_section_for_viewer(client):
     login(client, "vera", "vera-pw")
     page = client.get("/sinks").get_data(as_text=True)
     assert ">Set Key</button>" not in page
+
+
+# --- X25519+PIN pairing endpoint (Phase 4b) -------------------------------
+
+
+def test_pair_admin_only(client, token_pair):
+    token, _ = token_pair
+    r = client.post(f"/api/sinks/{DEV}/pair", headers=_bearer(token), json={"pin": "01234567"})
+    assert r.status_code == 403
+
+
+def test_pair_requires_pin(client):
+    csrf = login(client, "admin", ADMIN_PW)
+    r = client.post(f"/api/sinks/{DEV}/pair", headers={"X-CSRF-Token": csrf}, json={})
+    assert r.status_code == 400
+
+
+def test_pair_happy_path(app, client):
+    async def fake_pair(sink_id, pin):
+        assert sink_id == DEV and pin == "01234567"
+        return (True, "paired")
+
+    app.config["controller"]._connection_pool = SimpleNamespace(pair_device=fake_pair)
+    csrf = login(client, "admin", ADMIN_PW)
+    r = client.post(f"/api/sinks/{DEV}/pair", headers={"X-CSRF-Token": csrf}, json={"pin": "01234567"})
+    assert r.status_code == 200
+    assert r.get_json()["paired"] is True
+
+
+def test_pair_failure_reported(app, client):
+    async def fake_pair(sink_id, pin):
+        return (False, "device rejected pairing: wrong PIN")
+
+    app.config["controller"]._connection_pool = SimpleNamespace(pair_device=fake_pair)
+    csrf = login(client, "admin", ADMIN_PW)
+    r = client.post(f"/api/sinks/{DEV}/pair", headers={"X-CSRF-Token": csrf}, json={"pin": "0"})
+    assert r.status_code == 400
+    assert r.get_json()["paired"] is False
