@@ -278,6 +278,9 @@ class SerialFleet:
         self.members: dict[str, FleetMember] = {}  # keyed by real_path
         self._failed_ports: set[str] = set()  # probed, not LTP — log once
         self._running = False
+        # Serializes discovery passes so a provision-triggered re-adopt can't
+        # race the periodic rescan (both mutate members / probe the same port).
+        self._scan_lock = asyncio.Lock()
         # Controller-pushed per-device PSKs (Phase 5.2); takes precedence over
         # a static auth_psk in config so the controller UI is the source of truth.
         if provision_store is None:
@@ -408,18 +411,31 @@ class SerialFleet:
         if target is None:
             return True, f"key {action}; will apply when the device is next adopted"
 
-        await self._retire(target, f"re-adopting to apply {action} key")
-        # Re-probe/adopt so the sink is rebuilt with the new auth_psk.
-        await self.scan_once()
+        # Re-probe/adopt so the sink is rebuilt with the new auth_psk. Done under
+        # the scan lock so it can't race the periodic rescan. The key is already
+        # persisted, so a transient re-adopt failure is non-fatal — the next
+        # periodic rescan picks it up; report success either way.
+        try:
+            async with self._scan_lock:
+                await self._retire(target, f"re-adopting to apply {action} key")
+                await self._scan_once_locked()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Re-adopt after provisioning {device_id} failed: {exc}")
+            return True, f"key {action}; stored, re-adopt pending ({exc})"
         readopted = any(
             str(m.sink.config.device_id) == device_id for m in self.members.values()
         )
         if readopted:
             return True, f"key {action}; device re-adopted"
-        return True, f"key {action}; device was not re-adopted (check the port)"
+        return True, f"key {action}; stored, device will pick it up on next scan"
 
     async def scan_once(self) -> None:
-        """One discovery pass: adopt new devices, retire vanished ones."""
+        """One discovery pass: adopt new devices, retire vanished ones. Serialized
+        so a provision-triggered re-adopt can't race the periodic rescan."""
+        async with self._scan_lock:
+            await self._scan_once_locked()
+
+    async def _scan_once_locked(self) -> None:
         candidates = enumerate_candidates(self.config.scan)
         present = {c.real_path for c in candidates}
 

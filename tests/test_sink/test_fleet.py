@@ -467,3 +467,33 @@ class TestFleetProvision:
         reloaded = FleetProvisionStore(path=tmp_path / "prov.yaml")
         reloaded.load()
         assert reloaded.get("dev-1") == "44" * 16
+
+    async def test_apply_survives_failed_readopt(
+        self, fake_sink_cls, monkeypatch, tmp_path
+    ):
+        """If the device can't be re-probed during the push (e.g. still resetting),
+        the key is still stored and the result is a soft success, not an error."""
+        from ltp_serial_sink.enrollment import FleetProvisionStore
+
+        port = tmp_path / "ttyUSB0"
+        port.touch()
+        monkeypatch.setattr(fleet_mod, "probe_port", lambda c, s: FakeRenderer("Dev C"))
+        store = FleetProvisionStore(path=tmp_path / "prov.yaml")
+        fleet = SerialFleet(
+            FleetConfig(scan=FleetScanConfig(include=[str(port)], rescan_interval=0)),
+            provision_store=store,
+        )
+        await fleet.scan_once()
+        await asyncio.sleep(0)
+        did = str(next(iter(fleet.members.values())).sink.config.device_id)
+
+        # Device vanishes mid-push: re-probe finds nothing.
+        def gone(c, s):
+            raise ConnectionError("device resetting")
+
+        monkeypatch.setattr(fleet_mod, "probe_port", gone)
+        ok, msg = await fleet.apply_provision(did, "55" * 16)
+        assert ok is True
+        assert store.get(did) == "55" * 16  # persisted despite re-adopt failure
+        assert "next scan" in msg or "pending" in msg
+        await fleet.stop()
