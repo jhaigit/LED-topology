@@ -1,0 +1,26 @@
+[Unit]
+Description=LTP Thermal Source (AMG8833 IR camera -> LTP source)
+Documentation=https://github.com/jhaigit/LED-topology
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ltp
+Group=ltp
+# i2c grants /dev/i2c-1 access for the AMG8833 sensor (Raspberry Pi OS group).
+SupplementaryGroups=i2c
+# Defaults advertise the source for the controller to route. Customize inline
+# (e.g. --name, --rate, --palette, --bus, --address 0x69, or --sink host:port).
+ExecStart=/home/ltp/LED-topology/venv/bin/ltp-thermal-source
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the source needs no privileges and writes nothing to $HOME. It does
+# need /dev/i2c-1, so PrivateDevices is intentionally NOT set (it would hide it).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+
+[Install]
+WantedBy=multi-user.target
