@@ -1,9 +1,11 @@
 # Proposal: Fleet Enrollment & Remote Key Provisioning (Phase 5)
 
-**Status:** P5.1 **implemented** (2026-07-12). Decisions: enrollment-trust =
-**Option A, Pure TOFU** (§5); transport = LTP newline-JSON socket; payload
-encryption = XChaCha20-Poly1305 (§13, lands in P5.2). P5.2 (provisioning push)
-not yet started.
+**Status:** P5.1 + P5.2 **implemented** (2026-07-12). Decisions: enrollment-trust
+= **Option A, Pure TOFU** (§5); transport = LTP newline-JSON socket; payload
+encryption = **ChaCha20-Poly1305** (§13 — XChaCha isn't exposed by the installed
+`cryptography`; a per-direction subkey + single-use challenge give equivalent
+safety at this volume). P5.1 hardware-verified on block + 3pi; P5.2 unit/e2e
+tested, not yet hardware-run.
 
 > **P5.1 delivered.** Fleet + controller static X25519 identities
 > (`libltp/identity.py`, persisted `0600`), interop-locked enrollment crypto
@@ -208,9 +210,14 @@ notices. Noting so the message set is designed to be extensible, not built now.
    controller "Fleets" tab (discover/verify/trust/revoke). Interop-locked with a
    pinned vector + unit/e2e/web tests; no device provisioning yet. (For TOFU the
    fleet-side `enroll` verb is just status/reset — there is no code to enter.)
-2. **P5.2 — Provisioning channel + push.** Encrypted+MAC'd channel, the
-   `fleet_provision` message, fleet applies/persists/re-adopts, keystore UI
-   wired to push. End-to-end serial-device set/rotate/unpair from the UI.
+2. **P5.2 — Provisioning channel + push.** ✅ **Done (2026-07-12).** ChaCha20-
+   Poly1305 channel over the enrollment channel key (`libltp/fleet_channel.py`,
+   per-direction subkeys, single-use challenge for anti-replay; pinned vector).
+   `FLEET_PROVISION_BEGIN/CHALLENGE/PROVISION/RESULT` exchange; the fleet applies
+   pushed keys to a writable store (`~/.config/ltp/fleet-provisioned.yaml`, wins
+   over static config auth_psk) and re-adopts the device; the keystore Set Key /
+   Rotate / Unpair endpoints detect the owning fleet (host match) and push
+   instead of showing the YAML hint. Protocol 0.4→0.5. Unit + e2e + web tests.
 3. **P5.3 (optional) — inventory/health** over the same channel.
 
 ## 13. Open decisions (need sign-off)

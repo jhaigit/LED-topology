@@ -375,6 +375,40 @@ def create_app(
             ),
         }
 
+    def _owning_fleet(sink: Any) -> Any:
+        """The trusted fleet that hosts this (serial) device, matched by host, or
+        None. Serial devices are advertised from their fleet's host, so a pinned
+        fleet on the same host owns them (Phase 5.2 provisioning target)."""
+        store = app.config.get("fleet_store")
+        if store is None:
+            return None
+        try:
+            host = (sink.device.host or "").rstrip(".").lower()
+        except Exception:
+            return None
+        if not host:
+            return None
+        for f in store.all():
+            if (f.host or "").rstrip(".").lower() == host:
+                return f
+        return None
+
+    def _push_to_fleet(fleet: Any, device_id: str, psk_hex: str | None) -> dict[str, Any]:
+        """Push a key (or None to disable) to a trusted fleet over the encrypted
+        channel. Returns a small status dict for the API response."""
+        from ltp_controller.fleet_manager import provision_device
+
+        ident = app.config.get("fleet_identity")
+        label = fleet.name or fleet.fingerprint
+        if ident is None:
+            return {"fleet": label, "ok": False, "message": "no controller identity"}
+        try:
+            message = run_async(provision_device(ident, fleet, device_id, psk_hex))
+            return {"fleet": label, "ok": True, "message": message}
+        except Exception as e:  # noqa: BLE001 - surfaced to the operator
+            logger.warning("Fleet push to %s failed: %s", label, e)
+            return {"fleet": label, "ok": False, "message": str(e)}
+
     @app.route("/api/sinks/<sink_id>/key", methods=["GET"])
     def api_sink_key_status(sink_id: str) -> Any:
         """Pairing status for a device. Never returns the key material."""
@@ -437,7 +471,6 @@ def create_app(
             generated = True
 
         ks.set_key(sink_id, key)  # persists 0600
-        _reclaim_after_key_change(sink_id)
         logger.info(
             "Device key %s for %s (%s)",
             "rotated" if had_key else "set",
@@ -446,21 +479,35 @@ def create_app(
         )
 
         resp: dict[str, Any] = {"device_id": sink_id, "has_key": True, "rotated": had_key}
-        if generated:
+        # If a trusted fleet hosts this (serial) device, push the key to it over
+        # the encrypted channel — no YAML editing. Otherwise fall back to the
+        # manual provisioning hint (network devices, or an un-enrolled fleet).
+        fleet = _owning_fleet(sink)
+        if fleet is not None:
+            resp["fleet_push"] = _push_to_fleet(fleet, sink_id, key.hex())
+        elif generated:
             # Shown once — the operator must now provision the device side.
             resp["provisioning"] = _provisioning_hint(sink, key.hex())
+        _reclaim_after_key_change(sink_id)
         return jsonify(resp)
 
     @app.route("/api/sinks/<sink_id>/key", methods=["DELETE"])
     def api_sink_key_delete(sink_id: str) -> Any:
-        """Unpair: remove the device's key and reconnect (drops the lease)."""
+        """Unpair: remove the device's key and reconnect (drops the lease). If a
+        trusted fleet hosts the device, also push a disable so the bridge stops
+        requiring auth."""
         ks = app.config.get("keystore")
         if ks is None:
             return jsonify({"error": "keystore not configured"}), 409
         ks.remove_key(sink_id)
+        resp: dict[str, Any] = {"device_id": sink_id, "has_key": False}
+        sink = controller.get_sink(sink_id)
+        fleet = _owning_fleet(sink) if sink else None
+        if fleet is not None:
+            resp["fleet_push"] = _push_to_fleet(fleet, sink_id, None)
         _reclaim_after_key_change(sink_id)
         logger.info("Device key removed for %s", sink_id)
-        return jsonify({"device_id": sink_id, "has_key": False})
+        return jsonify(resp)
 
     @app.route("/api/sinks/<sink_id>/pair", methods=["POST"])
     def api_sink_pair(sink_id: str) -> Any:

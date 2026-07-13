@@ -721,9 +721,17 @@ function pairDevice(id, rotate) {
     .then(r => r.json().then(data => ({ ok: r.ok, status: r.status, data })))
     .then(({ ok, status, data }) => {
         if (ok) {
-            if (data.provisioning) showKeyModal(data.provisioning);
             loadKeyStatuses();
-            showToast(rotate ? 'Key rotated' : 'Key set', 'success');
+            if (data.fleet_push) {
+                // Pushed to the owning fleet over the encrypted channel — no manual step.
+                showToast(data.fleet_push.ok
+                    ? `Key pushed to fleet ${data.fleet_push.fleet}`
+                    : `Key set, but fleet push failed: ${data.fleet_push.message}`,
+                    data.fleet_push.ok ? 'success' : 'error');
+            } else {
+                if (data.provisioning) showKeyModal(data.provisioning);
+                showToast(rotate ? 'Key rotated' : 'Key set', 'success');
+            }
         } else if (status === 409) {
             showToast('Device already keyed — use Rotate to replace.', 'error');
         } else {
@@ -758,7 +766,17 @@ function unpairDevice(id) {
     if (!confirm('Remove this device’s key? The controller will reconnect and the device becomes unclaimed.')) return;
     fetch(`/api/sinks/${id}/key`, { method: 'DELETE' })
         .then(r => r.json())
-        .then(() => { loadKeyStatuses(); showToast('Device unpaired', 'success'); })
+        .then((data) => {
+            loadKeyStatuses();
+            if (data.fleet_push) {
+                showToast(data.fleet_push.ok
+                    ? 'Device unpaired (fleet updated)'
+                    : 'Unpaired locally, fleet push failed: ' + data.fleet_push.message,
+                    data.fleet_push.ok ? 'success' : 'error');
+            } else {
+                showToast('Device unpaired', 'success');
+            }
+        })
         .catch(err => showToast('Error: ' + err.message, 'error'));
 }
 
