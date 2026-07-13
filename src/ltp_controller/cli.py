@@ -100,12 +100,18 @@ def resolve_web_security(
         ensure_self_signed_cert(cert, key)
         ssl_context = (str(cert), str(key))
 
+    # Reading system state is open by default (no login to view); set
+    # web.public_read: false to require a login even to look. Mutations and key
+    # management always require the appropriate role regardless.
+    public_read = bool(web_config.get("public_read", True))
+
     settings = WebSecuritySettings(
         auth=auth,
         secret_key=ensure_secret_key() if auth else None,
         secure_cookies=decision.secure_cookies,
         insecure_transport=decision.insecure_transport,
         trust_proxy=decision.trust_proxy,
+        public_read=public_read,
     )
     return settings, ssl_context, decision.scheme
 

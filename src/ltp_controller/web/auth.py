@@ -36,11 +36,15 @@ from ltp_controller.security import (
 logger = logging.getLogger(__name__)
 
 _MUTATING = {"POST", "PUT", "DELETE", "PATCH"}
+_READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 # Endpoint names (not paths) exempt from authentication.
 _PUBLIC_ENDPOINTS = {"static", "login", "healthz"}
 
 _ANONYMOUS_ADMIN = Principal(name="anonymous", role="admin", kind="anonymous")
+# Granted to unauthenticated read requests when public_read is enabled: can see
+# state (viewer role), but the policy table still blocks admin-gated reads.
+_ANONYMOUS_VIEWER = Principal(name="anonymous", role="viewer", kind="anonymous")
 
 
 # ---------------------------------------------------------------------------
@@ -343,16 +347,22 @@ def init_auth(app: Flask, settings: WebSecuritySettings) -> None:
             via_session = principal is not None
 
         if principal is None:
-            # API paths always answer 401 JSON (curl's Accept: */* would
-            # otherwise count as "accepts HTML" and get a redirect); page
-            # requests from browsers bounce to the login form.
-            if (
-                not request.path.startswith("/api/")
-                and request.method == "GET"
-                and request.accept_mimetypes.accept_html
-            ):
-                return redirect(url_for("login", next=request.full_path.rstrip("?")))
-            return jsonify({"error": "unauthorized"}), 401
+            # Open read access: an unauthenticated read gets a viewer principal
+            # so system state is visible without logging in (mutations and
+            # admin-gated reads are still refused by the policy table below).
+            if settings.public_read and request.method in _READ_METHODS:
+                principal = _ANONYMOUS_VIEWER
+            else:
+                # API paths always answer 401 JSON (curl's Accept: */* would
+                # otherwise count as "accepts HTML" and get a redirect); page
+                # requests from browsers bounce to the login form.
+                if (
+                    not request.path.startswith("/api/")
+                    and request.method == "GET"
+                    and request.accept_mimetypes.accept_html
+                ):
+                    return redirect(url_for("login", next=request.full_path.rstrip("?")))
+                return jsonify({"error": "unauthorized"}), 401
 
         g.principal = principal
 

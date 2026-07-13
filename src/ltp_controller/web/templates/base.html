@@ -45,11 +45,15 @@
             {% if is_admin %}
             <button id="save-config-btn" class="btn btn-save" title="Save routes and rules to config file">Save Config</button>
             {% endif %}
-            {% if auth_enabled and principal %}
-            <form method="post" action="/logout" class="logout-form" title="Logged in as {{ principal.name }} ({{ principal.role }})">
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-                <button type="submit" class="btn btn-sm">{{ principal.name }} &middot; Log out</button>
-            </form>
+            {% if auth_enabled %}
+                {% if principal and principal.kind != 'anonymous' %}
+                <form method="post" action="/logout" class="logout-form" title="Logged in as {{ principal.name }} ({{ principal.role }})">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-sm">{{ principal.name }} &middot; Log out</button>
+                </form>
+                {% else %}
+                <a href="/login" class="btn btn-sm btn-primary" title="Log in for operator/admin actions">Log in</a>
+                {% endif %}
             {% endif %}
         </div>
     </nav>
