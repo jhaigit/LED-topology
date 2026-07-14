@@ -19,6 +19,12 @@ web:
   # start in that configuration.
   # allow_insecure_http: true
 
+  # Read access without a login. Default true: anyone who can reach the UI can
+  # SEE system state (devices, routes, sensors) as a viewer without signing in;
+  # any change, and all key management, still require a logged-in account with
+  # the right role. Set false to require a login even to view.
+  # public_read: true
+
   # TLS for the web UI/API. mode: auto = HTTPS whenever host is non-loopback
   # (a self-signed certificate is generated on first run); on/off force it.
   # tls:

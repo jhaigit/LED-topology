@@ -480,6 +480,12 @@ class WebSecuritySettings:
     secure_cookies: bool = False
     insecure_transport: bool = False
     trust_proxy: bool = False
+    # When True, unauthenticated callers get an anonymous *viewer* principal for
+    # read-only (GET/HEAD) requests, so the system state is visible without a
+    # login. Mutations and admin-gated reads (e.g. key status) still require the
+    # proper role. Only meaningful when auth is enabled. Field default is closed;
+    # resolve_web_security() opens it by default for real deployments.
+    public_read: bool = False
 
     @property
     def auth_enabled(self) -> bool:

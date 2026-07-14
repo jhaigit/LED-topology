@@ -45,11 +45,15 @@
             {% if is_admin %}
             <button id="save-config-btn" class="btn btn-save" title="Save routes and rules to config file">Save Config</button>
             {% endif %}
-            {% if auth_enabled and principal %}
-            <form method="post" action="/logout" class="logout-form" title="Logged in as {{ principal.name }} ({{ principal.role }})">
-                <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-                <button type="submit" class="btn btn-sm">{{ principal.name }} &middot; Log out</button>
-            </form>
+            {% if auth_enabled %}
+                {% if principal and principal.kind != 'anonymous' %}
+                <form method="post" action="/logout" class="logout-form" title="Logged in as {{ principal.name }} ({{ principal.role }})">
+                    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-sm">{{ principal.name }} &middot; Log out</button>
+                </form>
+                {% else %}
+                <a href="{{ url_for('login', next=request.path) }}" class="btn btn-sm btn-primary" title="Log in for operator/admin actions" onclick="return ltpLoginOpen()">Log in</a>
+                {% endif %}
             {% endif %}
         </div>
     </nav>
@@ -78,6 +82,32 @@
             </div>
         </div>
     </div>
+
+    {% if auth_enabled and (not principal or principal.kind == 'anonymous') %}
+    <!-- Login dialog (opened from the nav; the /login page is the no-JS fallback) -->
+    <div id="loginModal" class="modal" style="display: none;" role="dialog" aria-modal="true">
+        <div class="modal-content" style="max-width: 360px;">
+            <div class="modal-header">
+                <h2>Log in</h2>
+                <button class="close-btn" onclick="ltpLoginClose()" aria-label="Close">&times;</button>
+            </div>
+            <form method="post" action="{{ url_for('login', next=request.path) }}">
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <input id="login-username" name="username" type="text" autocomplete="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+                </div>
+                <div class="confirm-actions">
+                    <button type="button" class="btn" onclick="ltpLoginClose()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Log in</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
     <script src="{{ url_for('static', filename='js/list-tools.js') }}"></script>
