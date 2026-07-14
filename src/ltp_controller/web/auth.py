@@ -315,6 +315,10 @@ def init_auth(app: Flask, settings: WebSecuritySettings) -> None:
     @app.route("/logout", methods=["POST"])
     def logout() -> Any:
         session.clear()
+        # With public read on, the pages are still viewable anonymously —
+        # land back on the dashboard rather than the login form.
+        if settings.public_read:
+            return redirect(url_for("dashboard"))
         return redirect(url_for("login"))
 
     def _session_principal() -> Principal | None:

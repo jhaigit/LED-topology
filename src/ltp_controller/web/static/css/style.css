@@ -591,6 +591,7 @@ h2 {
 }
 
 .form-group input[type="text"],
+.form-group input[type="password"],
 .form-group select {
     width: 100%;
     padding: 0.75rem;
@@ -602,6 +603,7 @@ h2 {
 }
 
 .form-group input[type="text"]:focus,
+.form-group input[type="password"]:focus,
 .form-group select:focus {
     outline: none;
     border-color: var(--accent);

@@ -114,6 +114,19 @@ function confirmAction(message, {title = 'Confirm', okLabel = 'Delete'} = {}) {
     return new Promise(resolve => { _confirmResolve = resolve; });
 }
 
+// Login dialog (anonymous viewers; the full /login page is the no-JS fallback)
+function ltpLoginOpen() {
+    const modal = document.getElementById('loginModal');
+    if (!modal) return true;  // no modal on this page: follow the link to /login
+    modal.style.display = 'flex';
+    document.getElementById('login-username').focus();
+    return false;
+}
+
+function ltpLoginClose() {
+    document.getElementById('loginModal').style.display = 'none';
+}
+
 // Save config button handler
 (function() {
     const saveBtn = document.getElementById('save-config-btn');

@@ -83,7 +83,27 @@ def test_anon_can_view_page(open_client):
     # No redirect to login; the page renders for an anonymous viewer.
     r = open_client.get("/sinks")
     assert r.status_code == 200
-    assert "Log in" in r.get_data(as_text=True)  # nav offers login, not logout
+    body = r.get_data(as_text=True)
+    assert "Log in" in body  # nav offers login, not logout
+    # The login modal is present, posting back to the current page.
+    assert 'id="loginModal"' in body
+    assert "/login?next=/sinks" in body
+
+
+def _login_and_csrf(client):
+    assert client.post("/login", data={"username": "admin", "password": ADMIN_PW}).status_code == 302
+    page = client.get("/sinks").get_data(as_text=True)
+    marker = 'name="csrf-token" content="'
+    start = page.index(marker) + len(marker)
+    return page[start : page.index('"', start)]
+
+
+def test_logout_lands_on_dashboard(open_client):
+    # With public read on, logging out drops back to the (viewable) dashboard.
+    csrf = _login_and_csrf(open_client)
+    r = open_client.post("/logout", data={"_csrf": csrf})
+    assert r.status_code == 302
+    assert r.headers["Location"] in ("/", "http://localhost/")
 
 
 def test_anon_cannot_mutate(open_client):
@@ -114,5 +134,13 @@ def test_closed_api_requires_auth(closed_client):
 
 def test_closed_page_redirects_to_login(closed_client):
     r = closed_client.get("/sinks", headers={"Accept": "text/html"})
+    assert r.status_code == 302
+    assert "/login" in r.headers["Location"]
+
+
+def test_closed_logout_lands_on_login(closed_client):
+    # Without public read, logout still goes to the login form.
+    csrf = _login_and_csrf(closed_client)
+    r = closed_client.post("/logout", data={"_csrf": csrf})
     assert r.status_code == 302
     assert "/login" in r.headers["Location"]
