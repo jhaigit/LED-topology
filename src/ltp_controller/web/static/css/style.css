@@ -579,6 +579,11 @@ h2 {
     color: var(--text-primary);
 }
 
+.login-modal-msg {
+    margin: 1rem 1.5rem 0;
+    color: var(--text-secondary);
+}
+
 /* Forms */
 .form-group {
     padding: 1rem 1.5rem;

@@ -92,6 +92,7 @@
                 <button class="close-btn" onclick="ltpLoginClose()" aria-label="Close">&times;</button>
             </div>
             <form method="post" action="{{ url_for('login', next=request.path) }}">
+                <p id="login-modal-msg" class="login-modal-msg" style="display: none;"></p>
                 <div class="form-group">
                     <label for="login-username">Username</label>
                     <input id="login-username" name="username" type="text" autocomplete="username" required>

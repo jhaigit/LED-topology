@@ -19,7 +19,12 @@
         }
         return origFetch(input, init).then(response => {
             if (response.status === 401 && !window.location.pathname.startsWith('/login')) {
-                window.location = '/login?next=' + encodeURIComponent(window.location.pathname);
+                // Anonymous viewer hit a privileged action: open the in-page
+                // login modal. Pages without the modal (expired session of a
+                // logged-in user) still bounce to the full login form.
+                if (ltpLoginOpen('Logging in is required for that action.')) {
+                    window.location = '/login?next=' + encodeURIComponent(window.location.pathname);
+                }
             }
             return response;
         });
@@ -115,9 +120,12 @@ function confirmAction(message, {title = 'Confirm', okLabel = 'Delete'} = {}) {
 }
 
 // Login dialog (anonymous viewers; the full /login page is the no-JS fallback)
-function ltpLoginOpen() {
+function ltpLoginOpen(message) {
     const modal = document.getElementById('loginModal');
     if (!modal) return true;  // no modal on this page: follow the link to /login
+    const msg = document.getElementById('login-modal-msg');
+    msg.textContent = message || '';
+    msg.style.display = message ? '' : 'none';
     modal.style.display = 'flex';
     document.getElementById('login-username').focus();
     return false;
