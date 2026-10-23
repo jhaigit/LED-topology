@@ -7,7 +7,7 @@ import asyncio
 import logging
 import sys
 import threading
-from typing import Any, TextIO
+from typing import Any, Callable, TextIO
 from uuid import UUID, uuid4
 
 import numpy as np
@@ -18,6 +18,7 @@ from libltp import (
     BooleanControl,
     ColorFormat,
     ControlRegistry,
+    ControlValidationError,
     DataPacket,
     DeviceType,
     EnumControl,
@@ -25,6 +26,7 @@ from libltp import (
     Message,
     MessageType,
     NumberControl,
+    StringControl,
     SinkAdvertiser,
     capability_response,
     control_get_response,
@@ -39,6 +41,11 @@ from libltp.transport import ControlServer, DataReceiver, StreamManager
 from ltp_serial_sink.v2_renderer import V2Renderer, V2RendererConfig
 
 logger = logging.getLogger(__name__)
+
+# Pseudo-control exposing the device's EEPROM-backed instance name
+# (CMD_SET_NAME). Not a firmware control id — handled specially on set.
+DEVICE_NAME_CONTROL_ID = "device_name"
+DEVICE_NAME_MAXLEN = 15  # bytes; matches DEVICE_NAME_MAXLEN in the sketches
 
 
 class SerialSinkConfig(BaseModel):
@@ -136,6 +143,11 @@ class SerialSink:
         # Controls registry - will be populated after device connection
         self._controls = ControlRegistry()
         self._setup_local_controls()
+
+        # Called with the device's new reported name after a successful
+        # CMD_SET_NAME. Fleet mode uses it to re-advertise the sink under the
+        # new name (its advertised name derives from the device name).
+        self.on_device_renamed: Callable[[str], None] | None = None
 
         # Actual pixel count (may be updated from device)
         self._pixel_count = self.config.pixels
@@ -263,6 +275,24 @@ class SerialSink:
                         group="hardware",
                     )
                 )
+
+        # Device instance name (EEPROM-backed). Only offered when the device
+        # reports one, i.e. firmware with CMD_SET_NAME support.
+        device_info = self._renderer.device_info
+        if device_info is not None and device_info.device_name:
+            self._controls.register(
+                StringControl(
+                    id=DEVICE_NAME_CONTROL_ID,
+                    name="Device Name",
+                    description=(
+                        "Name stored in the device's EEPROM "
+                        f"(max {DEVICE_NAME_MAXLEN} bytes; empty restores the factory default)"
+                    ),
+                    value=device_info.device_name,
+                    maxLength=DEVICE_NAME_MAXLEN,
+                    group="hardware",
+                )
+            )
 
         logger.info(
             f"Device controls registered: {[c.id for c in self._controls._controls.values()]}"
@@ -504,6 +534,14 @@ class SerialSink:
         errors = {}
 
         for control_id, value in values.items():
+            if control_id == DEVICE_NAME_CONTROL_ID and self._renderer is not None:
+                new_name = self._set_device_name(value)
+                if new_name is None:
+                    errors[control_id] = "Failed to set device name"
+                else:
+                    applied[control_id] = new_name
+                continue
+
             # Check if this is a hardware control by looking it up in the renderer
             device_ctrl = None
             device_ctrl_id = None
@@ -591,6 +629,51 @@ class SerialSink:
 
         status = "ok" if not errors else "partial"
         return control_set_response(message.seq, status, applied, errors or None)
+
+    def _set_device_name(self, value: Any) -> str | None:
+        """Persist a new instance name on the device and propagate it.
+
+        Returns the name the device reports afterwards (it may differ from the
+        request: the firmware truncates to 15 bytes and an empty request
+        restores the factory default), or None if the device refused/failed.
+        """
+        assert self._renderer is not None
+        requested = str(value).strip()
+        new_name = self._renderer.set_name(requested)
+        if new_name is None:
+            return None
+
+        try:
+            self._controls.set_value(DEVICE_NAME_CONTROL_ID, new_name)
+        except (KeyError, ControlValidationError):
+            # Control not registered yet (older firmware path); nothing to sync.
+            pass
+        logger.info(f"Device renamed to {new_name!r}")
+
+        if self.on_device_renamed is not None:
+            try:
+                self.on_device_renamed(new_name)
+            except Exception as e:
+                logger.warning(f"on_device_renamed callback failed: {e}")
+        return new_name
+
+    async def rename(self, new_name: str) -> None:
+        """Change this sink's advertised name and re-announce it via mDNS.
+
+        The controller keys devices by service name, so this shows up there
+        as a goodbye for the old name and an add under the new one; it
+        migrates the existing entry by device UUID rather than duplicating.
+        """
+        if new_name == self.config.name:
+            return
+        old_name = self.config.name
+        self.config.name = new_name
+        if self._advertiser is None:
+            return
+        await self._advertiser.stop()
+        self._advertiser = self._build_advertiser()
+        await self._advertiser.start()
+        logger.info(f"Sink re-advertised: '{old_name}' -> '{new_name}'")
 
     def _handle_pixel_read(self, message: Message) -> Message:
         """Handle pixel read request — read actual pixels from device."""
@@ -907,20 +990,7 @@ class SerialSink:
         await self._control_server.start()
 
         # Start mDNS advertisement
-        self._advertiser = SinkAdvertiser(
-            name=self.config.name.lower().replace(" ", "-"),
-            port=self._control_server.actual_port,
-            device_id=self.config.device_id,
-            display_name=self.config.name,
-            description=self.config.description,
-            device_type=self._device_type,
-            pixels=self._pixel_count,
-            dimensions=self._dimensions,
-            color_format=self.config.color_format,
-            max_rate=self.config.max_refresh_hz,
-            has_controls=True,
-            auth="siphash" if self._auth_guard.enabled else "none",
-        )
+        self._advertiser = self._build_advertiser()
         await self._advertiser.start()
 
         self._running = True
@@ -949,6 +1019,23 @@ class SerialSink:
                 f"Data: {self._data_receiver.actual_port}, "
                 f"Serial: {self.config.port} ({self.config.baudrate} baud)"
             )
+
+    def _build_advertiser(self) -> SinkAdvertiser:
+        assert self._control_server is not None
+        return SinkAdvertiser(
+            name=self.config.name.lower().replace(" ", "-"),
+            port=self._control_server.actual_port,
+            device_id=self.config.device_id,
+            display_name=self.config.name,
+            description=self.config.description,
+            device_type=self._device_type,
+            pixels=self._pixel_count,
+            dimensions=self._dimensions,
+            color_format=self.config.color_format,
+            max_rate=self.config.max_refresh_hz,
+            has_controls=True,
+            auth="siphash" if self._auth_guard.enabled else "none",
+        )
 
     async def stop(self) -> None:
         """Stop the serial sink."""

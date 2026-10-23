@@ -482,6 +482,30 @@ class V2Renderer:
             self._close_device()
             return False
 
+    def set_name(self, name: str) -> str | None:
+        """Set the device's EEPROM-backed instance name.
+
+        The firmware caps the name at 15 bytes (the CLI layer truncates on a
+        UTF-8 boundary); an empty name restores the factory default. Returns
+        the name the device reports after the change, or None on failure.
+        """
+        if not self.is_connected() or not self._device:
+            return None
+
+        try:
+            self._device.set_name(name)
+            # Re-read INFO_ALL so device_info (and anything derived from it,
+            # such as the advertised sink name) reflects the stored name.
+            self._device_info = self._device.refresh_info()
+        except LtpError as e:
+            logger.warning(f"Failed to set device name to {name!r}: {e}")
+            self._close_device()
+            return None
+
+        new_name = self._device_info.device_name if self._device_info else None
+        logger.info(f"Device name set to {new_name!r}")
+        return new_name
+
     def _get_control_type_code(self, type_name: str) -> int:
         """Convert control type name to protocol type code."""
         type_map = {

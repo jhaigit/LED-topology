@@ -302,11 +302,27 @@ class SerialFleet:
 
     def _unique_name(self, base: str, port_path: str) -> str:
         """mDNS advertisement names derive from the sink name; make sure two
-        identically-named devices don't collide."""
-        names = {m.name for m in self.members.values()}
-        if base not in names:
+        identically-named devices don't collide. The member on `port_path`
+        itself (if any) is ignored so a rename can't collide with its own
+        old name."""
+        names = {p: m.name for p, m in self.members.items() if p != port_path}
+        if base not in names.values():
             return base
         return f"{base} ({os.path.basename(port_path)})"
+
+    def _on_member_renamed(self, real_path: str, new_device_name: str) -> None:
+        """A device's EEPROM name changed (CMD_SET_NAME via the sink's
+        `device_name` control). Follow it: re-advertise under the new name so
+        the controller migrates the entry rather than showing a stale one."""
+        member = self.members.get(real_path)
+        if member is None or not new_device_name:
+            return
+        name = self._unique_name(new_device_name, real_path)
+        if name == member.name:
+            return
+        logger.info(f"Device on {real_path} renamed: '{member.name}' -> '{name}'")
+        member.name = name
+        asyncio.create_task(member.sink.rename(name), name=f"rename:{real_path}")
 
     # -- scan/adopt loop ---------------------------------------------------
 
@@ -367,6 +383,13 @@ class SerialFleet:
             auth_read_open=override.auth_read_open if override else True,
         )
         sink = SerialSink(sink_config, renderer=renderer)
+        # Only follow device renames when the advertised name actually comes
+        # from the device (a configured override name stays authoritative).
+        if override is None or not override.name:
+            real_path = candidate.real_path
+            sink.on_device_renamed = lambda new_name: self._on_member_renamed(
+                real_path, new_name
+            )
         task = asyncio.create_task(sink.run(), name=f"sink:{candidate.real_path}")
         self.members[candidate.real_path] = FleetMember(
             candidate=candidate, sink=sink, task=task, name=name

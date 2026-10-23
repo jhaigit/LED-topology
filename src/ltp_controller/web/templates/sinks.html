@@ -131,6 +131,19 @@
                            {% if control.max is defined and control.max is not none %}max="{{ control.max|int if is_integer else control.max }}"{% endif %}
                            {% if control.step is defined %}step="{{ control.step|int if is_integer else control.step }}"{% endif %}
                            onchange="setControl('{{ sink.id }}', '{{ control.id }}', {{ 'parseInt(this.value)' if is_integer else 'parseFloat(this.value)' }})">
+                    {% elif control.type == 'string' %}
+                    {# Free-form text (e.g. the device's EEPROM name). Applied on
+                       demand rather than on every keystroke: a rename writes EEPROM
+                       and re-advertises the sink, so it must be deliberate. #}
+                    <form class="control-text-form" onsubmit="applyStringControl(this, '{{ sink.id }}', '{{ control.id }}', '{{ control.name }}'); return false;">
+                        <input type="text" class="control-input control-text"
+                               value="{{ current_value }}"
+                               {% if control.max_length is defined and control.max_length is not none %}maxlength="{{ control.max_length }}"{% endif %}
+                               {% if control.min_length is defined and control.min_length is not none %}minlength="{{ control.min_length }}"{% endif %}
+                               {% if control.pattern is defined and control.pattern %}pattern="{{ control.pattern }}"{% endif %}
+                               spellcheck="false" autocomplete="off">
+                        <button type="submit" class="btn btn-sm btn-action">Apply</button>
+                    </form>
                     {% elif control.type == 'enum' %}
                     <select class="control-input" onchange="setControl('{{ sink.id }}', '{{ control.id }}', this.value)">
                         {% for option in control.options %}
@@ -342,6 +355,14 @@
 select.control-input {
     min-width: 100px;
 }
+.control-text-form {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.control-text {
+    width: 150px;
+}
 .btn-action {
     background: var(--secondary-bg, #374151);
     border: 1px solid var(--border-color, #4b5563);
@@ -422,6 +443,47 @@ function setControlLive(sinkId, controlId, value) {
         })
         .catch(err => showToastOnce('Error: ' + err.message, 'error'))
     );
+}
+
+function applyStringControl(form, sinkId, controlId, controlName) {
+    const input = form.querySelector('input');
+    const btn = form.querySelector('button');
+    const value = input.value;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    const values = {};
+    values[controlId] = value;
+
+    fetch(`/api/sinks/${sinkId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            btn.textContent = 'Saved';
+            showToast(`${controlName} updated`, 'success');
+            if (controlId === 'device_name') {
+                // The sink re-advertises under its new name; reload once the
+                // controller has migrated the entry so the card header follows.
+                setTimeout(() => window.location.reload(), 2500);
+            } else {
+                setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1000);
+            }
+        } else {
+            btn.textContent = originalText;
+            btn.disabled = false;
+            showToast('Error setting ' + controlName + ': ' + JSON.stringify(data.results || data.error), 'error');
+        }
+    })
+    .catch(err => {
+        btn.textContent = originalText;
+        btn.disabled = false;
+        showToast('Error: ' + err.message, 'error');
+    });
 }
 
 function triggerAction(sinkId, controlId, actionName) {
