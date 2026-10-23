@@ -2,33 +2,190 @@
 
 // CSRF + session handling: wrap fetch once so every same-origin mutating
 // request (apiCall and the direct fetch() call sites alike) carries the
-// CSRF token, and an expired session bounces to the login page.
-(function() {
+// CSRF token. A 401 (anonymous viewer, or a login that expired while the
+// page sat open) opens the in-page login modal and *holds* the request:
+// once the user logs in it is replayed with the fresh CSRF token and the
+// caller sees the replayed response, so the interaction completes instead
+// of being lost to a page navigation. Cancelling hands back the 401.
+const ltpSession = (function() {
     const meta = document.querySelector('meta[name="csrf-token"]');
-    const csrfToken = meta ? meta.content : '';
+    let csrfToken = meta ? meta.content : '';
     const origFetch = window.fetch.bind(window);
+    const pending = [];  // {input, init, resolve, response}
+    const principalMeta = document.querySelector('meta[name="ltp-principal"]');
+    let principal = principalMeta ? principalMeta.content : '';
+
+    function setCsrf(token) {
+        csrfToken = token || '';
+        if (meta) meta.content = csrfToken;
+        document.querySelectorAll('input[name="_csrf"]').forEach(i => { i.value = csrfToken; });
+    }
+
+    function isSameOrigin(url) {
+        return !/^[a-z]+:\/\//i.test(url) || url.startsWith(window.location.origin);
+    }
+
     window.fetch = function(input, init) {
         init = init || {};
         const method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
         const url = typeof input === 'string' ? input : input.url;
-        const sameOrigin = !/^[a-z]+:\/\//i.test(url) || url.startsWith(window.location.origin);
-        if (csrfToken && sameOrigin && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+        if (csrfToken && isSameOrigin(url) && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
             const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
             headers.set('X-CSRF-Token', csrfToken);
             init.headers = headers;
         }
         return origFetch(input, init).then(response => {
-            if (response.status === 401 && !window.location.pathname.startsWith('/login')) {
-                // Anonymous viewer hit a privileged action: open the in-page
-                // login modal. Pages without the modal (expired session of a
-                // logged-in user) still bounce to the full login form.
-                if (ltpLoginOpen('Logging in is required for that action.')) {
-                    window.location = '/login?next=' + encodeURIComponent(window.location.pathname);
-                }
+            if (response.status !== 401 || window.location.pathname.startsWith('/login')) {
+                return response;
             }
-            return response;
+            if (!document.getElementById('loginModal')) {
+                // No modal on this page: fall back to the full login form.
+                window.location = '/login?next=' + encodeURIComponent(window.location.pathname);
+                return response;
+            }
+            const msg = principal
+                ? 'Your session has expired. Log in to continue where you left off.'
+                : 'Logging in is required for that action.';
+            return new Promise(resolve => {
+                pending.push({ input, init, resolve, response });
+                ltpLoginOpen(msg);
+            });
         });
     };
+
+    function replayPending() {
+        const items = pending.splice(0);
+        // Re-enter window.fetch so the fresh CSRF token is applied (and so a
+        // second expiry mid-replay would be handled the same way).
+        items.forEach(p => p.resolve(window.fetch(p.input, p.init)));
+    }
+
+    function cancelPending() {
+        const items = pending.splice(0);
+        items.forEach(p => p.resolve(p.response));
+    }
+
+    // Log in from the modal without leaving the page.
+    async function submitLogin(form) {
+        const msg = document.getElementById('login-modal-msg');
+        const submit = form.querySelector('button[type="submit"]');
+        submit.disabled = true;
+        try {
+            const resp = await origFetch(form.action, {
+                method: 'POST',
+                body: new FormData(form),
+                headers: { 'Accept': 'application/json' },
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || data.status !== 'ok') {
+                msg.textContent = data.error || 'Login failed.';
+                msg.style.display = '';
+                return;
+            }
+            setCsrf(data.csrf);
+            setPrincipal(data.principal.name, data.principal.role);
+            form.querySelector('input[name="password"]').value = '';
+            ltpLoginClose();
+            hideBanner();
+            replayPending();
+            if (typeof showToast === 'function') showToast(`Logged in as ${data.principal.name}`, 'success');
+        } catch (err) {
+            msg.textContent = 'Login failed: ' + err.message;
+            msg.style.display = '';
+        } finally {
+            submit.disabled = false;
+        }
+    }
+
+    // --- nav + banner state -------------------------------------------
+
+    function setPrincipal(name, role) {
+        principal = name || '';
+        const nav = document.getElementById('nav-auth');
+        if (!nav) return;
+        if (principal) {
+            nav.innerHTML = `<form method="post" action="/logout" class="logout-form" title="Logged in as ${escapeHtml(name)} (${escapeHtml(role || '')})">
+                <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+                <button type="submit" class="btn btn-sm">${escapeHtml(name)} &middot; Log out</button></form>`;
+        } else {
+            nav.innerHTML = `<a href="/login?next=${encodeURIComponent(window.location.pathname)}" class="btn btn-sm btn-primary" title="Log in for operator/admin actions" onclick="return ltpLoginOpen()">Log in</a>`;
+        }
+    }
+
+    function escapeHtml(v) {
+        return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    function showBanner(text, buttonText, onClick, expired) {
+        const banner = document.getElementById('session-banner');
+        if (!banner) return;
+        document.getElementById('session-banner-msg').textContent = text;
+        const btn = document.getElementById('session-banner-btn');
+        btn.textContent = buttonText;
+        btn.onclick = onClick;
+        banner.classList.toggle('expired', !!expired);
+        banner.hidden = false;
+    }
+
+    function hideBanner() {
+        const banner = document.getElementById('session-banner');
+        if (banner) banner.hidden = true;
+    }
+
+    // --- session monitor ------------------------------------------------
+    // Notice an expired (or expiring) login before the user starts an
+    // interaction that would only fail at the end. Runs on a slow timer and
+    // whenever the tab regains focus (a page left open overnight).
+
+    let monitorTimer = null;
+
+    async function check() {
+        let data;
+        try {
+            data = await (await origFetch('/api/session', { cache: 'no-store' })).json();
+        } catch (e) {
+            return;  // controller unreachable; other polls will complain
+        }
+        if (!data.auth_enabled) return;
+        if (principal && !data.authenticated) {
+            setPrincipal('', '');
+            showBanner('Your session has expired. Log in again to make changes.',
+                       'Log in', () => ltpLoginOpen('Your session has expired.'), true);
+            return;
+        }
+        if (data.authenticated) {
+            if (data.name !== principal) setPrincipal(data.name, data.role);  // logged in elsewhere
+            if (data.expires_in <= data.warn_below) {
+                const mins = Math.max(1, Math.round(data.expires_in / 60));
+                showBanner(`Your session expires in about ${mins} minute${mins === 1 ? '' : 's'} of inactivity.`,
+                           'Stay logged in', keepAlive, false);
+            } else {
+                hideBanner();
+            }
+        }
+    }
+
+    async function keepAlive() {
+        const resp = await window.fetch('/api/session/refresh', { method: 'POST' });
+        if (resp.ok) hideBanner();
+    }
+
+    function startMonitor() {
+        if (!document.getElementById('loginModal')) return;  // auth disabled
+        check();
+        monitorTimer = setInterval(check, 60000);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') check();
+        });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', startMonitor);
+    } else {
+        startMonitor();
+    }
+
+    return { setCsrf, submitLogin, cancelPending, check, get principal() { return principal; } };
 })();
 
 // Theme management
@@ -119,20 +276,74 @@ function confirmAction(message, {title = 'Confirm', okLabel = 'Delete'} = {}) {
     return new Promise(resolve => { _confirmResolve = resolve; });
 }
 
-// Login dialog (anonymous viewers; the full /login page is the no-JS fallback)
+// Login dialog (the full /login page is the no-JS fallback)
 function ltpLoginOpen(message) {
     const modal = document.getElementById('loginModal');
     if (!modal) return true;  // no modal on this page: follow the link to /login
     const msg = document.getElementById('login-modal-msg');
     msg.textContent = message || '';
     msg.style.display = message ? '' : 'none';
-    modal.style.display = 'flex';
-    document.getElementById('login-username').focus();
+    if (modal.style.display !== 'flex') {
+        modal.style.display = 'flex';
+        document.getElementById('login-username').focus();
+    }
     return false;
 }
 
 function ltpLoginClose() {
     document.getElementById('loginModal').style.display = 'none';
+    // Requests parked on this login get their original 401 back so the
+    // caller's own error handling runs.
+    ltpSession.cancelPending();
+}
+
+function ltpLoginSubmit(event) {
+    event.preventDefault();
+    ltpSession.submitLogin(event.target);
+    return false;
+}
+
+// Live ("real-time") controls: sliders fire dozens of input events per
+// second while dragging. ltpLiveSend() coalesces them per control — the
+// latest value wins, at most one request is in flight, and sends are spaced
+// at least LIVE_MIN_INTERVAL apart — so the device tracks the thumb without
+// a backlog of stale values queueing up behind the sink's request lock.
+const LIVE_MIN_INTERVAL = 100;  // ms (~10 updates/s)
+const _liveState = {};
+
+function ltpLiveSend(key, send) {
+    const st = _liveState[key] || (_liveState[key] = { inflight: false, next: null, last: 0, timer: null });
+    st.next = send;
+    if (st.inflight || st.timer) return;
+    const wait = LIVE_MIN_INTERVAL - (Date.now() - st.last);
+    if (wait > 0) {
+        st.timer = setTimeout(() => { st.timer = null; _liveRun(st); }, wait);
+    } else {
+        _liveRun(st);
+    }
+}
+
+function _liveRun(st) {
+    const fn = st.next;
+    st.next = null;
+    if (!fn) return;
+    st.inflight = true;
+    st.last = Date.now();
+    Promise.resolve().then(fn).catch(() => {}).then(() => {
+        st.inflight = false;
+        if (st.next && !st.timer) {
+            st.timer = setTimeout(() => { st.timer = null; _liveRun(st); }, LIVE_MIN_INTERVAL);
+        }
+    });
+}
+
+// Error toast that doesn't repeat itself while a slider is being dragged.
+const _toastOnceSeen = {};
+function showToastOnce(message, type) {
+    const now = Date.now();
+    if (_toastOnceSeen[message] && now - _toastOnceSeen[message] < 3000) return;
+    _toastOnceSeen[message] = now;
+    showToast(message, type);
 }
 
 // Save config button handler

@@ -1242,7 +1242,9 @@ function renderInteractiveControls(controls, values, deviceType, deviceId) {
             // Use range slider if min/max are defined (VS-style), otherwise numeric input
             if (ctrl.min !== undefined && ctrl.max !== undefined && ctrl.min !== null && ctrl.max !== null) {
                 const displayVal = isInt ? parseInt(val) : val;
-                html += `<input type="range" ${minAttr} ${maxAttr} ${stepAttr} value="${displayVal}" id="${ctrlIdAttr}" oninput="document.getElementById('${ctrlIdAttr}-val').textContent=this.value" onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', ${isInt ? 'parseInt(this.value)' : 'parseFloat(this.value)'})">`;
+                // Live: every input event is coalesced by ltpLiveSend so the
+                // device follows the thumb (~10 Hz) rather than waiting for release.
+                html += `<input type="range" ${minAttr} ${maxAttr} ${stepAttr} value="${displayVal}" id="${ctrlIdAttr}" oninput="document.getElementById('${ctrlIdAttr}-val').textContent=this.value; setDeviceControlLive('${deviceType}', '${deviceId}', '${ctrl.id}', ${isInt ? 'parseInt(this.value)' : 'parseFloat(this.value)'})">`;
                 html += `<span class="control-value-label" id="${ctrlIdAttr}-val">${displayVal}</span>`;
             } else {
                 html += `<input type="number" ${minAttr} ${maxAttr} ${stepAttr} value="${isInt ? parseInt(val) : val}" style="width:90px;" onchange="setDeviceControl('${deviceType}', '${deviceId}', '${ctrl.id}', ${isInt ? 'parseInt(this.value)' : 'parseFloat(this.value)'})">`;
@@ -1284,6 +1286,26 @@ function setDeviceControl(deviceType, deviceId, controlId, value) {
         }
     })
     .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+// Slider variant of setDeviceControl: coalesced per control, errors
+// reported once rather than on every dropped-frame retry.
+function setDeviceControlLive(deviceType, deviceId, controlId, value) {
+    const apiPath = deviceType === 'virtual-source' ? 'virtual-sources' : deviceType + 's';
+    ltpLiveSend(`${apiPath}/${deviceId}/${controlId}`, () =>
+        fetch(`/api/${apiPath}/${deviceId}/controls`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [controlId]: value })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                showToastOnce('Error setting control: ' + JSON.stringify(data.results || data.error), 'error');
+            }
+        })
+        .catch(err => showToastOnce('Error: ' + err.message, 'error'))
+    );
 }
 
 function triggerDeviceAction(deviceType, deviceId, controlId, btn) {
@@ -1336,6 +1358,10 @@ graphCanvas.addEventListener('cable-selected', function(e) {
 function renderRouteEditor(route) {
     const content = document.getElementById('detail-content');
     const t = route.transform || {};
+    // Kept for the live brightness slider: a route PUT replaces the whole
+    // transform, so brightness must be sent merged with the stored values
+    // (not with unsaved edits to the other fields).
+    liveRouteTransform = { id: route.id, t: Object.assign({}, t) };
     const statusClass = route.status || 'disconnected';
 
     let html = `
@@ -1392,7 +1418,7 @@ function renderRouteEditor(route) {
             <div class="form-row">
                 <label for="re-brightness">Brightness</label>
                 <div style="display:flex;align-items:center;gap:0.5rem;">
-                    <input type="range" id="re-brightness" min="0" max="1" step="0.05" value="${t.brightness !== undefined ? t.brightness : 1}" oninput="document.getElementById('re-bri-val').textContent=Math.round(this.value*100)+'%'">
+                    <input type="range" id="re-brightness" min="0" max="1" step="0.05" value="${t.brightness !== undefined ? t.brightness : 1}" oninput="document.getElementById('re-bri-val').textContent=Math.round(this.value*100)+'%'; setRouteBrightnessLive('${route.id}', parseFloat(this.value))">
                     <span id="re-bri-val">${Math.round((t.brightness !== undefined ? t.brightness : 1) * 100)}%</span>
                 </div>
             </div>
@@ -1413,6 +1439,32 @@ function renderRouteEditor(route) {
         </form>`;
 
     content.innerHTML = html;
+}
+
+let liveRouteTransform = null;
+
+// Live route dimming: applied by the router on the next frame, no device
+// round trip. Only brightness changes; the other transform fields are sent
+// as stored so an unsaved edit to them is not applied by accident.
+function setRouteBrightnessLive(routeId, brightness) {
+    if (!liveRouteTransform || liveRouteTransform.id !== routeId) return;
+    const transform = Object.assign({}, liveRouteTransform.t, { brightness });
+    ltpLiveSend(`route/${routeId}/brightness`, () =>
+        fetch(`/api/routes/${routeId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ transform })
+        })
+        .then(r => r.json())
+        .then(result => {
+            if (result.id) {
+                liveRouteTransform.t = result.transform || transform;
+            } else {
+                showToastOnce('Error: ' + (result.error || 'Unknown'), 'error');
+            }
+        })
+        .catch(err => showToastOnce('Error: ' + err.message, 'error'))
+    );
 }
 
 async function saveRouteEdit(event, routeId) {
@@ -1436,6 +1488,9 @@ async function saveRouteEdit(event, routeId) {
         });
         const result = await resp.json();
         if (result.id) {
+            if (liveRouteTransform && liveRouteTransform.id === routeId) {
+                liveRouteTransform.t = result.transform || data.transform;
+            }
             showToast('Route updated', 'success');
             // Refresh graph data
             refreshGraphData();

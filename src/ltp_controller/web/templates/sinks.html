@@ -110,6 +110,19 @@
                     <input type="checkbox" class="control-input"
                            {% if current_value %}checked{% endif %}
                            onchange="setControl('{{ sink.id }}', '{{ control.id }}', this.checked)">
+                    {% elif control.type == 'number' and control.min is defined and control.min is not none and control.max is defined and control.max is not none %}
+                    {# Bounded numbers (brightness, gamma, ...) are live sliders:
+                       the device follows the thumb via ltpLiveSend. #}
+                    {% set is_integer = control.step is defined and control.step >= 1 %}
+                    <span class="control-live">
+                        <input type="range" class="control-input control-range"
+                               value="{{ current_value }}"
+                               min="{{ control.min|int if is_integer else control.min }}"
+                               max="{{ control.max|int if is_integer else control.max }}"
+                               {% if control.step is defined %}step="{{ control.step|int if is_integer else control.step }}"{% endif %}
+                               oninput="this.nextElementSibling.textContent = this.value; setControlLive('{{ sink.id }}', '{{ control.id }}', {{ 'parseInt(this.value)' if is_integer else 'parseFloat(this.value)' }})">
+                        <span class="control-range-value">{{ current_value }}</span>
+                    </span>
                     {% elif control.type == 'number' %}
                     {% set is_integer = control.step is defined and control.step >= 1 %}
                     <input type="number" class="control-input"
@@ -118,6 +131,19 @@
                            {% if control.max is defined and control.max is not none %}max="{{ control.max|int if is_integer else control.max }}"{% endif %}
                            {% if control.step is defined %}step="{{ control.step|int if is_integer else control.step }}"{% endif %}
                            onchange="setControl('{{ sink.id }}', '{{ control.id }}', {{ 'parseInt(this.value)' if is_integer else 'parseFloat(this.value)' }})">
+                    {% elif control.type == 'string' %}
+                    {# Free-form text (e.g. the device's EEPROM name). Applied on
+                       demand rather than on every keystroke: a rename writes EEPROM
+                       and re-advertises the sink, so it must be deliberate. #}
+                    <form class="control-text-form" onsubmit="applyStringControl(this, '{{ sink.id }}', '{{ control.id }}', '{{ control.name }}'); return false;">
+                        <input type="text" class="control-input control-text"
+                               value="{{ current_value }}"
+                               {% if control.max_length is defined and control.max_length is not none %}maxlength="{{ control.max_length }}"{% endif %}
+                               {% if control.min_length is defined and control.min_length is not none %}minlength="{{ control.min_length }}"{% endif %}
+                               {% if control.pattern is defined and control.pattern %}pattern="{{ control.pattern }}"{% endif %}
+                               spellcheck="false" autocomplete="off">
+                        <button type="submit" class="btn btn-sm btn-action">Apply</button>
+                    </form>
                     {% elif control.type == 'enum' %}
                     <select class="control-input" onchange="setControl('{{ sink.id }}', '{{ control.id }}', this.value)">
                         {% for option in control.options %}
@@ -304,6 +330,23 @@
     width: 100px;
     text-align: right;
 }
+.control-live {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.control-range {
+    width: 140px;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+.control-range-value {
+    min-width: 3ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.9rem;
+}
 .control-input[type="checkbox"] {
     width: 18px;
     height: 18px;
@@ -311,6 +354,14 @@
 }
 select.control-input {
     min-width: 100px;
+}
+.control-text-form {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.control-text {
+    width: 150px;
 }
 .btn-action {
     background: var(--secondary-bg, #374151);
@@ -372,6 +423,65 @@ function setControl(sinkId, controlId, value) {
         }
     })
     .catch(err => {
+        showToast('Error: ' + err.message, 'error');
+    });
+}
+
+// Slider variant: coalesced per control (see ltpLiveSend in app.js).
+function setControlLive(sinkId, controlId, value) {
+    ltpLiveSend(`sinks/${sinkId}/${controlId}`, () =>
+        fetch(`/api/sinks/${sinkId}/controls`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [controlId]: value })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                showToastOnce('Error setting control: ' + JSON.stringify(data.results || data.error), 'error');
+            }
+        })
+        .catch(err => showToastOnce('Error: ' + err.message, 'error'))
+    );
+}
+
+function applyStringControl(form, sinkId, controlId, controlName) {
+    const input = form.querySelector('input');
+    const btn = form.querySelector('button');
+    const value = input.value;
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    const values = {};
+    values[controlId] = value;
+
+    fetch(`/api/sinks/${sinkId}/controls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            btn.textContent = 'Saved';
+            showToast(`${controlName} updated`, 'success');
+            if (controlId === 'device_name') {
+                // The sink re-advertises under its new name; reload once the
+                // controller has migrated the entry so the card header follows.
+                setTimeout(() => window.location.reload(), 2500);
+            } else {
+                setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1000);
+            }
+        } else {
+            btn.textContent = originalText;
+            btn.disabled = false;
+            showToast('Error setting ' + controlName + ': ' + JSON.stringify(data.results || data.error), 'error');
+        }
+    })
+    .catch(err => {
+        btn.textContent = originalText;
+        btn.disabled = false;
         showToast('Error: ' + err.message, 'error');
     });
 }

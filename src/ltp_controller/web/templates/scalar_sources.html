@@ -87,7 +87,7 @@
                            max="{{ control.max }}"
                            step="{{ control.step }}"
                            value="{{ ss.controls.get_value(control.id) }}"
-                           onchange="updateControl('{{ ss.id }}', '{{ control.id }}', parseFloat(this.value))">
+                           oninput="updateControlLive('{{ ss.id }}', '{{ control.id }}', parseFloat(this.value))">
                     <span class="control-value">{{ ss.controls.get_value(control.id) }}</span>
                     {% elif control.type == 'number' %}
                     <span class="control-value">{{ ss.controls.get_value(control.id) }} {{ control.unit or '' }}</span>
@@ -226,6 +226,22 @@ function updateControl(sourceId, controlId, value) {
             }
         }
     });
+}
+
+// Slider drag: coalesced sends (see ltpLiveSend in app.js).
+function updateControlLive(sourceId, controlId, value) {
+    const li = document.querySelector(`#controls-${sourceId} [data-control-id="${controlId}"]`);
+    if (li) {
+        const valueSpan = li.querySelector('.control-value');
+        if (valueSpan) valueSpan.textContent = value.toFixed(2);
+    }
+    ltpLiveSend(`scalar-sources/${sourceId}/${controlId}`, () =>
+        fetch(`/api/scalar-sources/${sourceId}/controls`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [controlId]: value })
+        }).then(r => { if (!r.ok) showToastOnce('Error setting control', 'error'); })
+    );
 }
 
 function refreshSample(sourceId) {

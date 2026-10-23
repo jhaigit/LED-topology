@@ -137,6 +137,25 @@ ltp-serial-sink --port /dev/ttyUSB0 --pixels 60
 ltp-serial-sink --port /dev/ttyUSB0 --pixels 300 --baud 115200 --name "Living Room LEDs"
 ```
 
+### Renaming a device
+
+Firmware with `CMD_SET_NAME` support stores an instance name in EEPROM and
+reports it in `INFO_ALL`. The serial sink exposes it as a `device_name` string
+control, so it can be changed from the controller's **Sinks** page (type the
+new name, click **Apply**) as well as from the CLI:
+
+```bash
+python -m ltp_serial_cli /dev/ttyUSB0 set-name "Hall Strip"
+```
+
+Names are capped at 15 bytes; an empty name restores the firmware default.
+In fleet mode the sink's advertised name follows the device name (unless a
+`name:` override is configured for it), so a rename re-advertises the sink
+and the controller migrates the existing entry rather than showing a
+duplicate. Note that devices without a USB serial number derive their stable
+ID from the reported name, so renaming one of those changes its ID at the
+next fleet restart and any routes referencing it must be recreated.
+
 ### Using a Configuration File
 
 Create `serial-sink.yaml`:

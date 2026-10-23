@@ -102,7 +102,8 @@
                            max="{{ control.max }}"
                            step="{{ control.step }}"
                            value="{{ vs.controls.get_value(control.id) }}"
-                           onchange="updateControl('{{ vs.id }}', '{{ control.id }}', parseFloat(this.value))">
+                           oninput="updateControlLive('{{ vs.id }}', '{{ control.id }}', parseFloat(this.value))"
+                           onchange="refreshPreview('{{ vs.id }}')">
                     <span class="control-value">{{ vs.controls.get_value(control.id) }}</span>
                     {% elif control.type == 'boolean' %}
                     <label class="toggle">
@@ -353,6 +354,23 @@ function updateControl(sourceId, controlId, value) {
         // Refresh preview after control change
         refreshPreview(sourceId);
     });
+}
+
+// Slider drag: coalesced sends, preview refreshed on release (onchange)
+// rather than at every step.
+function updateControlLive(sourceId, controlId, value) {
+    const li = document.querySelector(`#controls-${sourceId} [data-control-id="${controlId}"]`);
+    if (li) {
+        const valueSpan = li.querySelector('.control-value');
+        if (valueSpan) valueSpan.textContent = value.toFixed(2);
+    }
+    ltpLiveSend(`virtual-sources/${sourceId}/${controlId}`, () =>
+        fetch(`/api/virtual-sources/${sourceId}/controls`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [controlId]: value })
+        }).then(r => { if (!r.ok) showToastOnce('Error setting control', 'error'); })
+    );
 }
 
 function refreshPreview(sourceId) {
