@@ -152,8 +152,10 @@ class Controller:
         self._running = False
         self._health_check_task: asyncio.Task | None = None
 
-        self._on_source_change: DeviceCallback | None = None
-        self._on_sink_change: DeviceCallback | None = None
+        # Several components follow device changes (connection pool, input
+        # manager, ...), so these are listener lists, not a single callback.
+        self._on_source_change: list[DeviceCallback] = []
+        self._on_sink_change: list[DeviceCallback] = []
         self._on_device_id_change: list[DeviceIdCallback] = []
         self._connection_pool: "SinkConnectionPool | None" = None
         self._sink_group_manager = SinkGroupManager(self)
@@ -205,12 +207,29 @@ class Controller:
         return len(to_remove)
 
     def on_source_change(self, callback: DeviceCallback) -> None:
-        """Set callback for source changes."""
-        self._on_source_change = callback
+        """Add a listener for source changes."""
+        if callback not in self._on_source_change:
+            self._on_source_change.append(callback)
 
     def on_sink_change(self, callback: DeviceCallback) -> None:
-        """Set callback for sink changes."""
-        self._on_sink_change = callback
+        """Add a listener for sink changes."""
+        if callback not in self._on_sink_change:
+            self._on_sink_change.append(callback)
+
+    def _notify_device_change(self, state: DeviceState, is_online: bool) -> None:
+        """Tell every source or sink listener; one failing listener must not
+        stop the others hearing about the change."""
+        if state.device.is_source:
+            listeners = self._on_source_change
+        elif state.device.is_sink:
+            listeners = self._on_sink_change
+        else:
+            return
+        for callback in list(listeners):
+            try:
+                callback(state, is_online)
+            except Exception:
+                logger.exception(f"Device change listener failed for {state.name}")
 
     def on_device_id_change(self, callback: DeviceIdCallback) -> None:
         """Add a listener called with (old_id, new_id) when a known device's
@@ -316,15 +335,13 @@ class Controller:
                 # Fetch capabilities async
                 asyncio.create_task(self._fetch_device_info(state))
 
-            if self._on_source_change:
-                self._on_source_change(state, True)
+            self._notify_device_change(state, True)
         else:
             if device_key in self._sources:
                 state = self._sources[device_key]
                 state.online = False
                 logger.info(f"Source went offline: {state.name}")
-                if self._on_source_change:
-                    self._on_source_change(state, False)
+                self._notify_device_change(state, False)
 
     def _handle_sink(self, device: DiscoveredDevice, is_added: bool) -> None:
         """Handle sink device changes."""
@@ -359,16 +376,14 @@ class Controller:
                 # Fetch capabilities async
                 asyncio.create_task(self._fetch_device_info(state))
 
-            if self._on_sink_change:
-                self._on_sink_change(state, True)
+            self._notify_device_change(state, True)
             self._sink_group_manager.on_member_sink_changed(state.id)
         else:
             if device_key in self._sinks:
                 state = self._sinks[device_key]
                 state.online = False
                 logger.info(f"Sink went offline: {state.name}")
-                if self._on_sink_change:
-                    self._on_sink_change(state, False)
+                self._notify_device_change(state, False)
 
     def _handle_unsolicited_message(self, sink_id: str, message: Message) -> None:
         """Handle unsolicited messages from sinks (via pool)."""
@@ -468,10 +483,7 @@ class Controller:
             if not state.online:
                 state.online = True
                 logger.info(f"Device came online: {state.name}")
-                if state.device.is_source and self._on_source_change:
-                    self._on_source_change(state, True)
-                elif state.device.is_sink and self._on_sink_change:
-                    self._on_sink_change(state, True)
+                self._notify_device_change(state, True)
 
             state.last_seen = datetime.now()
 
@@ -488,10 +500,7 @@ class Controller:
                 logger.info(
                     f"Device went offline: {state.name} (after {state._consecutive_failures} failed health checks)"
                 )
-                if state.device.is_source and self._on_source_change:
-                    self._on_source_change(state, False)
-                elif state.device.is_sink and self._on_sink_change:
-                    self._on_sink_change(state, False)
+                self._notify_device_change(state, False)
 
     async def start(self) -> None:
         """Start the controller."""

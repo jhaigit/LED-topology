@@ -211,3 +211,89 @@ class TestDeviceIdChange:
         reloaded = KeyStore(path=tmp_path / "keys.yaml")
         reloaded.load()
         assert reloaded.device_ids == [new_id]  # persisted
+
+
+class TestDeviceChangeListeners:
+    """Several components follow sink changes (the connection pool and the
+    input manager); registering one must not replace another."""
+
+    async def test_every_sink_listener_is_called(self, controller):
+        pool_seen, inputs_seen = [], []
+        controller.on_sink_change(lambda state, online: pool_seen.append(online))
+        controller.on_sink_change(lambda state, online: inputs_seen.append(online))
+
+        controller._handle_sink(_device("big-array", uuid4()), True)
+        controller._handle_sink(_device("big-array", uuid4()), False)
+
+        assert pool_seen == [True, False]
+        assert inputs_seen == [True, False]
+
+    async def test_same_listener_registered_once(self, controller):
+        seen = []
+
+        def listener(state, online):
+            seen.append(online)
+
+        controller.on_sink_change(listener)
+        controller.on_sink_change(listener)  # e.g. a component restarted
+        controller._handle_sink(_device("big-array", uuid4()), True)
+        assert seen == [True]
+
+    async def test_failing_listener_does_not_block_others(self, controller):
+        seen = []
+
+        def boom(state, online):
+            raise RuntimeError("listener bug")
+
+        controller.on_sink_change(boom)
+        controller.on_sink_change(lambda state, online: seen.append(online))
+        controller._handle_sink(_device("big-array", uuid4()), True)
+        assert seen == [True]
+
+    async def test_source_and_sink_listeners_are_separate(self, controller):
+        from libltp.discovery import SERVICE_TYPE_SOURCE
+
+        sinks, sources = [], []
+        controller.on_sink_change(lambda state, online: sinks.append(state.name))
+        controller.on_source_change(lambda state, online: sources.append(state.name))
+        controller._handle_sink(_device("big-array", uuid4()), True)
+        controller._handle_source(
+            DiscoveredDevice(
+                name="thermal",
+                service_type=SERVICE_TYPE_SOURCE,
+                host="h.local.",
+                port=6000,
+                device_id=uuid4(),
+                display_name="thermal",
+                description="",
+            ),
+            True,
+        )
+        assert sinks == ["Big Array"]
+        assert sources == ["thermal"]
+
+    async def test_pool_and_input_manager_both_hear_sinks(self, controller):
+        from ltp_controller.input_manager import InputEventManager
+        from ltp_controller.sink_connection_pool import SinkConnectionPool
+
+        pool = SinkConnectionPool(controller)
+        inputs = InputEventManager(controller, pool)
+        connected, loaded = [], []
+
+        async def connect(sink):
+            connected.append(sink.name)
+
+        async def load(sink):
+            loaded.append(sink.name)
+
+        pool._connect_to_sink = connect
+        inputs._load_inputs_for_sink = load
+        # Registration order as in cli.py: pool first, input manager last.
+        controller.on_sink_change(pool._on_sink_change)
+        controller.on_sink_change(inputs._on_sink_change)
+
+        controller._handle_sink(_device("big-array", uuid4()), True)
+        await asyncio.sleep(0)
+
+        assert connected == ["Big Array"]
+        assert loaded == ["Big Array"]
