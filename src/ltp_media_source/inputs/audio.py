@@ -100,14 +100,14 @@ class AudioFileInput(MediaInput):
     @property
     def frame_rate(self) -> float:
         """Frame rate for visualization."""
-        return self._frame_rate * self._speed
+        return self._frame_rate * self.speed
 
     @property
     def duration(self) -> float | None:
         """Audio duration in seconds."""
         if self._duration_sec > 0:
             effective_end = self.end_time if self.end_time else self._duration_sec
-            return (effective_end - self.start_time) / self._speed
+            return (effective_end - self.start_time) / self.speed
         return None
 
     @property
@@ -229,7 +229,7 @@ class AudioFileInput(MediaInput):
 
         # Calculate elapsed time since last frame
         now = time.monotonic()
-        elapsed = (now - self._last_frame_time) * self._speed
+        elapsed = (now - self._last_frame_time) * self.speed
         self._last_frame_time = now
 
         # Update playback position

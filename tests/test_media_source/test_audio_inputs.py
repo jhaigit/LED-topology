@@ -7,19 +7,23 @@ import numpy as np
 class TestAudioFileInput:
     """Tests for AudioFileInput class."""
 
-    def test_import_without_pyav(self, monkeypatch):
+    def test_import_without_pyav(self):
         """Test graceful handling when PyAV is not available."""
-        # Simulate missing av module
+        # Run in a fresh interpreter: modules imported while 'av' is hidden
+        # cache HAS_PYAV=False, and in this process that would make the
+        # later tests skip instead of exercising the PyAV code paths.
+        import subprocess
         import sys
-        if 'ltp_media_source.inputs.audio' in sys.modules:
-            del sys.modules['ltp_media_source.inputs.audio']
 
-        monkeypatch.setitem(sys.modules, 'av', None)
-
-        # Should not raise
-        from ltp_media_source.inputs import HAS_AUDIO_INPUTS
-        # HAS_AUDIO_INPUTS may be True or False depending on import state
-        assert isinstance(HAS_AUDIO_INPUTS, bool)
+        code = (
+            "import sys; sys.modules['av'] = None\n"
+            "from ltp_media_source.inputs import HAS_AUDIO_INPUTS\n"
+            "from ltp_media_source.inputs import audio\n"
+            "assert isinstance(HAS_AUDIO_INPUTS, bool)\n"
+            "assert audio.HAS_PYAV is False\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
 
     def test_audio_file_input_properties(self):
         """Test AudioFileInput properties before opening."""
