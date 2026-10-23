@@ -1126,6 +1126,10 @@ def create_app(
         """Get system status."""
         return jsonify(
             {
+                # Same as the page footer: lets a deploy be checked from the
+                # API (git_revision is None outside a git checkout).
+                "version": __version__,
+                "git_revision": git_revision,
                 "sources": {
                     "total": len(controller.sources),
                     "online": len(controller.online_sources),
