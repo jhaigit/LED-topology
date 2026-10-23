@@ -303,6 +303,49 @@ function ltpLoginSubmit(event) {
     return false;
 }
 
+// Live ("real-time") controls: sliders fire dozens of input events per
+// second while dragging. ltpLiveSend() coalesces them per control — the
+// latest value wins, at most one request is in flight, and sends are spaced
+// at least LIVE_MIN_INTERVAL apart — so the device tracks the thumb without
+// a backlog of stale values queueing up behind the sink's request lock.
+const LIVE_MIN_INTERVAL = 100;  // ms (~10 updates/s)
+const _liveState = {};
+
+function ltpLiveSend(key, send) {
+    const st = _liveState[key] || (_liveState[key] = { inflight: false, next: null, last: 0, timer: null });
+    st.next = send;
+    if (st.inflight || st.timer) return;
+    const wait = LIVE_MIN_INTERVAL - (Date.now() - st.last);
+    if (wait > 0) {
+        st.timer = setTimeout(() => { st.timer = null; _liveRun(st); }, wait);
+    } else {
+        _liveRun(st);
+    }
+}
+
+function _liveRun(st) {
+    const fn = st.next;
+    st.next = null;
+    if (!fn) return;
+    st.inflight = true;
+    st.last = Date.now();
+    Promise.resolve().then(fn).catch(() => {}).then(() => {
+        st.inflight = false;
+        if (st.next && !st.timer) {
+            st.timer = setTimeout(() => { st.timer = null; _liveRun(st); }, LIVE_MIN_INTERVAL);
+        }
+    });
+}
+
+// Error toast that doesn't repeat itself while a slider is being dragged.
+const _toastOnceSeen = {};
+function showToastOnce(message, type) {
+    const now = Date.now();
+    if (_toastOnceSeen[message] && now - _toastOnceSeen[message] < 3000) return;
+    _toastOnceSeen[message] = now;
+    showToast(message, type);
+}
+
 // Save config button handler
 (function() {
     const saveBtn = document.getElementById('save-config-btn');

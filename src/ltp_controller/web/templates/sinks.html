@@ -110,6 +110,19 @@
                     <input type="checkbox" class="control-input"
                            {% if current_value %}checked{% endif %}
                            onchange="setControl('{{ sink.id }}', '{{ control.id }}', this.checked)">
+                    {% elif control.type == 'number' and control.min is defined and control.min is not none and control.max is defined and control.max is not none %}
+                    {# Bounded numbers (brightness, gamma, ...) are live sliders:
+                       the device follows the thumb via ltpLiveSend. #}
+                    {% set is_integer = control.step is defined and control.step >= 1 %}
+                    <span class="control-live">
+                        <input type="range" class="control-input control-range"
+                               value="{{ current_value }}"
+                               min="{{ control.min|int if is_integer else control.min }}"
+                               max="{{ control.max|int if is_integer else control.max }}"
+                               {% if control.step is defined %}step="{{ control.step|int if is_integer else control.step }}"{% endif %}
+                               oninput="this.nextElementSibling.textContent = this.value; setControlLive('{{ sink.id }}', '{{ control.id }}', {{ 'parseInt(this.value)' if is_integer else 'parseFloat(this.value)' }})">
+                        <span class="control-range-value">{{ current_value }}</span>
+                    </span>
                     {% elif control.type == 'number' %}
                     {% set is_integer = control.step is defined and control.step >= 1 %}
                     <input type="number" class="control-input"
@@ -304,6 +317,23 @@
     width: 100px;
     text-align: right;
 }
+.control-live {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.control-range {
+    width: 140px;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+.control-range-value {
+    min-width: 3ch;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.9rem;
+}
 .control-input[type="checkbox"] {
     width: 18px;
     height: 18px;
@@ -374,6 +404,24 @@ function setControl(sinkId, controlId, value) {
     .catch(err => {
         showToast('Error: ' + err.message, 'error');
     });
+}
+
+// Slider variant: coalesced per control (see ltpLiveSend in app.js).
+function setControlLive(sinkId, controlId, value) {
+    ltpLiveSend(`sinks/${sinkId}/${controlId}`, () =>
+        fetch(`/api/sinks/${sinkId}/controls`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [controlId]: value })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status !== 'ok') {
+                showToastOnce('Error setting control: ' + JSON.stringify(data.results || data.error), 'error');
+            }
+        })
+        .catch(err => showToastOnce('Error: ' + err.message, 'error'))
+    );
 }
 
 function triggerAction(sinkId, controlId, actionName) {
