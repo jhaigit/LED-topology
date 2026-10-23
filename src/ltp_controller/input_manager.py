@@ -41,6 +41,12 @@ class InputEventManager:
         self._listeners: list[InputEventCallback] = []
         self._running = False
         self._retry_task: asyncio.Task | None = None
+        controller.on_device_id_change(self._on_device_id_change)
+
+    def _on_device_id_change(self, old_id: str, new_id: str) -> None:
+        """Carry a sink's known input states over to its new stable ID."""
+        if old_id in self._input_states and new_id not in self._input_states:
+            self._input_states[new_id] = self._input_states.pop(old_id)
 
     def set_connection_pool(self, pool: "SinkConnectionPool") -> None:
         """Set the connection pool (for late binding)."""

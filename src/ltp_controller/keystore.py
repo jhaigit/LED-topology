@@ -89,6 +89,20 @@ class KeyStore:
         if persist:
             self.save()
 
+    def rename_device(self, old_id: str, new_id: str, persist: bool = True) -> bool:
+        """Move a device's key (and zone membership) to its new ID. Returns
+        whether there was anything to move."""
+        moved = False
+        if old_id in self._device_keys:
+            self._device_keys[new_id] = self._device_keys.pop(old_id)
+            moved = True
+        if old_id in self._device_zone:
+            self._device_zone[new_id] = self._device_zone.pop(old_id)
+            moved = True
+        if moved and persist:
+            self.save()
+        return moved
+
     @property
     def device_ids(self) -> list[str]:
         return list(self._device_keys.keys())

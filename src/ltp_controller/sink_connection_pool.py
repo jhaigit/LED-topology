@@ -55,6 +55,16 @@ class SinkConnectionPool:
         self._running = False
         self._reconnect_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
+        controller.on_device_id_change(self._on_device_id_change)
+
+    def _on_device_id_change(self, old_id: str, new_id: str) -> None:
+        """A sink's stable ID changed: carry its key over, and drop the
+        connection held under the old ID (its handler reports messages with
+        the old ID). The sink's re-advertisement reconnects under the new one."""
+        if self.keystore is not None and self.keystore.rename_device(old_id, new_id):
+            logger.info(f"Pool: moved device key {old_id} -> {new_id}")
+        if old_id in self._connections:
+            asyncio.create_task(self._disconnect_from_sink(old_id))
 
     def add_unsolicited_listener(self, callback: UnsolicitedMessageCallback) -> None:
         """Add a listener for unsolicited messages (e.g., INPUT_EVENT).

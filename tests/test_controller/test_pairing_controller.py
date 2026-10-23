@@ -22,6 +22,7 @@ SINK_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 def _pool(tmp_path, device: ReferenceDevice, *, arm: bool = True):
     controller = SimpleNamespace(
         device_id="test-controller",
+        on_device_id_change=lambda callback: None,
         get_sink=lambda sid: (
             SimpleNamespace(id=SINK_ID, online=True) if sid == SINK_ID else None
         ),

@@ -92,6 +92,19 @@ class RuleEngine:
         self._last_schedule_check: dict[str, float] = {}
         # In-flight jittered schedule fires (held so they aren't GC'd mid-sleep)
         self._jitter_tasks: set[asyncio.Task] = set()
+        controller.on_device_id_change(self._on_device_id_change)
+
+    def _on_device_id_change(self, old_id: str, new_id: str) -> None:
+        """Re-point input triggers and action targets at a device whose
+        stable ID changed."""
+        for rule in self._rules.values():
+            if rule.trigger.sink_id == old_id:
+                rule.trigger.sink_id = new_id
+                logger.info(f"Rule {rule.name}: trigger sink {old_id} -> {new_id}")
+            for action in rule.actions:
+                if action.target_id == old_id:
+                    action.target_id = new_id
+                    logger.info(f"Rule {rule.name}: action target {old_id} -> {new_id}")
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Set the event loop for async action execution."""

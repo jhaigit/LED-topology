@@ -115,6 +115,13 @@ class DeviceState:
 
 
 DeviceCallback = Callable[[DeviceState, bool], None]  # device, is_added
+DeviceIdCallback = Callable[[str, str], None]  # old_id, new_id
+
+# A device's ID is locked to the value first seen so routes survive restarts
+# of the many sinks that pick a random (uuid4) ID every run. A uuid5 ID is
+# derived deterministically (the serial fleet's port + name), so a change in
+# it is deliberate — e.g. a rename — and the controller adopts it.
+DETERMINISTIC_UUID_VERSION = 5
 
 
 class Controller:
@@ -147,6 +154,7 @@ class Controller:
 
         self._on_source_change: DeviceCallback | None = None
         self._on_sink_change: DeviceCallback | None = None
+        self._on_device_id_change: list[DeviceIdCallback] = []
         self._connection_pool: "SinkConnectionPool | None" = None
         self._sink_group_manager = SinkGroupManager(self)
 
@@ -204,6 +212,12 @@ class Controller:
         """Set callback for sink changes."""
         self._on_sink_change = callback
 
+    def on_device_id_change(self, callback: DeviceIdCallback) -> None:
+        """Add a listener called with (old_id, new_id) when a known device's
+        stable ID changes, so anything holding the old ID can re-point it."""
+        if callback not in self._on_device_id_change:
+            self._on_device_id_change.append(callback)
+
     @property
     def sink_group_manager(self) -> SinkGroupManager:
         return self._sink_group_manager
@@ -252,6 +266,25 @@ class Controller:
                 logger.info(f"{kind} renamed: '{key}' -> '{device.name}' ({device.device_id})")
                 return
 
+    def _adopt_changed_device_id(self, state: DeviceState, kind: str) -> None:
+        """Take the device's newly advertised ID if it is deterministic, and
+        tell every holder of the old ID (routes, groups, rules, keys, ...)."""
+        new = state.device.device_id
+        if new is None or new.version != DETERMINISTIC_UUID_VERSION:
+            return
+        old_id, new_id = state.id, str(new)
+        if old_id == new_id:
+            return
+        state._stable_id = new_id
+        logger.info(f"{kind} ID changed: {state.name} {old_id} -> {new_id}")
+        if state.device.is_sink:
+            self._sink_group_manager.replace_sink_id(old_id, new_id)
+        for callback in list(self._on_device_id_change):
+            try:
+                callback(old_id, new_id)
+            except Exception:
+                logger.exception(f"Device ID change listener failed ({old_id} -> {new_id})")
+
     def _handle_source(self, device: DiscoveredDevice, is_added: bool) -> None:
         """Handle source device changes."""
         device_key = device.name
@@ -264,6 +297,7 @@ class Controller:
                 old_port = state.port
                 was_offline = not state.online
                 state.device = device
+                self._adopt_changed_device_id(state, "Source")
                 state.last_seen = datetime.now()
                 state.online = True
                 reason = (
@@ -304,6 +338,7 @@ class Controller:
                 old_port = state.port
                 was_offline = not state.online
                 state.device = device
+                self._adopt_changed_device_id(state, "Sink")
                 state.last_seen = datetime.now()
                 state.online = True
                 # Refetch capabilities on any re-advertisement (covers restart,

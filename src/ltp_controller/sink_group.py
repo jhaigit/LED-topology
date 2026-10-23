@@ -167,6 +167,18 @@ class SinkGroupManager:
             return True
         return False
 
+    def replace_sink_id(self, old_id: str, new_id: str) -> None:
+        """Re-point group members at a sink whose stable ID changed."""
+        for group in self._groups.values():
+            changed = False
+            for member in group.members:
+                if member.sink_id == old_id:
+                    member.sink_id = new_id
+                    changed = True
+            if changed:
+                group.recompute(self.controller)
+                logger.info(f"Sink group {group.name}: member {old_id} -> {new_id}")
+
     def on_member_sink_changed(self, sink_id: str) -> None:
         """Called when a member sink comes online or changes pixel count."""
         for group in self._groups.values():

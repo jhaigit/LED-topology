@@ -176,6 +176,23 @@ class RoutingEngine:
         self._pending_stops: set[str] = set()
         self._pending_restarts: set[str] = set()
         self._monitor_task: asyncio.Task | None = None
+        controller.on_device_id_change(self._on_device_id_change)
+
+    def _on_device_id_change(self, old_id: str, new_id: str) -> None:
+        """Re-point routes (and running group senders) at a device whose
+        stable ID changed. A route's sink_id may also be a group's ID; those
+        don't change, and member senders are keyed by member sink ID."""
+        for route in self._routes.values():
+            if route.source_id == old_id:
+                route.source_id = new_id
+                logger.info(f"Route {route.name}: source {old_id} -> {new_id}")
+            if route.sink_id == old_id:
+                route.sink_id = new_id
+                logger.info(f"Route {route.name}: sink {old_id} -> {new_id}")
+            if old_id in route._group_senders:
+                route._group_senders[new_id] = route._group_senders.pop(old_id)
+            if old_id in route._group_stream_ids:
+                route._group_stream_ids[new_id] = route._group_stream_ids.pop(old_id)
 
     def set_virtual_source_manager(self, manager: "VirtualSourceManager") -> None:
         """Set the virtual source manager (for late binding)."""
