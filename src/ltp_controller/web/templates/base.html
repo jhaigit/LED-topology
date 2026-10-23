@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}LTP Controller{% endblock %}</title>
     <meta name="csrf-token" content="{{ csrf_token }}">
+    {# Who this page was rendered for; the session monitor compares it with
+       /api/session to notice an expired login before the user acts on it. #}
+    <meta name="ltp-principal" content="{{ principal.name if auth_enabled and principal and principal.kind != 'anonymous' else '' }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block head %}{% endblock %}
 </head>
@@ -46,6 +49,7 @@
             <button id="save-config-btn" class="btn btn-save" title="Save routes and rules to config file">Save Config</button>
             {% endif %}
             {% if auth_enabled %}
+            <span id="nav-auth">
                 {% if principal and principal.kind != 'anonymous' %}
                 <form method="post" action="/logout" class="logout-form" title="Logged in as {{ principal.name }} ({{ principal.role }})">
                     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
@@ -54,9 +58,17 @@
                 {% else %}
                 <a href="{{ url_for('login', next=request.path) }}" class="btn btn-sm btn-primary" title="Log in for operator/admin actions" onclick="return ltpLoginOpen()">Log in</a>
                 {% endif %}
+            </span>
             {% endif %}
         </div>
     </nav>
+
+    {% if auth_enabled %}
+    <div id="session-banner" class="session-banner" role="status" hidden>
+        <span id="session-banner-msg"></span>
+        <button type="button" class="btn btn-sm" id="session-banner-btn"></button>
+    </div>
+    {% endif %}
 
     <main class="container">
         {% block content %}{% endblock %}
@@ -83,15 +95,16 @@
         </div>
     </div>
 
-    {% if auth_enabled and (not principal or principal.kind == 'anonymous') %}
-    <!-- Login dialog (opened from the nav; the /login page is the no-JS fallback) -->
+    {% if auth_enabled %}
+    <!-- Login dialog (opened from the nav, or by a 401 — including an expired
+         session mid-interaction; the /login page is the no-JS fallback). -->
     <div id="loginModal" class="modal" style="display: none;" role="dialog" aria-modal="true">
         <div class="modal-content" style="max-width: 360px;">
             <div class="modal-header">
                 <h2>Log in</h2>
                 <button class="close-btn" onclick="ltpLoginClose()" aria-label="Close">&times;</button>
             </div>
-            <form method="post" action="{{ url_for('login', next=request.path) }}">
+            <form id="login-modal-form" method="post" action="{{ url_for('login', next=request.path) }}" onsubmit="return ltpLoginSubmit(event)">
                 <p id="login-modal-msg" class="login-modal-msg" style="display: none;"></p>
                 <div class="form-group">
                     <label for="login-username">Username</label>

@@ -792,6 +792,25 @@ h2 {
 }
 
 /* Security UI (auth + insecure-transport banner) */
+.session-banner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    background: var(--warning);
+    color: #000;
+    padding: 6px 12px;
+    font-weight: 600;
+}
+.session-banner.expired {
+    background: var(--error);
+    color: #fff;
+}
+.session-banner .btn {
+    background: rgba(255, 255, 255, 0.85);
+    color: #000;
+}
+
 .insecure-banner {
     background: #8b1a1a;
     color: #ffffff;

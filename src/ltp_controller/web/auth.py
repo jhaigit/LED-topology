@@ -39,7 +39,15 @@ _MUTATING = {"POST", "PUT", "DELETE", "PATCH"}
 _READ_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 # Endpoint names (not paths) exempt from authentication.
-_PUBLIC_ENDPOINTS = {"static", "login", "healthz"}
+_PUBLIC_ENDPOINTS = {"static", "login", "healthz", "api_session"}
+
+# Sessions expire on idle: the issue stamp is pushed forward by user activity
+# (mutations and page navigations — not the pages' background API polling, so
+# an abandoned tab still times out). Rewriting the cookie on every such request
+# is pointless churn; refresh at most this often.
+SESSION_REFRESH_INTERVAL = 60.0
+# Client-side warning threshold, reported by /api/session as `warn_below`.
+SESSION_WARN_BELOW = 300.0
 
 _ANONYMOUS_ADMIN = Principal(name="anonymous", role="admin", kind="anonymous")
 # Granted to unauthenticated read requests when public_read is enabled: can see
@@ -169,6 +177,8 @@ _POLICY: list[tuple[frozenset[str], re.Pattern[str], Any]] = [
         _R(min_role="admin"),
     ),
     (frozenset({"GET"}), re.compile(r"^/api/fleets$"), _R(min_role="viewer")),
+    # --- session keep-alive: any signed-in user may extend their own session.
+    (frozenset({"POST"}), re.compile(r"^/api/session/refresh$"), _R(min_role="viewer")),
     (frozenset({"GET"}), re.compile(r"^/fleets$"), _R(min_role="viewer")),
     # --- per-device control (scope-checked at the resolved target) ---
     (
@@ -276,6 +286,37 @@ def init_auth(app: Flask, settings: WebSecuritySettings) -> None:
             "csrf_token": session.get("csrf", "") if settings.auth_enabled else "",
         }
 
+    def _session_status() -> dict[str, Any]:
+        """What the browser's session cookie currently buys it. Lets pages
+        notice an expired login *before* the user starts an interaction
+        that will fail at the end (see the session monitor in app.js)."""
+        if auth is None:
+            return {"auth_enabled": False, "authenticated": False}
+        principal = _session_principal()
+        if principal is None:
+            return {"auth_enabled": True, "authenticated": False}
+        remaining = max(0.0, auth.session_ttl - (time.time() - float(session["t"])))
+        return {
+            "auth_enabled": True,
+            "authenticated": True,
+            "name": principal.name,
+            "role": principal.role,
+            "expires_in": round(remaining),
+            "warn_below": SESSION_WARN_BELOW,
+        }
+
+    @app.route("/api/session")
+    def api_session() -> Any:
+        # Public (no gate): an expired session must be reportable as such
+        # rather than answered with a 401/redirect. Never refreshes the stamp.
+        return jsonify(_session_status())
+
+    @app.route("/api/session/refresh", methods=["POST"])
+    def api_session_refresh() -> Any:
+        # Gated + CSRF-checked like any mutation; being a mutation, the gate
+        # has already slid the expiry forward. Just report the new state.
+        return jsonify(_session_status())
+
     if auth is None:
         # Authentication disabled: everything runs with full (anonymous)
         # authority — exactly today's behavior. The startup matrix in cli.py
@@ -293,19 +334,38 @@ def init_auth(app: Flask, settings: WebSecuritySettings) -> None:
             if _session_principal() is not None:
                 return redirect(url_for("dashboard"))
             return render_template("login.html", error=None)
+        # The in-page login modal posts with Accept: application/json so it
+        # can stay on the page (and replay the request that got the 401)
+        # instead of navigating; the no-JS /login form gets HTML as before.
+        wants_json = request.accept_mimetypes.best == "application/json"
+
+        def fail(message: str, status: int) -> Any:
+            if wants_json:
+                return jsonify({"error": message}), status
+            return render_template("login.html", error=message), status
+
         if not auth.login_limiter.allow(request.remote_addr or "?"):
-            return render_template("login.html", error="Too many attempts — wait a minute."), 429
+            return fail("Too many attempts — wait a minute.", 429)
         username = request.form.get("username", "")
         password = request.form.get("password", "")
         principal = auth.authenticate_password(username, password)
         if principal is None:
             logger.warning(f"Failed login for {username!r} from {request.remote_addr}")
-            return render_template("login.html", error="Invalid username or password."), 401
+            return fail("Invalid username or password.", 401)
         session.clear()
         session["u"] = principal.name
         session["t"] = time.time()
         session["csrf"] = secrets.token_urlsafe(32)
         logger.info(f"User {principal.name!r} logged in from {request.remote_addr}")
+        if wants_json:
+            return jsonify(
+                {
+                    "status": "ok",
+                    "csrf": session["csrf"],
+                    "principal": {"name": principal.name, "role": principal.role},
+                    "session": _session_status(),
+                }
+            )
         target = request.args.get("next", "")
         # Only redirect within this app (no scheme/host, no protocol-relative).
         if not target.startswith("/") or target.startswith("//"):
@@ -369,6 +429,17 @@ def init_auth(app: Flask, settings: WebSecuritySettings) -> None:
                 return jsonify({"error": "unauthorized"}), 401
 
         g.principal = principal
+
+        # Sliding expiry: user activity keeps a login alive. Background API
+        # polling (GET /api/...) deliberately does not count, so a tab left
+        # open overnight still times out; page navigations and mutations do.
+        if via_session and (
+            request.method in _MUTATING
+            or (request.method == "GET" and not request.path.startswith("/api/"))
+        ):
+            issued = float(session.get("t", 0))
+            if time.time() - issued > SESSION_REFRESH_INTERVAL:
+                session["t"] = time.time()
 
         # CSRF: only session-cookie auth is forgeable cross-site; bearer
         # requests carry the credential explicitly and are exempt.

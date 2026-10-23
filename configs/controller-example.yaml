@@ -38,7 +38,8 @@ web:
   # automation (none|run|manage), scenes (run|manage).
   # Generate hashes with: ltp-controller --hash-password / --generate-token
   # auth:
-  #   session_ttl_seconds: 43200
+  #   session_ttl_seconds: 43200   # idle timeout: page loads and actions extend it,
+  #                                # background polling from an open tab does not
   #   users:
   #     - name: alice
   #       role: admin
