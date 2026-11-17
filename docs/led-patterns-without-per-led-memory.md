@@ -250,6 +250,28 @@ Three findings from reading and timing the sketches:
 2. **APA102 output on the 328P is limited by `digitalWrite`, not by RAM.** `apa102SendByte` costs 6,236 cycles per pixel, so 80 LEDs take 31 ms and the strip cannot pass 32 fps. Direct port writes on the same pins (D3 and D2) cut that to 423 cycles. Hardware SPI at 125 cycles needs the strip moved to D11 and D13.
 3. **The Teensy sketches gain no RAM from streaming.** Their 64 KB holds every frame, and OctoWS2811 needs its buffer for DMA. The gain there is one shared set of per-pixel pattern functions: buffered boards call them to fill the buffer, the 328P calls them from its send loop.
 
+## Implementation (added 2026-11-16)
+
+The report was followed by firmware that does this: `arduino/ltp_stream_serial`
+(ATmega328P and Teensy 3.2, serial protocol) and `arduino/ltp_stream_esp32`
+(WiFi), sharing the pattern engine in `arduino/libraries/LtpStreamFx`. They
+take no pixel data and run twelve patterns from this report with no frame
+buffer. Two things turned out differently from what the report expected:
+
+- **Per-pixel cost.** The cycle counts above are for one pattern inlined into
+  a tight loop. A general engine, where any pattern can be selected at run
+  time, pays for function calls and for keeping its position in memory:
+  roughly 200 to 450 cycles per pixel on the 328P, not 8 to 255.
+- **How the 328P sends WS2812.** At that cost, splitting the work across the
+  three colour bytes does not fit in 80-cycle gaps. The firmware instead
+  sends one bit per timer interrupt, 68 cycles apart, and calculates pixels
+  between interrupts. Every gap is then 4.25 us whatever the pattern costs,
+  at the price of 102 us per pixel, against 30 us for the bits alone.
+
+Measured on a simulated ATmega328P, with the frames compared byte for byte
+against the same pattern code compiled for the host; not yet run on hardware.
+Details and figures are in `arduino/ltp_stream_serial/README.md`.
+
 ## Sources
 
 Cycle counts are my own measurements, made for this report: 35 pattern kernels compiled with avr-gcc 7.3 at `-Os` for the ATmega328P and run in the avr8js simulator, plus an APA102 output sketch built with arduino-cli for `arduino:avr:nano`. They have not been checked on hardware.

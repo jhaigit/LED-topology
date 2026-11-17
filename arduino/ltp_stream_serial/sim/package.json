@@ -1,0 +1,9 @@
+{
+  "name": "ltp-stream-serial-sim",
+  "private": true,
+  "description": "Runs the ltp_stream_serial AVR build on a simulated ATmega328P",
+  "license": "MIT",
+  "dependencies": {
+    "avr8js": "0.21.1"
+  }
+}

@@ -452,6 +452,11 @@ class SerialSink:
             device_info["backend"]["firmware"] = self._renderer.device_info.firmware_version
             device_info["backend"]["device_name"] = self._renderer.device_info.device_name
 
+        # A pattern-only device takes no pixel stream; say so, so a controller
+        # can tell why stream setup is refused.
+        if self._renderer is not None and not getattr(self._renderer, "accepts_pixels", True):
+            device_info["pixel_input"] = False
+
         # Add build info if available
         if self._renderer and self._renderer.build_info:
             build = self._renderer.build_info
@@ -478,6 +483,19 @@ class SerialSink:
 
     def _handle_stream_setup(self, message: Message) -> Message:
         """Handle stream setup request."""
+        # A pattern-only device (ltp_stream_serial firmware) shows its own
+        # patterns and drops pixel data: refuse the stream rather than accept
+        # frames that would go nowhere.
+        if self._renderer is not None and not getattr(self._renderer, "accepts_pixels", True):
+            logger.warning("Stream setup refused: the device generates its own patterns")
+            return Message(
+                MessageType.STREAM_SETUP_RESPONSE,
+                message.seq,
+                status="error",
+                error="NOT_SUPPORTED",
+                message="This device generates its own patterns and does not accept a pixel stream",
+            )
+
         if self._data_receiver is None:
             logger.warning("Data receiver not initialized")
 

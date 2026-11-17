@@ -245,6 +245,61 @@ def cmd_read(device: LtpDevice, args: argparse.Namespace):
         print(f"  ... ({num_pixels - 20} more)")
 
 
+def find_control(controls: list[dict], key: str) -> dict:
+    """Pick a control by name or by id (decimal or 0x hex)."""
+    for control in controls:
+        if control["name"] == key:
+            return control
+    try:
+        control_id = int(key, 0)
+    except ValueError:
+        control_id = None
+    for control in controls:
+        if control["id"] == control_id:
+            return control
+    names = ", ".join(c["name"] for c in controls)
+    raise LtpError(f"No control '{key}'. Controls: {names}")
+
+
+def parse_control_value(control: dict, text: str) -> int:
+    """A value for a control: a number, or the label of an enum option."""
+    for option in control.get("enum_values", []):
+        if option["label"].lower() == text.lower():
+            return option["value"]
+    if text.lower() in ("on", "true", "yes"):
+        return 1
+    if text.lower() in ("off", "false", "no"):
+        return 0
+    try:
+        return int(text, 0)
+    except ValueError:
+        options = ", ".join(o["label"] for o in control.get("enum_values", []))
+        hint = f" Options: {options}" if options else ""
+        raise LtpError(f"'{text}' is not a value for {control['name']}.{hint}") from None
+
+
+def describe_control(control: dict, value: int) -> str:
+    for option in control.get("enum_values", []):
+        if option["value"] == value:
+            return f"{control['name']} = {value} ({option['label']})"
+    return f"{control['name']} = {value}"
+
+
+def cmd_control(device: LtpDevice, args: argparse.Namespace):
+    """Read, set or trigger one device control."""
+    control = find_control(device.get_controls(), args.control)
+    if control["type"] == CTRL_ACTION:
+        device.set_control(control["id"], 1, control["type"])
+        print(f"{control['name']}: done")
+        return
+    if args.value is None:
+        print(describe_control(control, control["value"]))
+        return
+    value = parse_control_value(control, args.value)
+    device.set_control(control["id"], value, control["type"])
+    print(describe_control(control, value))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="LTP Serial Protocol v2 CLI",
@@ -294,6 +349,14 @@ def main():
     p.add_argument("-g", type=int, default=0, help="Green (0-255)")
     p.add_argument("-b", type=int, default=0, help="Blue (0-255)")
 
+    # control
+    p = subparsers.add_parser(
+        "control",
+        help="Read, set or trigger a control, by name or id ('info' lists them)",
+    )
+    p.add_argument("control", help="Control name or id, e.g. local_mode or 6")
+    p.add_argument("value", nargs="?", help="New value: a number or an enum label, e.g. Fire")
+
     # ping
     subparsers.add_parser("ping", help="Ping the device")
 
@@ -319,6 +382,7 @@ def main():
         "set-name": cmd_set_name,
         "rainbow": cmd_rainbow,
         "chase": cmd_chase,
+        "control": cmd_control,
         "ping": cmd_ping,
         "read": cmd_read,
     }

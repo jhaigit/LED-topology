@@ -278,8 +278,15 @@ Bit 3: CAPS_USB_HIGHSPEED - Native USB (ignore baud rate)
 Bit 4: CAPS_MULTI_STRIP - Supports multiple LED strip outputs
 Bit 5: CAPS_INPUTS - Has input devices (buttons, encoders, etc.)
 Bit 6: CAPS_SUBMATRIX - Supports PIXEL_SUBMATRIX commands (0x36, 0x37)
-Bit 7: Reserved
+Bit 7: CAPS_NO_PIXEL_INPUT - Generates its own patterns; pixel data is ignored
 ```
+
+A device that sets `CAPS_NO_PIXEL_INPUT` (the `ltp_stream_serial` firmware)
+shows patterns it calculates itself and is driven through its controls only.
+It reads and drops the pixel data commands (0x30-0x3F) and SHOW without a
+reply, or with NAK `ERR_NOT_SUPPORTED` if the packet asked for an ACK. A host
+should not send it frames. `GET_PIXELS` may still work on such a device: it
+returns the pattern's current frame.
 
 **Example:** MCU with 60 RGB pixels, protocol 2.0, firmware 1.5, USB high-speed
 ```

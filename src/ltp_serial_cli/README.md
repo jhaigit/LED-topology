@@ -178,6 +178,12 @@ python -m ltp_serial_cli /dev/ttyUSB0 clear
 # Set brightness
 python -m ltp_serial_cli /dev/ttyUSB0 brightness 128
 
+# Read, set or trigger any control, by name or id ('info' lists them)
+python -m ltp_serial_cli /dev/ttyUSB0 control local_mode
+python -m ltp_serial_cli /dev/ttyUSB0 control local_mode Fire
+python -m ltp_serial_cli /dev/ttyUSB0 control num_pixels 144
+python -m ltp_serial_cli /dev/ttyUSB0 control save
+
 # Rainbow pattern
 python -m ltp_serial_cli /dev/ttyUSB0 rainbow
 

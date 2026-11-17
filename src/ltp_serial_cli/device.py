@@ -50,6 +50,7 @@ from .protocol import (
     CAPS_EXTENDED,
     CAPS_INPUTS,
     CAPS_SUBMATRIX,
+    CAPS_NO_PIXEL_INPUT,
     LED_TYPE_NAMES,
     COLOR_FORMAT_NAMES,
     COMMAND_NAMES,
@@ -163,6 +164,18 @@ class DeviceInfo:
     @property
     def has_submatrix(self) -> bool:
         return bool(self.capabilities1 & CAPS_EXTENDED) and bool(self.capabilities2 & CAPS_SUBMATRIX)
+
+    @property
+    def accepts_pixels(self) -> bool:
+        """False for a pattern-only device (e.g. ltp_stream_serial firmware).
+
+        Such a device shows its own patterns and drops pixel commands, so
+        there is no point sending it frames.
+        """
+        return not (
+            bool(self.capabilities1 & CAPS_EXTENDED)
+            and bool(self.capabilities2 & CAPS_NO_PIXEL_INPUT)
+        )
 
 
 @dataclass

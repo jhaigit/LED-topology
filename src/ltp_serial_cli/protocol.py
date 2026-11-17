@@ -130,6 +130,7 @@ CAPS_USB_HIGHSPEED = 0x08
 CAPS_MULTI_STRIP = 0x10
 CAPS_INPUTS = 0x20
 CAPS_SUBMATRIX = 0x40
+CAPS_NO_PIXEL_INPUT = 0x80  # generates its own patterns; pixel commands are ignored
 
 # Submatrix layout flags
 SUBMATRIX_SERPENTINE = 0x01

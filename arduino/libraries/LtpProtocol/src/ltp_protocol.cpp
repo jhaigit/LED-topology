@@ -11,6 +11,8 @@ LtpProtocol::LtpProtocol(Stream& serial, uint8_t* buffer, uint16_t maxPayload)
     , runningChecksum(0)
     , maxPayload(maxPayload)
     , lastByteTime(0)
+    , skipOversize(false)
+    , oversize(false)
 {
     rxPacket.clear();
     rxPacket.payload = buffer;
@@ -20,6 +22,7 @@ void LtpProtocol::reset() {
     state = ParserState::WAIT_START;
     payloadIndex = 0;
     runningChecksum = 0;
+    oversize = false;
     rxPacket.clear();
 }
 
@@ -38,6 +41,7 @@ bool LtpProtocol::processInput() {
                 if (byte == LTP_START_BYTE) {
                     rxPacket.clear();
                     runningChecksum = 0;
+                    oversize = false;
                     state = ParserState::READ_FLAGS;
                 }
                 break;
@@ -57,10 +61,12 @@ bool LtpProtocol::processInput() {
             case ParserState::READ_LENGTH_HIGH:
                 rxPacket.length |= (uint16_t)byte << 8;
                 runningChecksum ^= byte;
-                if (rxPacket.length > maxPayload) {
+                if (rxPacket.length > maxPayload && !skipOversize) {
                     // Payload too large, reset
                     reset();
                 } else {
+                    // With skipOversize the payload is read but not stored
+                    oversize = rxPacket.length > maxPayload;
                     state = ParserState::READ_CMD;
                 }
                 break;
@@ -77,7 +83,10 @@ bool LtpProtocol::processInput() {
                 break;
 
             case ParserState::READ_PAYLOAD:
-                rxPacket.payload[payloadIndex++] = byte;
+                if (!oversize) {
+                    rxPacket.payload[payloadIndex] = byte;
+                }
+                payloadIndex++;
                 runningChecksum ^= byte;
                 if (payloadIndex >= rxPacket.length) {
                     state = ParserState::READ_CHECKSUM;

@@ -220,6 +220,11 @@ class V2Renderer:
                     f"{self._device_info.total_pixels} pixels, "
                     f"firmware v{self._device_info.firmware_version}"
                 )
+                if not self.accepts_pixels:
+                    logger.info(
+                        "Device generates its own patterns: controls only, "
+                        "pixel data will not be sent to it"
+                    )
 
                 # Query build info
                 try:
@@ -426,6 +431,11 @@ class V2Renderer:
         return self._device_info
 
     @property
+    def accepts_pixels(self) -> bool:
+        """False once a connected device has said it ignores pixel data."""
+        return getattr(self._device_info, "accepts_pixels", True)
+
+    @property
     def build_info(self) -> BuildInfo | None:
         """Get cached build info."""
         return self._build_info
@@ -595,6 +605,8 @@ class V2Renderer:
         """
         if not self.is_connected() or not self._device:
             return 0
+        if not self.accepts_pixels:
+            return 0
 
         try:
             # Convert numpy array to bytes
@@ -619,6 +631,8 @@ class V2Renderer:
         """Fill all pixels with a solid color."""
         if not self.is_connected() or not self._device:
             return False
+        if not self.accepts_pixels:
+            return False
 
         try:
             self._device.fill(r, g, b)
@@ -633,6 +647,8 @@ class V2Renderer:
     def show(self) -> bool:
         """Trigger display update on the device."""
         if not self.is_connected() or not self._device:
+            return False
+        if not self.accepts_pixels:
             return False
 
         try:

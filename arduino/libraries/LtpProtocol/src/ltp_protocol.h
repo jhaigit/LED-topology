@@ -128,6 +128,7 @@
 #define CAPS_MULTI_STRIP    0x10
 #define CAPS_INPUTS         0x20
 #define CAPS_SUBMATRIX      0x40
+#define CAPS_NO_PIXEL_INPUT 0x80  // generates its own patterns; pixel commands are ignored
 
 // Submatrix layout flags
 #define SUBMATRIX_SERPENTINE     0x01
@@ -235,6 +236,17 @@ public:
     // Reset parser state
     void reset();
 
+    // What to do with a packet whose payload is longer than the buffer.
+    // Off (default): drop back to hunting for a start byte, as before.
+    // On: read the packet to its end without storing the payload, check its
+    // checksum and return it like any other, with isOversize() true and the
+    // payload unusable. A device that ignores pixel data needs this, or the
+    // inside of a pixel frame would be searched for commands.
+    void setSkipOversize(bool enable) { skipOversize = enable; }
+
+    // True if the packet returned by the last processInput() did not fit.
+    bool isOversize() const { return oversize; }
+
 private:
     Stream& serial;
     LtpPacket rxPacket;
@@ -243,6 +255,8 @@ private:
     uint8_t runningChecksum;
     uint16_t maxPayload;
     uint32_t lastByteTime;
+    bool skipOversize;
+    bool oversize;
 
     static const uint32_t INTER_BYTE_TIMEOUT = 10; // ms
 };
