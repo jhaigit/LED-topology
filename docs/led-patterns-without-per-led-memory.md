@@ -272,6 +272,25 @@ Measured on a simulated ATmega328P, with the frames compared byte for byte
 against the same pattern code compiled for the host; not yet run on hardware.
 Details and figures are in `arduino/ltp_stream_serial/README.md`.
 
+### Teensy 4.0 (added 2026-11-17)
+
+The same sketch now builds for the Teensy 4.0, where the constraint that
+shaped everything above goes away. A UART sends the WS2812 frame (the
+encoding of WS2812Serial, two WS2812 bits per UART character) from a
+21-pixel ring that the foreground keeps filled, so the data line never waits
+for a calculation and a frame takes 30 us per pixel whatever the pattern
+costs. The pattern has that 30 us per pixel, 18 000 cycles at 600 MHz, and it
+is an average, not a deadline for each pixel.
+
+Six patterns were added that spend it: Fireworks, Bounce, Meteors, Lava Lamp,
+Aurora and Raindrops. They keep the rule of this report - nothing stored per
+LED, a frame is a function of the settings and the time - but a pixel may be
+the sum of up to a few hundred moving objects worked out once per frame, with
+sub-pixel positions, square roots and several octaves of three-dimensional
+noise. The heaviest needs about 2000 instructions per pixel, counted in a CPU
+emulator: under a quarter of the budget even at two cycles per instruction.
+Compiled and tested against models; not yet run on a board.
+
 ## Sources
 
 Cycle counts are my own measurements, made for this report: 35 pattern kernels compiled with avr-gcc 7.3 at `-Os` for the ATmega328P and run in the avr8js simulator, plus an APA102 output sketch built with arduino-cli for `arduino:avr:nano`. They have not been checked on hardware.

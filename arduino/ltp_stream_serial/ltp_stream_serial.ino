@@ -1,5 +1,5 @@
 /**
- * LTP Stream (serial) - pattern-only LED controller for Arduino and Teensy 3.2
+ * LTP Stream (serial) - pattern-only LED controller for Arduino and Teensy
  *
  * Speaks LTP serial protocol v2 (spec/serial-protocol-v2.md) but accepts no
  * pixel data: the device shows its own patterns, chosen and tuned through
@@ -9,7 +9,8 @@
  *   - Patterns and their maths:   libraries/LtpStreamFx/src/ltp_fx.cpp
  *   - Controls and settings:      libraries/LtpStreamFx/src/ltp_fx_controls.h
  *   - Pins, limits, timing:       config.h
- *   - LED output and host link:   platform_avr.h, platform_teensy.h
+ *   - LED output and host link:   platform_avr.h, platform_teensy.h,
+ *                                 ws2812_teensy3.h, ws2812_teensy4.h
  *
  * Pixel commands (PIXEL_*, SHOW) are read and dropped. GET_PIXELS works: the
  * pattern is a function of position and time, so any pixel of the current
@@ -25,6 +26,7 @@
 #define FXC_DEFAULT_NAME  DEVICE_NAME
 #define FXC_HAS_APA102    1
 #define FXC_HAS_LPD8806   HAS_LPD8806
+#define FXC_HAS_LOAD      HAS_LOAD_CONTROL
 #include <ltp_fx_controls.h>
 
 #include "build_info.h"

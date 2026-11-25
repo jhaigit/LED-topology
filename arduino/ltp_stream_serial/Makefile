@@ -3,7 +3,7 @@
 # Pattern-only LED controller: LTP serial protocol v2 without pixel data.
 # Patterns are calculated while the frame is sent; there is no frame buffer.
 #
-# Boards: ATmega328P (Arduino Uno / Nano) and Teensy 3.2.
+# Boards: ATmega328P (Arduino Uno / Nano), Teensy 3.2 and Teensy 4.0.
 #
 # Uses arduino-cli for building.
 #
@@ -14,6 +14,7 @@
 # Build and upload:
 #   make upload PORT=/dev/ttyUSB0
 #   make upload-teensy32
+#   make upload-teensy40
 
 # Configuration
 BOARD ?= arduino:avr:nano:cpu=atmega328old
@@ -36,10 +37,11 @@ BUILD_INFO_CPP = build_info.cpp
 LIBRARIES = ../libraries
 
 TEENSY32 = teensy:avr:teensy31
+TEENSY40 = teensy:avr:teensy40
 TEENSY_URL = https://www.pjrc.com/teensy/package_teensy_index.json
 
-.PHONY: all build build-uno build-nano build-teensy32 build-all upload upload-only \
-	upload-teensy32 clean setup setup-teensy monitor list-boards size sim-test help build-info
+.PHONY: all build build-uno build-nano build-teensy32 build-teensy40 build-all upload upload-only \
+	upload-teensy32 upload-teensy40 clean setup setup-teensy monitor list-boards size sim-test help build-info
 
 # Default target
 all: build
@@ -86,7 +88,11 @@ build-teensy32: build-info
 	$(CLI) compile --fqbn $(TEENSY32) --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy32 .
 	@echo "Teensy 3.2 build complete ($(GIT_COMMIT))"
 
-build-all: build-uno build-nano build-teensy32
+build-teensy40: build-info
+	$(CLI) compile --fqbn $(TEENSY40) --libraries $(LIBRARIES) --build-path $(BUILD_DIR)/teensy40 .
+	@echo "Teensy 4.0 build complete ($(GIT_COMMIT))"
+
+build-all: build-uno build-nano build-teensy32 build-teensy40
 	@echo ""
 	@echo "All builds complete."
 
@@ -102,6 +108,9 @@ upload-only:
 
 upload-teensy32: build-teensy32
 	$(CLI) upload --fqbn $(TEENSY32) --port $(PORT) --input-dir $(BUILD_DIR)/teensy32
+
+upload-teensy40: build-teensy40
+	$(CLI) upload --fqbn $(TEENSY40) --port $(PORT) --input-dir $(BUILD_DIR)/teensy40
 
 # ============================================================================
 # Utility targets
@@ -136,6 +145,7 @@ help:
 	@echo "Pattern-only LED controller, no pixel data, no frame buffer."
 	@echo "  ATmega328P: WS2812 on D8, APA102 on D3 (data) / D2 (clock)"
 	@echo "  Teensy 3.2: WS2812 on pin 2, APA102 or LPD8806 on SPI (11 / 13)"
+	@echo "  Teensy 4.0: WS2812 on pin 14, APA102 or LPD8806 on SPI (11 / 13)"
 	@echo ""
 	@echo "First-time setup:"
 	@echo "  make setup            - Install Arduino AVR core"
@@ -146,12 +156,14 @@ help:
 	@echo "  make build-uno        - Build for Arduino Uno"
 	@echo "  make build-nano       - Build for Arduino Nano"
 	@echo "  make build-teensy32   - Build for Teensy 3.2"
+	@echo "  make build-teensy40   - Build for Teensy 4.0"
 	@echo "  make build-all        - Build all variants"
 	@echo ""
 	@echo "Upload:"
 	@echo "  make upload           - Build and upload (current BOARD)"
 	@echo "  make upload-only      - Upload without rebuilding"
 	@echo "  make upload-teensy32  - Build and upload to a Teensy 3.2"
+	@echo "  make upload-teensy40  - Build and upload to a Teensy 4.0"
 	@echo ""
 	@echo "Utilities:"
 	@echo "  make monitor          - Open serial monitor"

@@ -7,7 +7,7 @@ is no frame buffer.
 
 Patterns and controls are listed in
 [libraries/LtpStreamFx/README.md](../libraries/LtpStreamFx/README.md).
-The serial version, for Arduino and Teensy 3.2, is `ltp_stream_serial`.
+The serial version, for Arduino, Teensy 3.2 and Teensy 4.0, is `ltp_stream_serial`.
 
 **This sketch compiles for ESP32 and ESP32-C3 but has not been run on
 hardware.** The pattern engine and the control table are the code the tests

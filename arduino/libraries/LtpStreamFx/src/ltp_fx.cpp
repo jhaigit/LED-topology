@@ -1,8 +1,9 @@
 /**
  * LtpStreamFx - pattern engine implementation. See ltp_fx.h.
  *
- * Rules kept throughout, because the same code runs on a 16 MHz AVR between
- * the bits of a WS2812 frame:
+ * Rules kept throughout this file, because the same code runs on a 16 MHz AVR
+ * between the bits of a WS2812 frame (the patterns for fast processors, with
+ * looser rules, are in ltp_fx_extended.h):
  *   - integer maths only; no divide in any per-pixel path (divides live in
  *     fxBeginFrame, once per frame);
  *   - a pixel depends only on (x, y, logical index) and frame constants, so
@@ -276,6 +277,9 @@ bool isFieldEffect(uint8_t effect) {
     switch (effect) {
         case FX_RAINBOW: case FX_FIRE: case FX_WAVES:
         case FX_NOISE: case FX_PLASMA: case FX_RIPPLE:
+#if FX_EXTENDED
+        case FX_LAVA_LAMP: case FX_RAINDROPS:
+#endif
             return true;
         default:
             return false;
@@ -457,6 +461,22 @@ FX_NOINLINE void colourPixel(FxPixel pixel, uint8_t rgb[3]) {
     rgb[2] = scale8(b, k);
 }
 
+#if FX_EXTENDED
+#include "ltp_fx_extended.h"
+#endif
+
+// One pixel of the current frame.
+inline void pixelAt(uint16_t x, uint16_t y, uint8_t rgb[3]) __attribute__((always_inline));
+inline void pixelAt(uint16_t x, uint16_t y, uint8_t rgb[3]) {
+#if FX_EXTENDED
+    if (evalRgb) {
+        evalRgb(x, y, rgb);
+        return;
+    }
+#endif
+    colourPixel(evalPixel(x, y), rgb);
+}
+
 // Set the walker to the first LED of wired line S.major.
 void lineStart() {
     bool odd = (S.major & 1) != 0;
@@ -516,6 +536,12 @@ uint8_t fxDefaultPalette(uint8_t effect) {
         case FX_RIPPLE:  return FXPAL_OCEAN;
         case FX_NOISE:   return FXPAL_LAVA;
         case FX_TWINKLE: return FXPAL_PARTY;
+#if FX_EXTENDED
+        case FX_METEORS:   return FXPAL_ICE;
+        case FX_LAVA_LAMP: return FXPAL_LAVA;
+        case FX_AURORA:    return FXPAL_AURORA;
+        case FX_RAINDROPS: return FXPAL_OCEAN;
+#endif
         default:         return FXPAL_RAINBOW;
     }
 }
@@ -656,6 +682,11 @@ void fxBeginFrame(const FxParams& p, uint32_t fxTime) {
             break;
     }
     #undef FX_PHASE
+
+#if FX_EXTENDED
+    evalRgb = nullptr;
+    if (S.effect >= FX_COUNT_BASE) extendedBeginFrame(p, fxTime);
+#endif
 }
 
 void fxStart() {
@@ -664,7 +695,7 @@ void fxStart() {
 }
 
 void fxNext(uint8_t rgb[3]) {
-    colourPixel(evalPixel(S.x, S.y), rgb);
+    pixelAt(S.x, S.y, rgb);
 
     if (S.alongY) S.y = (uint16_t)(S.y + S.step);
     else S.x = (uint16_t)(S.x + S.step);
@@ -685,5 +716,5 @@ void fxAt(uint16_t logicalIndex, uint8_t rgb[3]) {
         x = logicalIndex % S.w;
         y = logicalIndex / S.w;
     }
-    colourPixel(evalPixel(x, y), rgb);
+    pixelAt(x, y, rgb);
 }

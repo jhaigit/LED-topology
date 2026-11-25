@@ -47,6 +47,7 @@ def rainbow():
 
 
 # Order must match the FXPAL_* table palettes in ltp_fx.h (after Default, Color).
+# These are in every build.
 PALETTES = [
     ("Rainbow", rainbow()),
     ("Heat", gradient([(0, (0, 0, 0)), (85, (255, 0, 0)),
@@ -66,13 +67,36 @@ PALETTES = [
                       (215, (120, 220, 255)), (255, (255, 255, 255))])),
 ]
 
+# Only in builds with FX_EXTENDED (see ltp_fx.h), so the small boards do not
+# pay 768 bytes of flash for each. They follow the palettes above.
+EXTENDED_PALETTES = [
+    # Dark sky, the green of the lower curtain, then the violet and pink of
+    # its upper fringe.
+    ("Aurora", gradient([(0, (0, 0, 0)), (50, (0, 70, 30)), (120, (30, 255, 90)),
+                         (170, (0, 200, 170)), (215, (110, 60, 255)),
+                         (255, (255, 90, 200))])),
+]
+
+
+def c_rows(values, per_line):
+    return ["    " + ",".join(f"{v:3d}" for v in values[i:i + per_line]) + ","
+            for i in range(0, len(values), per_line)]
+
 
 def c_array(name, values, per_line=16):
     lines = [f"static const uint8_t {name}[{len(values)}] FX_PROGMEM = {{"]
-    for i in range(0, len(values), per_line):
-        lines.append("    " + ",".join(f"{v:3d}" for v in values[i:i + per_line]) + ",")
+    lines += c_rows(values, per_line)
     lines.append("};")
     return "\n".join(lines)
+
+
+def palette_bytes(palettes):
+    flat = []
+    for name, colours in palettes:
+        assert len(colours) == TABLE_SIZE, name
+        for rgb in colours:
+            flat.extend(gamma8(c) for c in rgb)
+    return flat
 
 
 def main():
@@ -91,7 +115,11 @@ def main():
         "#define LTP_FX_TABLES_H",
         "",
         f"// Palettes are gamma-corrected (gamma {GAMMA}) RGB triplets, 256 entries each.",
+        "#if FX_EXTENDED",
+        f"#define FX_TABLE_PALETTES {len(PALETTES) + len(EXTENDED_PALETTES)}",
+        "#else",
         f"#define FX_TABLE_PALETTES {len(PALETTES)}",
+        "#endif",
         "",
         "// 127.5 + 127.5 * sin(2 * pi * i / 256)",
         c_array("fxSinTable", sin8),
@@ -103,19 +131,24 @@ def main():
         c_array("fxPermTable", perm8),
         "",
     ]
-    flat = []
-    for name, colours in PALETTES:
-        assert len(colours) == TABLE_SIZE, name
-        for rgb in colours:
-            flat.extend(gamma8(c) for c in rgb)
+    flat = palette_bytes(PALETTES)
+    extended = palette_bytes(EXTENDED_PALETTES)
     names = ", ".join(name for name, _ in PALETTES)
-    parts += [f"// Table palettes in FXPAL_* order: {names}.",
-              c_array("fxPaletteTable", flat, per_line=12), "",
+    extended_names = ", ".join(name for name, _ in EXTENDED_PALETTES)
+    parts += [f"// Table palettes in FXPAL_* order: {names};",
+              f"// with FX_EXTENDED also: {extended_names}.",
+              "static const uint8_t fxPaletteTable[FX_TABLE_PALETTES * 768] FX_PROGMEM = {",
+              *c_rows(flat, 12),
+              "#if FX_EXTENDED",
+              *c_rows(extended, 12),
+              "#endif",
+              "};", "",
               "#endif // LTP_FX_TABLES_H", ""]
 
     out = Path(__file__).resolve().parent.parent / "src" / "ltp_fx_tables.h"
     out.write_text("\n".join(parts))
-    print(f"wrote {out} ({len(flat) + 3 * TABLE_SIZE} table bytes)")
+    print(f"wrote {out} ({len(flat) + 3 * TABLE_SIZE} table bytes, "
+          f"{len(extended)} more with FX_EXTENDED)")
 
 
 if __name__ == "__main__":

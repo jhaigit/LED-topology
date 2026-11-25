@@ -13,6 +13,7 @@
  *     #define FXC_DEFAULT_NAME   "LTP-Stream" // factory device name
  *     #define FXC_HAS_APA102     1            // board can drive APA102 / SK9822
  *     #define FXC_HAS_LPD8806    0            // board can drive LPD8806
+ *     #define FXC_HAS_LOAD       0            // board measures its pixel-time load
  *     #include <ltp_fx_controls.h>
  */
 
@@ -34,6 +35,9 @@
 #endif
 #ifndef FXC_HAS_LPD8806
 #define FXC_HAS_LPD8806 0
+#endif
+#ifndef FXC_HAS_LOAD
+#define FXC_HAS_LOAD 0
 #endif
 
 // ============================================================================
@@ -61,6 +65,7 @@
 #define FXC_ID_REVERSE        20
 #define FXC_ID_MAX_FPS        21
 #define FXC_ID_FPS            22   // read-only: frames per second achieved
+#define FXC_ID_LOAD           23   // read-only, with FXC_HAS_LOAD: see FxRuntime::load
 #define FXC_ID_SAVE           0xF0
 #define FXC_ID_REBOOT         0xF1
 
@@ -157,6 +162,11 @@ struct FxRuntime {
     uint16_t fps;          // measured, for the fps control
     uint16_t blankTo;      // LEDs beyond numPixels still to be turned off once
     uint8_t blankLedType;  // chip those LEDs are on
+#if FXC_HAS_LOAD
+    // Share of the time one pixel takes on the wire that the last frame spent
+    // calculating it, in percent. The pattern keeps up while this is under 100.
+    uint8_t load;
+#endif
 };
 
 static FxConfig fxConfig;
@@ -203,10 +213,13 @@ FXC_STR(fxcN_palette, "palette");           FXC_STR(fxcD_palette, "colours used"
 FXC_STR(fxcN_hue, "hue");                   FXC_STR(fxcD_hue, "colour 0-255");
 FXC_STR(fxcN_saturation, "saturation");     FXC_STR(fxcD_saturation, "0=white, 255=vivid");
 FXC_STR(fxcN_intensity, "intensity");       FXC_STR(fxcD_intensity, "tail, density, flame");
-FXC_STR(fxcN_count, "count");               FXC_STR(fxcD_count, "number of comets");
+FXC_STR(fxcN_count, "count");               FXC_STR(fxcD_count, "how many objects");
 FXC_STR(fxcN_reverse, "reverse");           FXC_STR(fxcD_reverse, "flip direction");
 FXC_STR(fxcN_max_fps, "max_fps");           FXC_STR(fxcD_max_fps, "frame rate limit");
 FXC_STR(fxcN_fps, "fps");                   FXC_STR(fxcD_fps, "frame rate achieved");
+#if FXC_HAS_LOAD
+FXC_STR(fxcN_load, "load");                 FXC_STR(fxcD_load, "% of pixel time used");
+#endif
 FXC_STR(fxcN_save, "save");                 FXC_STR(fxcD_save, "save settings");
 FXC_STR(fxcN_reboot, "reboot");             FXC_STR(fxcD_reboot, "restart");
 
@@ -217,13 +230,23 @@ FXC_STR(fxcL_solid, "Solid");     FXC_STR(fxcL_comet, "Comet");
 FXC_STR(fxcL_waves, "Waves");     FXC_STR(fxcL_twinkle, "Twinkle");
 FXC_STR(fxcL_noise, "Noise");     FXC_STR(fxcL_plasma, "Plasma");
 FXC_STR(fxcL_ripple, "Ripple");   FXC_STR(fxcL_cycle, "Cycle");
+#if FX_EXTENDED
+FXC_STR(fxcL_fireworks, "Fireworks"); FXC_STR(fxcL_bounce, "Bounce");
+FXC_STR(fxcL_meteors, "Meteors");     FXC_STR(fxcL_lava_lamp, "Lava Lamp");
+FXC_STR(fxcL_aurora, "Aurora");       FXC_STR(fxcL_raindrops, "Raindrops");
+#endif
 
 static const FxEnumOption fxcModeOptions[] PROGMEM = {
     { FX_OFF, fxcL_off },         { FX_SCANNER, fxcL_scanner }, { FX_RAINBOW, fxcL_rainbow },
     { FX_FIRE, fxcL_fire },       { FX_SPARKLE, fxcL_sparkle }, { FX_CHASE, fxcL_chase },
     { FX_SOLID, fxcL_solid },     { FX_COMET, fxcL_comet },     { FX_WAVES, fxcL_waves },
     { FX_TWINKLE, fxcL_twinkle }, { FX_NOISE, fxcL_noise },     { FX_PLASMA, fxcL_plasma },
-    { FX_RIPPLE, fxcL_ripple },   { FX_CYCLE, fxcL_cycle },
+    { FX_RIPPLE, fxcL_ripple },
+#if FX_EXTENDED
+    { FX_FIREWORKS, fxcL_fireworks }, { FX_BOUNCE, fxcL_bounce },   { FX_METEORS, fxcL_meteors },
+    { FX_LAVA_LAMP, fxcL_lava_lamp }, { FX_AURORA, fxcL_aurora },   { FX_RAINDROPS, fxcL_raindrops },
+#endif
+    { FX_CYCLE, fxcL_cycle },
 };
 
 FXC_STR(fxcL_ws2812, "WS2812");
@@ -269,6 +292,9 @@ static const FxEnumOption fxcPaletteOptions[] PROGMEM = {
     { FXPAL_DEFAULT, fxcL_default }, { FXPAL_COLOR, fxcL_color },   { FXPAL_RAINBOW, fxcL_rainbow },
     { FXPAL_HEAT, fxcL_heat },       { FXPAL_OCEAN, fxcL_ocean },   { FXPAL_FOREST, fxcL_forest },
     { FXPAL_LAVA, fxcL_lava },       { FXPAL_PARTY, fxcL_party },   { FXPAL_ICE, fxcL_ice },
+#if FX_EXTENDED
+    { FXPAL_AURORA, fxcL_aurora },
+#endif
 };
 
 #define FXC_OPTIONS(array) (uint8_t)(sizeof(array) / sizeof(array[0])), array
@@ -311,6 +337,10 @@ static const FxControlDef fxControlDefs[] PROGMEM = {
       fxcN_max_fps, fxcD_max_fps, FXC_NO_OPTIONS, FXC_AT(maxFps) },
     { FXC_ID_FPS,           FXC_TYPE_UINT16, FXC_FLAG_READONLY | FXC_FLAG_VOLATILE, 0, 32767,
       fxcN_fps, fxcD_fps, FXC_NO_OPTIONS, FXC_NO_STORAGE },
+#if FXC_HAS_LOAD
+    { FXC_ID_LOAD,          FXC_TYPE_UINT8,  FXC_FLAG_READONLY | FXC_FLAG_VOLATILE, 0, 255,
+      fxcN_load, fxcD_load, FXC_NO_OPTIONS, FXC_NO_STORAGE },
+#endif
     { FXC_ID_SAVE,          FXC_TYPE_ACTION, FXC_FLAG_HARDWARE | FXC_FLAG_ACTION, 0, 0,
       fxcN_save, fxcD_save, FXC_NO_OPTIONS, FXC_NO_STORAGE },
     { FXC_ID_REBOOT,        FXC_TYPE_ACTION, FXC_FLAG_HARDWARE | FXC_FLAG_ACTION, 0, 0,
@@ -445,6 +475,9 @@ static void fxcSanitize() {
 
 static uint16_t fxcGetDef(const FxControlDef& def) {
     if (def.id == FXC_ID_FPS) return fxRuntime.fps;
+#if FXC_HAS_LOAD
+    if (def.id == FXC_ID_LOAD) return fxRuntime.load;
+#endif
     if (def.offset == FXC_NO_STORAGE) return 0;
     const uint8_t* at = (const uint8_t*)&fxConfig + def.offset;
     if (def.type == FXC_TYPE_UINT16) {
